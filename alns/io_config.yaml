@@ -1,0 +1,6 @@
+---
+data_path:
+  fleet: ['data', 'fleet']
+  installations: ['data', 'installations']
+  solution: ['data', 'solutions']
+

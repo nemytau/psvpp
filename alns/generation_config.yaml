@@ -1,0 +1,28 @@
+---
+inst_generation_params:
+  small_1:
+    installation_type:
+      drill:
+        num: 4
+        time_windows: 2
+        demand_mu: 25
+        demand_sigma: 7
+        frequencies: [1, 2]
+        name_prefix: 'd'
+      prod:
+        num: 6
+        time_windows: 3
+        demand_mu: 20
+        demand_sigma: 5
+        frequencies: [1, 2, 3]
+        name_prefix: 'p'
+
+fleet_generation_params:
+  small1:
+    vessel_type:
+      vtype1:
+        num: 8
+        speed: 12
+        fuel_consumption: 0.43
+        deck_capacity: 100
+        cost: 0
