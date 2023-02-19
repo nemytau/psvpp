@@ -18,26 +18,16 @@ class Coord:
         self.rad_coord = tuple(np.radians(self.coord))
 
     @classmethod
-    def from_tuple(cls, coords):
+    def from_pair(cls, coords):
         """
-        Create Coord from tuple.
+        Create Coord from tuple or list.
 
         :param coords: longitude and latitude tuple.
-        :type coords: tuple[float, float]
-        """
-        return cls(*coords)
-
-    @classmethod
-    def from_list(cls, coords):
-        """
-        Create Coord from longitude and latityde packed in list.
-
-        :param coords:
-        :type coords: list[float, float]
+        :type coords: tuple[float, float], list[float]
         """
         if len(coords) != 2:
-            raise ValueError('Coordinate should consist of 2 values: longitutde and latitude.')
-        return [cls(*coord) for coord in coords]
+            raise ValueError('Coordinate should consist of 2 values: longitude and latitude.')
+        return cls(*coords)
 
     @staticmethod
     def geo_distance(coord1, coord2, unit='nmi'):
