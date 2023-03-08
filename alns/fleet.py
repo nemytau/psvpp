@@ -1,4 +1,4 @@
-from vessel import Vessel
+from .vessel import Vessel
 
 
 class Fleet:
@@ -13,6 +13,13 @@ class Fleet:
             fleet.add_vessel(Vessel.default_charter_vessel(i))
         return fleet
 
+    @classmethod
+    def from_vessels_list(cls, vessels):
+        fleet = cls()
+        for vessel in vessels:
+            fleet.add_vessel(vessel)
+        return fleet
+
     def __repr__(self):
         return '\n'.join([str(vessel) for vessel in self.pool])
 
@@ -21,6 +28,7 @@ class Fleet:
         self.vessel[vessel.name] = vessel
 
     def remove_vessel(self, vessel):
+        self.vessel.pop(vessel.name)
         self.pool.remove(vessel)
 
     def pool_cost(self):

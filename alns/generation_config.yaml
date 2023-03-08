@@ -27,14 +27,15 @@ inst_generation_params:
       deck_service_speed: 10
 
 fleet_generation_params:
-  small1:
-    vessel_type:
-      - type: vtype1
-        num: 8
-        speed: 12
-        fuel_consumption: 0.43
-        deck_capacity: 100
-        cost: 0
+  small_1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 8
+      speed: 12
+      fuel_consumption: 0.43
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 0
 
 base_generation_params:
   FMO:

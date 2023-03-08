@@ -27,8 +27,11 @@ class Installation:
         self.departure_days = self.random_departure_scenario()
 
     @classmethod
-    def from_df(cls):
+    def from_df(cls, df):
         pass
+
+    def __eq__(self, other):
+        return self.name == other.name
 
     def __repr__(self):
         return f'{self.name} {self.inst_type}'

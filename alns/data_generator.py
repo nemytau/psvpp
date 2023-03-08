@@ -2,7 +2,9 @@ from .__init__ import generation_yaml_config
 import pandas as pd
 import numpy as np
 from .installation import Installation
+from .vessel import Vessel
 from .base import Base
+from .fleet import Fleet
 
 
 def generate_installation_dataframe(inst_sample_name):
@@ -59,9 +61,30 @@ def installation_dataset_from_file():
     pass
 
 
-def generate_fleet_dataset():
-    pass
+def generate_fleet_dataframe(vessel_sample_name):
+    sample_config = generation_yaml_config['fleet_generation_params'][vessel_sample_name]
+    vessel_df_list = []
+    total_vessel_num = sum([conf['num'] for conf in sample_config])
+    print(sample_config, total_vessel_num)
+    for vessel_type_config in sample_config:
+        df = pd.DataFrame(index=range(vessel_type_config['num']))
+        df['name'] = vessel_type_config['name_prefix'] + df.index.astype(str)
+        df['vessel_type'] = vessel_type_config['type']
+        df['speed'] = vessel_type_config['speed']
+        df['fuel_consumption'] = vessel_type_config['fuel_consumption']
+        df['deck_capacity'] = vessel_type_config['deck_capacity']
+        df['bulk_capacity'] = vessel_type_config['bulk_capacity']
+        df['cost'] = vessel_type_config['cost']
+        vessel_df_list.append(df)
+    return pd.concat(vessel_df_list).reset_index(drop=True)
 
 
-def installation_fleet_from_file():
+def generate_fleet_dataset(vessel_sample_name):
+    vessel_df = generate_fleet_dataframe(vessel_sample_name)
+    vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
+    fleet = Fleet.from_vessels_list(vessels)
+    return fleet
+
+
+def fleet_from_file():
     pass
