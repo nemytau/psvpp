@@ -24,7 +24,7 @@ class Vessel:
             deck_capacity=100,
             bulk_capacity=1000,
             speed=12,
-            vessel_type='ordinal',
+            vessel_type='default',
             fuel_consumption=0.43,
             cost=0
         )
