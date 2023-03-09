@@ -14,7 +14,6 @@ def main():
     # fleet = io.load_fleet_dataset(dataset_name)
     # insts = io.load_installation_dataset(dataset_name)
     # base = io.load_base(base_name)
-    print(fleet, base, insts)
 
 if __name__ == '__main__':
     main()

@@ -37,6 +37,7 @@ def generate_installation_dataframe(inst_sample_name):
         df.loc[df.sample(inst_type_config['time_windows']).index,
                'time_window'] = inst_type_config['default_time_window']
         df['time_window'] = df['time_window'].str.split(',').map(tuple)
+        df['time_window'] = df['time_window'].apply(lambda x: (int(x[0]), int(x[1])))
         inst_df_list.append(df)
     return pd.concat(inst_df_list).reset_index(drop=True)
 
@@ -67,7 +68,6 @@ def generate_fleet_dataframe(vessel_sample_name):
     sample_config = generation_yaml_config['fleet_generation_params'][vessel_sample_name]
     vessel_df_list = []
     total_vessel_num = sum([conf['num'] for conf in sample_config])
-    print(sample_config, total_vessel_num)
     for vessel_type_config in sample_config:
         df = pd.DataFrame(index=range(vessel_type_config['num']))
         df['name'] = vessel_type_config['name_prefix'] + df.index.astype(str)
