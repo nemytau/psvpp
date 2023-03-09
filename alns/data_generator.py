@@ -52,7 +52,9 @@ def generate_base(name):
     base = Base(
         name,
         base_config[name]['service_time'],
-        tuple(map(int, base_config[name]['time_window'].split(',')))
+        tuple(map(int, base_config[name]['time_window'].split(','))),
+        generation_yaml_config['base_coords'][name][0],
+        generation_yaml_config['base_coords'][name][1]
     )
     return base
 

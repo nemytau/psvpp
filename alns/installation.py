@@ -1,6 +1,6 @@
 from itertools import combinations
 import random
-from alns.coord import Coord
+from .coord import Coord
 
 
 class Installation:
@@ -23,8 +23,8 @@ class Installation:
         self.deck_service_speed: float = deck_service_speed
         self.time_window: tuple[int, int] = time_window
         self.service_time: float = self.deck_demand / self.deck_service_speed
-        self.departure_scenarios = self._generate_departure_scenarios()
-        self.departure_days = self.random_departure_scenario()
+        # self.departure_scenarios = self._generate_departure_scenarios()
+        # self.departure_days = self.random_departure_scenario()
 
     @classmethod
     def from_df(cls, df):

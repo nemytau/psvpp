@@ -11,9 +11,9 @@ def main():
     io.dump_base(base, base_name)
     fleet = generate_fleet_dataset(dataset_name)
     io.dump_fleet_dataset(fleet, dataset_name)
-    fleet = io.load_fleet_dataset(dataset_name)
-    insts = io.load_installation_dataset(dataset_name)
-    base = io.load_base(base_name)
+    # fleet = io.load_fleet_dataset(dataset_name)
+    # insts = io.load_installation_dataset(dataset_name)
+    # base = io.load_base(base_name)
     print(fleet, base, insts)
 
 if __name__ == '__main__':
