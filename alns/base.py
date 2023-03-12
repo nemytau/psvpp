@@ -5,4 +5,4 @@ from dataclasses import dataclass
 class Base:
     name: str
     service_time: float
-    time_window: tuple[int, int]
+    time_window: tuple
