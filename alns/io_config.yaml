@@ -2,5 +2,13 @@
 data_path:
   fleet: ['data', 'fleet']
   installations: ['data', 'installations']
+  base: ['data', 'base']
   solution: ['data', 'solutions']
 
+dataset_name:
+  installations:
+    small_1: 'i_small_1.pkl'
+  fleet:
+    small_1: 'f_small_1.pkl'
+  base:
+    FMO: 'FMO.pkl'
