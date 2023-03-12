@@ -1,5 +1,5 @@
 import pickle
-from .__init__ import io_config, ROOT_PATH
+from alns import io_config, ROOT_PATH
 import os
 
 

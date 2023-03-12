@@ -1,6 +1,6 @@
 from itertools import combinations
 import random
-from .coord import Coord
+from alns.utils.coord import Coord
 
 
 class Installation:
@@ -13,7 +13,7 @@ class Installation:
                  latitude: float,
                  departure_spread: int,
                  deck_service_speed: float,
-                 time_window: tuple[int, int]) -> None:
+                 time_window: list) -> None:
         self.name: str = name
         self.inst_type: str = inst_type
         self.deck_demand: int = deck_demand
@@ -21,7 +21,7 @@ class Installation:
         self.location = Coord(longitude, latitude)
         self.departure_spread: int = departure_spread
         self.deck_service_speed: float = deck_service_speed
-        self.time_window: tuple[int, int] = time_window
+        self.time_window: list = time_window
         self.service_time: float = self.deck_demand / self.deck_service_speed
         # self.departure_scenarios = self._generate_departure_scenarios()
         # self.departure_days = self.random_departure_scenario()

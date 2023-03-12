@@ -1,5 +1,5 @@
 from .route import Route
-from .vessel import Vessel
+from alns.Beans.vessel import Vessel
 
 
 class Voyage:

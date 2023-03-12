@@ -1,5 +1,5 @@
 from alns.data_generator import *
-from alns import io
+from alns.utils import io
 
 
 def main():

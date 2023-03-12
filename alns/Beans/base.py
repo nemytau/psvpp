@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from .coord import Coord
+from alns.utils.coord import Coord
 
 
 class Base:
