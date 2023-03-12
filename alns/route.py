@@ -1,4 +1,4 @@
-from .installation import Installation
+from alns.Beans.installation import Installation
 
 
 class Route:

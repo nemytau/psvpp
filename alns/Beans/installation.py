@@ -1,6 +1,6 @@
 from itertools import combinations
 import random
-from .coord import Coord
+from alns.utils.coord import Coord
 
 
 class Installation:

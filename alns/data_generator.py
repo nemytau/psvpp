@@ -1,10 +1,10 @@
 from .__init__ import generation_yaml_config
 import pandas as pd
 import numpy as np
-from .installation import Installation
-from .vessel import Vessel
-from .base import Base
-from .fleet import Fleet
+from alns.Beans.installation import Installation
+from alns.Beans.vessel import Vessel
+from alns.Beans.base import Base
+from alns.Beans.fleet import Fleet
 
 
 def generate_installation_dataframe(inst_sample_name):
