@@ -130,3 +130,12 @@ dmypy.json
 
 # idea folder
 .idea
+
+#data folder
+data/
+
+#MacOS shit
+.DS_Store
+
+#main
+main.py

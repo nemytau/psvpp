@@ -1,62 +1,59 @@
 import pickle
-from alns import io_config, ROOT_PATH
+from .__init__ import io_config, ROOT_PATH
 import os
+from enum import Enum
 
 
-def load_installation_dataset(dataset_name):
+class DSType(Enum):
+    VESSELS = 'fleet'
+    INSTALLATIONS = 'installations'
+    BASE = 'base'
+
+
+def mkdirs():
+    for dstype, path_elements in io_config['data_path'].items():
+        dir_path = os.path.join(
+            ROOT_PATH,
+            *path_elements
+        )
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+
+
+def load_dataset(dataset_name, dataset_type):
+    """
+    Loads dataset.
+
+    :param dataset_name: name of the dataset.
+    :type dataset_name: str
+    :param dataset_type: dataset type from enum DSType: VESSELS, BASE, INSTALLATIONS.
+    :type dataset_type: DSType
+    :return: dataset
+    :rtype: object
+    """
+    dstype_val = dataset_type.value
     with open(os.path.join(ROOT_PATH,
-                           *io_config['data_path']['installations'],
-                           io_config['dataset_name']['installations'][dataset_name]),
+                           *io_config['data_path'][dstype_val],
+                           io_config['dataset_name'][dstype_val][dataset_name]),
               'rb') as f:
-        inst_dataset = pickle.load(f)
-    return inst_dataset
+        dataset = pickle.load(f)
+    return dataset
 
 
-def dump_installation_dataset(inst_dataset, dataset_name):
+def dump_dataset(dataset, dataset_name, dataset_type):
+    """
+        Dumps dataset.
+
+        :param dataset: dataset object
+        :param dataset_name: name of the dataset.
+        :type dataset_name: str
+        :param dataset_type: dataset type from enum DSType: VESSELS, BASE, INSTALLATIONS.
+        :type dataset_type: DSType
+        """
+    dstype_val = dataset_type.value
+    print(ROOT_PATH)
     with open(os.path.join(ROOT_PATH,
-                           *io_config['data_path']['installations'],
-                           io_config['dataset_name']['installations'][dataset_name]),
+                           *io_config['data_path'][dstype_val],
+                           io_config['dataset_name'][dstype_val][dataset_name]),
               'wb') as f:
-        pickle.dump(inst_dataset, f)
-
-
-def load_base(base_name):
-    with open(os.path.join(ROOT_PATH,
-                           *io_config['data_path']['base'],
-                           io_config['dataset_name']['base'][base_name]),
-              'rb') as f:
-        base = pickle.load(f)
-    return base
-
-
-def dump_base(base, base_name):
-    with open(os.path.join(ROOT_PATH,
-                           *io_config['data_path']['base'],
-                           io_config['dataset_name']['base'][base_name]),
-              'wb') as f:
-        pickle.dump(base, f)
-
-
-def load_fleet_dataset(dataset_name):
-    with open(os.path.join(ROOT_PATH,
-                           *io_config['data_path']['fleet'],
-                           io_config['dataset_name']['fleet'][dataset_name]),
-              'rb') as f:
-        fleet = pickle.load(f)
-    return fleet
-
-
-def dump_fleet_dataset(vessel_dataset, dataset_name):
-    with open(os.path.join(ROOT_PATH,
-                           *io_config['data_path']['fleet'],
-                           io_config['dataset_name']['fleet'][dataset_name]),
-              'wb') as f:
-        pickle.dump(vessel_dataset, f)
-
-
-def read_solution(solution_name):
-    pass
-
-
-def write_solution(solution_name):
-    pass
+        pickle.dump(dataset, f)
