@@ -1,4 +1,4 @@
-from .route import Route
+from alns.route import Route
 from alns.Beans.vessel import Vessel
 
 
@@ -13,6 +13,7 @@ class Voyage:
                  start_time: float):
         self.vessel = vessel
         self.route = route
+        self.deck_load = 0
         self.start_time = start_time
         self.end_time = self.calc_end_time(self.start_time, self.route)
 

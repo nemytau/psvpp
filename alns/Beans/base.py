@@ -5,7 +5,7 @@ class Base:
     def __init__(self,
                  name: str,
                  service_time: float,
-                 time_window: tuple[int, int],
+                 time_window: list,
                  longitude: float,
                  latitude: float):
         self.name = name

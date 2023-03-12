@@ -69,4 +69,5 @@ class Installation:
         :return: list of departure days from randomly selected departure scenario.
         :rtype: list[int]
         """
-        return random.choice(self.departure_scenarios)
+        departure_scenarios = self._generate_departure_scenarios()
+        return random.choice(departure_scenarios)
