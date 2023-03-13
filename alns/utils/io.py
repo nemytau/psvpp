@@ -51,7 +51,6 @@ def dump_dataset(dataset, dataset_name, dataset_type):
         :type dataset_type: DSType
         """
     dstype_val = dataset_type.value
-    print(ROOT_PATH)
     with open(os.path.join(ROOT_PATH,
                            *io_config['data_path'][dstype_val],
                            io_config['dataset_name'][dstype_val][dataset_name]),
