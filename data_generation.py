@@ -2,6 +2,7 @@ from alns.data_generator import *
 from alns.utils import io
 from alns.utils.io import DSType
 
+from alns.Beans.schedule import Schedule
 
 def main():
     io.mkdirs()
@@ -16,6 +17,6 @@ def main():
     # fleet = io.load_dataset(dataset_name, DSType.VESSELS)
     # insts = io.load_dataset(dataset_name, DSType.INSTALLATIONS)
     # base = io.load_dataset(base_name, DSType.BASE)
-
+    schedule = Schedule(fleet.pool, insts)
 if __name__ == '__main__':
     main()
