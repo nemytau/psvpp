@@ -1,6 +1,6 @@
 from alns.data_generator import *
 from alns.utils import io
-
+from alns.Beans.schedule import Schedule
 
 def main():
     dataset_name = 'small_1'
@@ -14,6 +14,7 @@ def main():
     # fleet = io.load_fleet_dataset(dataset_name)
     # insts = io.load_installation_dataset(dataset_name)
     # base = io.load_base(base_name)
+    schedule = Schedule(fleet.pool, insts)
 
 if __name__ == '__main__':
     main()
