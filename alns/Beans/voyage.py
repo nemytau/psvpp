@@ -21,7 +21,7 @@ class Voyage:
         self.distance_manager = distance_manager
         # self.load = self.calc_load()
 
-    def calc_voyage_length(self, ):
+    def calc_voyage_length(self, route ):
         """
         Calculates time length of the voyage.
 
@@ -29,10 +29,12 @@ class Voyage:
         :rtype: float
         """
         end_time = self.start_time
-        for edge in self.edges():
+        for edge in self.edges(route):
             to_node = edge[1]
             dist = edge[2]
-            arrival_cum_time = (end_time + dist / self.vessel.speed)
+            # arrival_cum_time = (end_time + dist / self.vessel.speed)
+            arrival_cum_time = end_time + (dist / self.vessel.speed)
+
             # print(f'ARRIVED {arrival_cum_time}, SAILED {dist}, TW: {to_node.time_window}')
             arrival_day = arrival_cum_time // HOURS
             arrival_time = arrival_cum_time % HOURS
@@ -45,7 +47,7 @@ class Voyage:
             # print(f'STARTING SERVICE at {start_service_time}, SERVICE TIME - {to_node.service_time}')
             end_time = start_service_time + to_node.service_time
             # print(f'FINISHED SERVICE {end_time}')
-        return end_time - self.start_time
+        return end_time
 
     def add_visit(self, new_inst, load):
         '''
@@ -56,25 +58,30 @@ class Voyage:
         if not self.route:
             self.route = [self.base] + [new_inst]+[self.base]
         else:
-            self.route = self.route.insert(len(self.route)-2, new_inst)
+            self.route.insert(len(self.route)-1, new_inst)
         self.deck_load += load
-        self.end_time = self.calc_voyage_length()
+        self.end_time = self.calc_voyage_length(self.route)
 
-    def edges(self):
+    def edges(self, route):
         """
         Edges of the route
         :return: list of edges [from_node, to_node, distance]
         :rtype: list[list[Installation, Installation, float]]
         """
-        edges = zip(self.route[:-1], self.route[1:])
+        edges = zip(route[:-1], route[1:])
         return [[from_node, to_node, self.distance_manager.distance(from_node.name, to_node.name)]
                 for (from_node, to_node) in edges]
 
-    def check_overlap(self, day):
+    def check_front_overlap(self, day, installation, vessel_first_start_time):
         '''
         Check if possible to choose this voyage for day 'day'
 
+        :param vessel_first_start_time:
+        :param installation: installation we would like to add
         :param day: departure day for voyage to be added
         :return: True - possible to use this voyage, False - otherwise.
         '''
-        return self.end_time < day*HOURS + DEPARTURE_PERIOD
+        route = self.route.copy()
+        route.insert(len(self.route) - 1, installation)
+        new_end_time = self.calc_voyage_length(route)
+        return new_end_time - PERIOD_LENGTH < vessel_first_start_time

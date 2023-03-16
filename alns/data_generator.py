@@ -68,9 +68,9 @@ def generate_fleet_dataframe(vessel_sample_name):
     sample_config = generation_yaml_config['fleet_generation_params'][vessel_sample_name]
     vessel_df_list = []
     total_vessel_num = sum([conf['num'] for conf in sample_config])
-    for vessel_type_config in sample_config:
+    for i, vessel_type_config in enumerate(sample_config):
         df = pd.DataFrame(index=range(vessel_type_config['num']))
-        df['name'] = vessel_type_config['name_prefix'] + df.index.astype(str)
+        df['name'] = df.index
         df['vessel_type'] = vessel_type_config['type']
         df['speed'] = vessel_type_config['speed']
         df['fuel_consumption'] = vessel_type_config['fuel_consumption']
