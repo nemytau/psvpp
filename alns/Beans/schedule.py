@@ -1,4 +1,5 @@
 import random
+import sys
 
 from alns.Beans.installation import Installation
 from alns.Beans.vessel import Vessel
@@ -6,6 +7,8 @@ from alns.Beans.voyage import Voyage
 from alns.utils.utils import *
 from alns.utils.distance_manager import DistanceManager
 from alns.Beans.base import Base
+
+import time
 
 
 class Schedule:
@@ -19,21 +22,39 @@ class Schedule:
         self.vessel_first_voyage_start_time = [-1 for n in range(len(self.vessels))]
         self.vessel_last_voyage_end_time = [0 for n in range(len(self.vessels))]
         if not schedule:
+            start = time.process_time()
+
             self.distance_manager = DistanceManager(base, installations)
+            print("Distance manager -> " + str(time.process_time() - start))
+
             self.schedule = self.generate_init_solution()
         else:
             self.schedule = schedule
 
     def generate_init_solution(self):
         schedule = {}
+        start = time.process_time()
         weekly_scenarios = build_weekly_departure_scnarios(self.installations)
+        print("weekly scen -> " + str(time.process_time() - start))
         for i, daily_departure in enumerate(weekly_scenarios):
             voyage_pool = set()
+            print("-------new day------")
             for inst_to_visit in daily_departure:
+                start = time.process_time()
+
                 voyage = self._get_free_voyage(voyage_pool, i, self.installations[inst_to_visit], schedule)
+
+                print("get voyage -> " + str(time.process_time() - start))
+
                 if voyage is None:
                     print("Cannot find feasible solution")
+                    sys.exit()
+                start = time.process_time()
+
                 voyage.add_visit(self.installations[inst_to_visit], self.installations[inst_to_visit].deck_demand)
+
+                print("add visit -> " + str(time.process_time() - start))
+
                 self.vessel_last_voyage_end_time[voyage.vessel.name] = voyage.end_time
         return schedule
 
@@ -47,7 +68,7 @@ class Schedule:
                 flag = True
                 local_voyage = possible_voyage
                 break
-        if len(voyage_pool) == 0 or not flag:
+        if not voyage_pool or not flag:
             free_vessel = self._get_free_vessel(day, installation.deck_demand)
             if free_vessel is None:
                 return None
@@ -67,7 +88,7 @@ class Schedule:
         # check back_overlap and capacity
         possible_vessels = [self.vessels[i] for i in range(len(self.vessels)) if self.vessel_last_voyage_end_time[i]
                             < day * 24 + 8 and self.vessels[i].deck_capacity >= demand]
-        if len(possible_vessels) > 0:
+        if possible_vessels:
             return random.choice(possible_vessels)
         else:
             return None
