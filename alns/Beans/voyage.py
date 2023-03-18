@@ -29,7 +29,7 @@ class Voyage:
         :rtype: float
         """
         end_time = self.start_time
-        for edge in self.edges(route):
+        for edge in self.edges([self.base]+route+[self.base]):
             to_node = edge[1]
             dist = edge[2]
             # arrival_cum_time = (end_time + dist / self.vessel.speed)
@@ -56,9 +56,9 @@ class Voyage:
         :return: None
         '''
         if not self.route:
-            self.route = [self.base] + [new_inst]+[self.base]
+            self.route = [new_inst]
         else:
-            self.route.insert(len(self.route)-1, new_inst)
+            self.route.append(new_inst)
         self.deck_load += load
         self.end_time = self.calc_voyage_length(self.route)
 
@@ -82,6 +82,6 @@ class Voyage:
         :return: True - possible to use this voyage, False - otherwise.
         '''
         route = self.route.copy()
-        route.insert(len(self.route) - 1, installation)
+        route.append(installation)
         new_end_time = self.calc_voyage_length(route)
         return new_end_time - PERIOD_LENGTH < vessel_first_start_time
