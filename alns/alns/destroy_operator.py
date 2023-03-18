@@ -18,7 +18,7 @@ def random_removal(schedule: dict, visit_pool: set):
         vis_number_to_remove = random.randint(min_vis_number_to_remove, max_vis_number_to_remove)
         insts_to_free = random.sample(voyage.route,vis_number_to_remove)
         if visit_number == vis_number_to_remove:
-            print("delete voyage")
+            schedule[voyage.vessel.name].remove(voyage)
             for inst in insts_to_free:
                 visit_pool.add([inst, voyage.start_time])
         else:
