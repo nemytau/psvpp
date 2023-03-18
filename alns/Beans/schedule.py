@@ -14,25 +14,20 @@ import time
 class Schedule:
 
     def __init__(self, vessels: list, installations: list, base: Base, schedule=None) -> None:
-        if schedule is None:
-            schedule = []
         self.vessels = vessels
+        self.schedule = {}
         self.installations = installations
         self.base = base
         self.vessel_first_voyage_start_time = [-1 for n in range(len(self.vessels))]
         self.vessel_last_voyage_end_time = [0 for n in range(len(self.vessels))]
         if not schedule:
-            start = time.process_time()
-
             self.distance_manager = DistanceManager(base, installations)
-            print("Distance manager -> " + str(time.process_time() - start))
-
-            self.schedule = self.generate_init_solution()
+            self.generate_init_solution()
         else:
             self.schedule = schedule
+        self.solution_cost = self.find_cost()
 
     def generate_init_solution(self):
-        schedule = {}
         start = time.process_time()
         weekly_scenarios = build_weekly_departure_scnarios(self.installations)
         print("weekly scen -> " + str(time.process_time() - start))
@@ -42,7 +37,7 @@ class Schedule:
             for inst_to_visit in daily_departure:
                 start = time.process_time()
 
-                voyage = self._get_free_voyage(voyage_pool, i, self.installations[inst_to_visit], schedule)
+                voyage = self._get_free_voyage(voyage_pool, i, self.installations[inst_to_visit])
 
                 print("get voyage -> " + str(time.process_time() - start))
 
@@ -54,11 +49,9 @@ class Schedule:
                 voyage.add_visit(self.installations[inst_to_visit], self.installations[inst_to_visit].deck_demand)
 
                 print("add visit -> " + str(time.process_time() - start))
-
                 self.vessel_last_voyage_end_time[voyage.vessel.name] = voyage.end_time
-        return schedule
 
-    def _get_free_voyage(self, voyage_pool, day, installation, schedule):
+    def _get_free_voyage(self, voyage_pool: set, day: int, installation: Installation):
         local_voyage = None
         flag = False
         for possible_voyage in voyage_pool:
@@ -74,17 +67,22 @@ class Schedule:
                 return None
             local_voyage = Voyage(vessel=free_vessel, distance_manager=self.distance_manager, base=self.base,
                                   start_day=day)
-            if free_vessel.name in schedule:
-                schedule[free_vessel.name].append(local_voyage)
-            else:
-                schedule[free_vessel.name] = [local_voyage]
+            self.add_voyage(free_vessel, local_voyage)
             if self.vessel_first_voyage_start_time[free_vessel.name] == -1:
                 self.vessel_first_voyage_start_time[free_vessel.name] = local_voyage.start_time
             voyage_pool.add(local_voyage)
         return local_voyage
 
-    def _get_free_vessel(self, day, demand):
+    def add_voyage(self, vessel: Vessel, voyage: Voyage):
+        if vessel.name in self.schedule:
+            self.schedule[vessel.name].append(voyage)
+        else:
+            self.schedule[vessel.name] = [voyage]
 
+    def remove_voyage(self, vessel: Vessel, voyage: Voyage):
+        self.schedule[vessel.name].remove(voyage)
+
+    def _get_free_vessel(self, day, demand):
         # check back_overlap and capacity
         possible_vessels = [self.vessels[i] for i in range(len(self.vessels)) if self.vessel_last_voyage_end_time[i]
                             < day * 24 + 8 and self.vessels[i].deck_capacity >= demand]
@@ -92,3 +90,19 @@ class Schedule:
             return random.choice(possible_vessels)
         else:
             return None
+
+    def remove_visit(self, voyage: Voyage, installation):
+        voyage.remove_visit(installation)
+        if not voyage.route:
+            # self.schedule[voyage.vessel.name].remove(voyage)
+            self.remove_voyage(voyage.vessel, voyage)
+            if not self.schedule[voyage.vessel.name]:
+                self.schedule.pop(voyage.vessel.name)
+
+    def find_cost(self):
+        overall_cost = 0
+        for vessel_name in self.schedule:
+            overall_cost += self.schedule[vessel_name][0].vessel.cost
+            for voyage in self.schedule[vessel_name]:
+                overall_cost += voyage.variable_cost
+        return overall_cost
