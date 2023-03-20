@@ -13,15 +13,15 @@ import time
 
 class Schedule:
 
-    def __init__(self, vessels: list, installations: list, base: Base, schedule=None) -> None:
+    def __init__(self, vessels: list, installations: list, base: Base, distance_manager: DistanceManager, schedule=None):
         self.vessels = vessels
         self.schedule = {}
         self.installations = installations
         self.base = base
         self.vessel_first_voyage_start_time = [-1 for n in range(len(self.vessels))]
         self.vessel_last_voyage_end_time = [0 for n in range(len(self.vessels))]
+        self.distance_manager = distance_manager
         if not schedule:
-            self.distance_manager = DistanceManager(base, installations)
             self.generate_init_solution()
         else:
             self.schedule = schedule
