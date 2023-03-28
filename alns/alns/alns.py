@@ -1,9 +1,10 @@
 from alns.Beans.schedule import Schedule
 from alns.utils.distance_manager import DistanceManager
 
-from alns.alns.destroy_operator import worst_removal, random_removal
-from alns.alns.repair_operator import *
-from alns.alns.improve_operator import *
+from alns.alns.destroy_operator import worst_removal, random_removal, shaw_removal
+from alns.alns.repair_operator import deep_greedy_insertion, k_regret_insertion
+from alns.alns.improve_operator import deep_greedy_swap, deep_greedy_relocation, daly_departure_relocaion,\
+    number_of_voyages_reduction, voyage_improvement, fleet_size_and_cost_reduction
 
 
 class ALNS:
