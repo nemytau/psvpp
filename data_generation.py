@@ -1,22 +1,25 @@
 from alns.data_generator import *
 from alns.utils import io
-from alns.utils.io import DSType
 from alns.Beans.schedule import Schedule
-
+import time
+# your code here
 def main():
-    io.mkdirs()
     dataset_name = 'small_1'
     base_name = 'FMO'
     insts = generate_installation_dataset(dataset_name)
-    io.dump_dataset(insts, dataset_name, DSType.INSTALLATIONS)
+    io.dump_installation_dataset(insts, dataset_name)
     base = generate_base(base_name)
-    io.dump_dataset(base, base_name, DSType.BASE)
+    io.dump_base(base, base_name)
     fleet = generate_fleet_dataset(dataset_name)
-    io.dump_dataset(fleet, dataset_name, DSType.VESSELS)
-    # fleet = io.load_dataset(dataset_name, DSType.VESSELS)
-    # insts = io.load_dataset(dataset_name, DSType.INSTALLATIONS)
-    # base = io.load_dataset(base_name, DSType.BASE)
-    schedule = Schedule(fleet.pool, insts)
+    io.dump_fleet_dataset(fleet, dataset_name)
+    # fleet = io.load_fleet_dataset(dataset_name)
+    # insts = io.load_installation_dataset(dataset_name)
+    # base = io.load_base(base_name)
+    start = time.process_time()
+
+    schedule = Schedule(fleet.pool, insts, base)
+
+    print(time.process_time() - start)
 
 if __name__ == '__main__':
     main()

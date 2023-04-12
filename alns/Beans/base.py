@@ -9,6 +9,7 @@ class Base:
                  longitude: float,
                  latitude: float):
         self.name = name
+        self.id = 0
         self.service_time = service_time
         self.time_window = time_window
         self.longitude = longitude

@@ -1,6 +1,6 @@
 class Vessel:
     def __init__(self,
-                 name: str,
+                 name: int,
                  deck_capacity: int,
                  bulk_capacity: int,
                  speed: float,
