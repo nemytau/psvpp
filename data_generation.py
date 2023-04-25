@@ -1,8 +1,10 @@
 from alns.data_generator import *
 from alns.utils import io
-from alns.Beans.schedule import Schedule
+from alns.alns.alns import ALNS
+from config.config_utils import get_config
 import time
-# your code here
+
+
 def main():
     dataset_name = 'small_1'
     base_name = 'FMO'
@@ -15,11 +17,18 @@ def main():
     # fleet = io.load_fleet_dataset(dataset_name)
     # insts = io.load_installation_dataset(dataset_name)
     # base = io.load_base(base_name)
-    start = time.process_time()
 
-    schedule = Schedule(fleet.pool, insts, base)
+    # schedule = Schedule(fleet.pool, insts, base)
+    alns = ALNS(
+        installations=insts,
+        base=base,
+        fleet=fleet.pool,
+        iterations=int(get_config()["alns"]["iterations"]),
+        speed_coeff=float(get_config()["alns"]["speed_up_coeff"]),
+        operator_select_type="Stochastic")
 
-    print(time.process_time() - start)
+    alns.start(int(get_config()["alns"]["repetitions"]))
+
 
 if __name__ == '__main__':
     main()
