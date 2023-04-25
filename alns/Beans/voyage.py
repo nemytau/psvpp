@@ -23,6 +23,12 @@ class Voyage:
         self.variable_cost = 0
         # self.load = self.calc_load()
 
+    def __repr__(self):
+        route = '-'.join([i.name for i in self.route])
+        route = f'{self.base.name}-{route}-{self.base.name}'
+        return f'starts at {self.start_time} route {route},' \
+               f' ends  at {self.end_time}'
+
     def calc_voyage_length(self, route):
         """
         Calculates time length of the voyage.

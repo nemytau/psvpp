@@ -34,7 +34,7 @@ class Installation:
         return self.name == other.name
 
     def __repr__(self):
-        return f'{self.name} {self.inst_type}'
+        return f'{self.name} {self.inst_type} {self.visit_frequency}'
 
     def _generate_departure_scenarios(self, avail_dep_days=range(7)):
         """

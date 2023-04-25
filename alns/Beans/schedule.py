@@ -9,6 +9,12 @@ from alns.utils.distance_manager import DistanceManager
 from alns.Beans.base import Base
 
 import time
+import pandas as pd
+
+DAYS = 7
+HOURS = 24
+PERIOD_LENGTH = 168
+DEPARTURE_PERIOD = 8
 
 
 class Schedule:
@@ -106,3 +112,39 @@ class Schedule:
             for voyage in self.schedule[vessel_name]:
                 overall_cost += voyage.variable_cost
         return overall_cost
+
+    def __repr__(self):
+        schedule_to_str_list = []
+        for vessel, voyages in self.schedule.items():
+            vessel_voyages_str = '\n'.join([str(voyage) for voyage in voyages])
+            schedule_to_str_list.append(f'Vessel {vessel}:\n{vessel_voyages_str}')
+        return '\n'.join(schedule_to_str_list)
+
+    def to_df(self):
+        rows = []
+        for vessel, voyages in self.schedule.items():
+            for voyage in voyages:
+                if voyage.end_time > PERIOD_LENGTH:
+                    first_part = {
+                        'Vessel': vessel,
+                        'Route': '-'.join([i.name for i in voyage.route]),
+                        'Start': voyage.start_time,
+                        'End': PERIOD_LENGTH
+                    }
+                    second_part = {
+                        'Vessel': vessel,
+                        'Route': '-'.join([i.name for i in voyage.route]),
+                        'Start': 0,
+                        'End': voyage.end_time - PERIOD_LENGTH
+                    }
+                    rows.append(first_part)
+                    rows.append(second_part)
+
+                else:
+                    row = {'Vessel': vessel,
+                           'Route': '-'.join([i.name for i in voyage.route]),
+                           'Start': voyage.start_time,
+                           'End': voyage.end_time
+                           }
+                    rows.append(row)
+        return pd.DataFrame(rows)
