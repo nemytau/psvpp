@@ -44,9 +44,9 @@ class Voyage:
             e2 = other.earliest_end_time(speed=self.vessel.speed)
         else:
             e2 = other.end_time
-
+        e2 = e2 + other.base.service_time
         s2 = other.start_time
-        e1 = self.end_time
+        e1 = self.end_time + self.base.service_time
         s1 = self.start_time
         overlap1 = self.overlap(s1, e1, s2, e2)
         overlap2 = self.overlap(s1-PERIOD_LENGTH, e1-PERIOD_LENGTH, s2, e2)
@@ -107,11 +107,15 @@ class Voyage:
                 start_service_time = arrival_cum_time
 
             end_time = start_service_time + to_node.service_time
-        end_time = end_time + edges[-1][2] / speed + edges[-1][1].service_time
+        end_time = end_time + edges[-1][2] / speed
         return end_time
 
     def calc_variable_cost(self):
-        return (self.end_time - self.start_time) * self.vessel.fcs
+        voyage_duration = self.end_time - self.start_time
+        total_service_time = sum([i.service_time for i in self.route])
+        total_sailing_time = sum([e[2] for e in self.edges])
+        total_waiting_time = voyage_duration - total_sailing_time - total_service_time
+        return (total_service_time+total_waiting_time) * self.vessel.fcw + total_sailing_time * self.vessel.fcs
 
     def add_visit(self, new_inst):
         """

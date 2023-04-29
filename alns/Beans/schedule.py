@@ -83,6 +83,7 @@ class Schedule:
                 if can_insert:
                     self.insert_voyage(voyage, vessel)
                     free_vessels.remove(vessel)
+                    vessel.add_departure_day(day)
                     break
 
     def insert_voyage(self, voyage, vessel):
@@ -107,7 +108,7 @@ class Schedule:
         """
         free_vessels = []
         for vessel in self.vessels:
-            if day in vessel.free_days:
+            if day not in vessel.departure_days:
                 free_vessels.append(vessel)
         return free_vessels
 

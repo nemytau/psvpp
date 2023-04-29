@@ -11,18 +11,18 @@ def main():
     base_name = 'FMO'
 
     insts = generate_installation_dataset(dataset_name)
-    fleet = generate_fleet_dataset(dataset_name)
+    vessels = generate_vessels_dataset(dataset_name)
     base = generate_base(base_name)
 
     io.dump_dataset(insts, dataset_name, io.DSType.INSTALLATIONS)
-    io.dump_dataset(fleet, dataset_name, io.DSType.VESSELS)
+    io.dump_dataset(vessels, dataset_name, io.DSType.VESSELS)
     io.dump_dataset(base, base_name, io.DSType.BASE)
 
-    # insts = io.load_dataset(dataset_name, io.DSType.INSTALLATIONS)
-    # fleet = io.load_dataset(dataset_name, io.DSType.VESSELS)
-    # base = io.load_dataset(base_name, io.DSType.BASE)
+    insts = io.load_dataset(dataset_name, io.DSType.INSTALLATIONS)
+    vessels = io.load_dataset(dataset_name, io.DSType.VESSELS)
+    base = io.load_dataset(base_name, io.DSType.BASE)
 
-    schedule = Schedule(fleet.pool, insts, base)
+    schedule = Schedule(vessels, insts, base)
 
     # alns = ALNS(
     #     installations=insts,

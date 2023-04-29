@@ -1,5 +1,4 @@
 class Vessel:
-    DAYS = 7
 
     def __init__(self,
                  name: str,
@@ -10,7 +9,6 @@ class Vessel:
                  fcs: float,
                  fcw: float,
                  cost: int,
-                 period_length_days: int = DAYS
                  ) -> None:
         self.name = name
         self.deck_capacity = deck_capacity
@@ -20,7 +18,13 @@ class Vessel:
         self.fcs = fcs
         self.fcw = fcw
         self.cost = cost
-        self.free_days = list(range(period_length_days))
+        self.departure_days = []
+
+    def add_departure_day(self, day):
+        self.departure_days.append(day)
+
+    def remove_departure_day(self, day):
+        self.departure_days.remove(day)
 
     @classmethod
     def default_charter_vessel(cls, n):

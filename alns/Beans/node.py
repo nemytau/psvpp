@@ -19,7 +19,7 @@ class Base(Node):
                  longitude: float,
                  latitude: float):
         self.name = name
-        self.id = 0
+        self.idx = 0
         self.service_time = service_time
         self.time_window = time_window
         self.longitude = longitude
@@ -67,7 +67,9 @@ class Installation(Node):
         return self.idx
 
     def __repr__(self):
-        return f'{self.name}-{self.idx} {self.inst_type} {self.visit_frequency}'
+        return f'{self.name}, id:{self.idx} freq:{self.visit_frequency}' \
+               f' demand:{self.deck_demand} serv_time:{self.service_time}' \
+               f' TW:{self.time_window}'
 
     def _generate_departure_scenarios(self, avail_dep_days=range(7)):
         """

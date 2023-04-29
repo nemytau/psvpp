@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from alns.Beans.node import Installation, Base
 from alns.Beans.vessel import Vessel
-from alns.Beans.fleet import Fleet
 
 
 def generate_installation_dataframe(inst_sample_name):
@@ -87,13 +86,6 @@ def generate_vessels_dataframe(vessel_sample_name):
         df['cost'] = vessel_type_config['cost']
         vessel_df_list.append(df)
     return pd.concat(vessel_df_list).reset_index(drop=True)
-
-
-def generate_fleet_dataset(vessel_sample_name):
-    vessel_df = generate_vessels_dataframe(vessel_sample_name)
-    vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
-    fleet = Fleet.from_vessels_list(vessels)
-    return fleet
 
 
 def generate_vessels_dataset(vessel_sample_name):
