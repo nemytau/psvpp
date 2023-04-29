@@ -31,22 +31,23 @@ class Schedule:
     def __init__(self, vessels: list[Vessel], installations: list[Installation], base: Base, schedule=None):
         self.vessels = vessels
         self.schedule = {}
-        self.voyage_assignment = {}
         self.installations = installations
         self.base = base
         self.distance_manager = DistanceManager(base, installations)
-        self.feasible = self.check_feasibility()
+        self.feasible = False
         if not schedule:
             self.generate_init_schedule()
         else:
             self.schedule = schedule
+            self.feasible = self.check_feasibility()
+            if not self.feasible:
+                raise AttributeError('Passed schedule is not feasible')
 
     def generate_init_schedule(self):
         extra_vessels = 0
         attempt_count = 0
         while not self.feasible:
-            self.voyage_assignment = {v: [] for v in self.vessels}
-            self.schedule = {day: [] for day in range(DAYS)}
+            self.schedule = {v: [] for v in self.vessels}
             for _ in range(self.MAX_ATTEMPTS_TO_INIT):
                 daily_visits = daily_visits_from_departure_scenarios(self.installations, DAYS)
                 for day, day_visits in enumerate(daily_visits):
@@ -75,8 +76,8 @@ class Schedule:
                 if not voyage.check_load_feasibility(vessel):
                     continue
                 can_insert = True
-                if self.voyage_assignment[vessel]:
-                    for assigned_voyage in self.voyage_assignment[vessel]:
+                if self.schedule[vessel]:
+                    for assigned_voyage in self.schedule[vessel]:
                         if assigned_voyage.check_overlap(voyage):
                             can_insert = False
                             break
@@ -97,7 +98,7 @@ class Schedule:
         """
         voyage.vessel = vessel
         voyage.improve_full_enum()
-        self.voyage_assignment[vessel].append(voyage)
+        self.schedule[vessel].append(voyage)
 
     def _get_free_vessels(self, day):
         """
@@ -108,16 +109,15 @@ class Schedule:
         """
         free_vessels = []
         for vessel in self.vessels:
-            if day not in vessel.departure_days:
-                free_vessels.append(vessel)
+            free_vessels.append(vessel)
         return free_vessels
 
     def check_feasibility(self):
-        if 'voyage_assignment' not in self.__dict__.keys():
+        if 'schedule' not in self.__dict__.keys():
             return False
         required_visits = {inst: inst.visit_frequency for inst in self.installations}
         actual_visits = {inst: 0 for inst in self.installations}
-        for vessel, voyages in self.voyage_assignment.items():
+        for vessel, voyages in self.schedule.items():
             for voyage in voyages:
                 for inst in voyage.route:
                     actual_visits[inst] += 1
@@ -126,13 +126,14 @@ class Schedule:
     def __repr__(self):
         schedule_to_str_list = []
         for vessel, voyages in self.schedule.items():
-            vessel_voyages_str = '\n'.join([str(voyage) for voyage in voyages])
-            schedule_to_str_list.append(f'Vessel {vessel}:\n{vessel_voyages_str}')
+            if voyages:
+                vessel_voyages_str = '\n'.join([str(voyage) for voyage in voyages])
+                schedule_to_str_list.append(f'{vessel}:\n{vessel_voyages_str}')
         return '\n'.join(schedule_to_str_list)
 
     def to_df(self):
         rows = []
-        for vessel, voyages in self.voyage_assignment.items():
+        for vessel, voyages in self.schedule.items():
             for voyage in voyages:
                 if voyage.end_time > PERIOD_LENGTH:
                     first_part = {

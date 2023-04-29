@@ -29,8 +29,7 @@ class Voyage:
     def __repr__(self):
         route = '-'.join([i.name for i in self.route])
         route = f'{self.base.name}-{route}-{self.base.name}'
-        return f'{self.start_time} route {route}' \
-               f' {self.end_time:.2f}'
+        return f'{route:>25}: [{self.start_time} - {self.end_time:.2f}]'
 
     def check_overlap(self, other):
         """

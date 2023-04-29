@@ -18,13 +18,6 @@ class Vessel:
         self.fcs = fcs
         self.fcw = fcw
         self.cost = cost
-        self.departure_days = []
-
-    def add_departure_day(self, day):
-        self.departure_days.append(day)
-
-    def remove_departure_day(self, day):
-        self.departure_days.remove(day)
 
     @classmethod
     def default_charter_vessel(cls, n):
