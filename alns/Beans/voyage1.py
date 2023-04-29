@@ -1,6 +1,6 @@
-from alns.Beans.vessel import Vessel
-from alns.Beans.installation import Installation
-from alns.Beans.base import Base
+from alns.Beans.vessel1 import Vessel
+from alns.Beans.installation1 import Installation
+from alns.Beans.base1 import Base
 
 DAYS = 7
 HOURS = 24
@@ -23,7 +23,7 @@ class Voyage:
         self.variable_cost = 0
         # self.load = self.calc_load()
 
-    def calc_voyage_length(self, route):
+    def calc_voyage_duration(self, route):
         """
         Calculates time length of the voyage.
 
@@ -31,9 +31,11 @@ class Voyage:
         :rtype: float
         """
         end_time = self.start_time
+        length = 0
         for edge in self.edges([self.base] + route + [self.base]):
             to_node = edge[1]
             dist = edge[2]
+            length += dist
             # arrival_cum_time = (end_time + dist / self.vessel.speed)
             arrival_cum_time = end_time + (dist / self.vessel.speed)
 
@@ -62,7 +64,7 @@ class Voyage:
         """
         self.route.append(new_inst)
         self.deck_load += load
-        self.end_time = self.calc_voyage_length(self.route)
+        self.end_time = self.calc_voyage_duration(self.route)
         self.variable_cost = self.calc_variable_cost()
 
     def remove_visit(self, installation: Installation):
@@ -73,7 +75,7 @@ class Voyage:
         """
         self.route.remove(installation)
         self.deck_load -= installation.deck_demand
-        self.end_time = self.calc_voyage_length(self.route)
+        self.end_time = self.calc_voyage_duration(self.route)
         self.variable_cost = self.calc_variable_cost()
 
     def edges(self, route):
@@ -86,16 +88,21 @@ class Voyage:
         return [(from_node, to_node, self.distance_manager.distance(from_node.name, to_node.name))
                 for (from_node, to_node) in edges]
 
-    def check_front_overlap(self, day, installation, vessel_first_start_time):
+    def check_front_overlap(self, installation, vessel_first_start_time):
         """
         Check if possible to choose this voyage for day 'day'
 
         :param vessel_first_start_time:
         :param installation: installation we would like to add
-        :param day: departure day for voyage to be added
         :return: True - possible to use this voyage, False - otherwise.
         """
         route = self.route.copy()
         route.append(installation)
-        new_end_time = self.calc_voyage_length(route)
+        new_end_time = self.calc_voyage_duration(route)
         return new_end_time - PERIOD_LENGTH < vessel_first_start_time
+
+    # def update_voyage_by_new_route(self, route):
+    #     length, new_end_time = self.calc_voyage_length_and_duration(route)
+    #     self.voyage_length = length
+    #     self.end_time = new_end_time
+    #     self.variable_cost = self.calc_variable_cost()

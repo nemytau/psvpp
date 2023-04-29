@@ -1,12 +1,12 @@
 import random
 import sys
 
-from alns.Beans.installation import Installation
-from alns.Beans.vessel import Vessel
-from alns.Beans.voyage import Voyage
+from alns.Beans.installation1 import Installation
+from alns.Beans.vessel1 import Vessel
+from alns.Beans.voyage1 import Voyage
 from alns.utils.utils import *
 from alns.utils.distance_manager import DistanceManager
-from alns.Beans.base import Base
+from alns.Beans.base1 import Base
 
 import time
 
@@ -15,6 +15,7 @@ class Schedule:
 
     def __init__(self, vessels: list, installations: list, base: Base, distance_manager: DistanceManager, schedule=None):
         self.vessels = vessels
+        # self.weighted_vessels = list(zip(vessels,[1 for _ in range(len(vessels))]))
         self.schedule = {}
         self.installations = installations
         self.base = base
@@ -30,14 +31,15 @@ class Schedule:
     def generate_init_solution(self):
         start = time.process_time()
         weekly_scenarios = build_weekly_departure_scnarios(self.installations)
+        # weekly_scenarios = [[3, 4, 6], [0, 1, 7, 8], [2, 3, 4, 5], [6, 9], [4], [0, 7], [2]]
         print("weekly scen -> " + str(time.process_time() - start))
-        for i, daily_departure in enumerate(weekly_scenarios):
+        for day, daily_departure in enumerate(weekly_scenarios):
             voyage_pool = set()
             print("-------new day------")
             for inst_to_visit in daily_departure:
                 start = time.process_time()
 
-                voyage = self._get_free_voyage(voyage_pool, i, self.installations[inst_to_visit])
+                voyage = self._get_free_voyage(voyage_pool, day, self.installations[inst_to_visit])
 
                 print("get voyage -> " + str(time.process_time() - start))
 
@@ -53,20 +55,24 @@ class Schedule:
 
     def _get_free_voyage(self, voyage_pool: set, day: int, installation: Installation):
         local_voyage = None
-        flag = False
+        voyage_was_found = False
         for possible_voyage in voyage_pool:
             vessel_first_start_time = self.vessel_first_voyage_start_time[possible_voyage.vessel.name]
-            if possible_voyage.check_front_overlap(day, installation, vessel_first_start_time) and \
+            if possible_voyage.check_front_overlap(installation, vessel_first_start_time) and \
                     possible_voyage.deck_load + installation.deck_demand <= possible_voyage.vessel.deck_capacity:
-                flag = True
+                voyage_was_found = True
                 local_voyage = possible_voyage
                 break
-        if not voyage_pool or not flag:
-            free_vessel = self._get_free_vessel(day, installation.deck_demand)
-            if free_vessel is None:
+        if not voyage_pool or not voyage_was_found:
+            free_vessels = self._get_free_vessels(day, installation.deck_demand)
+            if free_vessels is None:
                 return None
-            local_voyage = Voyage(vessel=free_vessel, distance_manager=self.distance_manager, base=self.base,
-                                  start_day=day)
+            free_vessel = None
+            for free_vessel in free_vessels:
+                local_voyage = Voyage(vessel=free_vessel, distance_manager=self.distance_manager, base=self.base,
+                                      start_day=day)
+                if local_voyage.check_front_overlap(installation, self.vessel_first_voyage_start_time[free_vessel.name]):
+                    break
             self.add_voyage(free_vessel, local_voyage)
             if self.vessel_first_voyage_start_time[free_vessel.name] == -1:
                 self.vessel_first_voyage_start_time[free_vessel.name] = local_voyage.start_time
@@ -82,14 +88,15 @@ class Schedule:
     def remove_voyage(self, vessel: Vessel, voyage: Voyage):
         self.schedule[vessel.name].remove(voyage)
 
-    def _get_free_vessel(self, day, demand):
+    def _get_free_vessels(self, day, demand):
         # check back_overlap and capacity
         possible_vessels = [self.vessels[i] for i in range(len(self.vessels)) if self.vessel_last_voyage_end_time[i]
                             < day * 24 + 8 and self.vessels[i].deck_capacity >= demand]
-        if possible_vessels:
-            return random.choice(possible_vessels)
-        else:
-            return None
+        # if possible_vessels:
+        #     return random.choice(possible_vessels)
+        # else:
+        #     return None
+        return possible_vessels
 
     def remove_visit(self, voyage: Voyage, installation):
         voyage.remove_visit(installation)

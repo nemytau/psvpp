@@ -1,4 +1,4 @@
-from alns.Beans.schedule import Schedule
+from alns.Beans.schedule1 import Schedule
 from alns.utils.distance_manager import DistanceManager
 
 from alns.alns.destroy_operator import worst_removal, random_removal, shaw_removal

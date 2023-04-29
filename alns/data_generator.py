@@ -1,11 +1,9 @@
 from .__init__ import generation_yaml_config
 import pandas as pd
 import numpy as np
-from alns.Beans.installation import Installation
-from alns.Beans.vessel import Vessel
-from alns.Beans.base import Base
-from alns.Beans.fleet import Fleet
-
+from alns.Beans.installation1 import Installation
+from alns.Beans.vessel1 import Vessel
+from alns.Beans.base1 import Base
 
 def generate_installation_dataframe(inst_sample_name):
     sample_config = generation_yaml_config['inst_generation_params'][inst_sample_name]
@@ -81,11 +79,10 @@ def generate_fleet_dataframe(vessel_sample_name):
     return pd.concat(vessel_df_list).reset_index(drop=True)
 
 
-def generate_fleet_dataset(vessel_sample_name):
-    vessel_df = generate_fleet_dataframe(vessel_sample_name)
-    vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
-    fleet = Fleet.from_vessels_list(vessels)
-    return fleet
+# def generate_fleet_dataset(vessel_sample_name):
+#     vessel_df = generate_fleet_dataframe(vessel_sample_name)
+#     vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
+#     return fleet
 
 
 def fleet_from_file():

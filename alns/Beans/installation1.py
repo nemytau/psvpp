@@ -26,6 +26,9 @@ class Installation:
         # self.departure_scenarios = self._generate_departure_scenarios()
         # self.departure_days = self.random_departure_scenario()
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     @classmethod
     def from_df(cls, df):
         pass
