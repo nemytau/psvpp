@@ -29,7 +29,7 @@ def load_dataset(dataset_name, dataset_type):
     :param dataset_type: dataset type from enum DSType: VESSELS, BASE, INSTALLATIONS.
     :type dataset_type: DSType
     :return: dataset
-    :rtype: object
+    :rtype: list[object]|object
     """
     dstype_val = dataset_type.value
     with open(os.path.join(ROOT_PATH,

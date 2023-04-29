@@ -1,9 +1,8 @@
 from .__init__ import generation_yaml_config
 import pandas as pd
 import numpy as np
-from alns.Beans.installation import Installation
+from alns.Beans.node import Installation, Base
 from alns.Beans.vessel import Vessel
-from alns.Beans.base import Base
 from alns.Beans.fleet import Fleet
 
 
@@ -39,10 +38,18 @@ def generate_installation_dataframe(inst_sample_name):
         df['time_window'] = df['time_window'].str.split(',').map(tuple)
         df['time_window'] = df['time_window'].apply(lambda x: (int(x[0]), int(x[1])))
         inst_df_list.append(df)
-    return pd.concat(inst_df_list).reset_index(drop=True)
+    res_df = pd.concat(inst_df_list).reset_index(drop=True)
+    res_df['idx'] = res_df.index.astype(int) + 1
+    return res_df
 
 
 def generate_installation_dataset(inst_sample_name):
+    """
+
+    :param inst_sample_name:
+    :return: list of installations
+    :rtype: list[Installation]
+    """
     inst_df = generate_installation_dataframe(inst_sample_name)
     insts = inst_df.apply(lambda x: Installation(**(x.to_dict())), axis=1).to_list()
     return insts
@@ -64,7 +71,7 @@ def installation_dataset_from_file():
     pass
 
 
-def generate_fleet_dataframe(vessel_sample_name):
+def generate_vessels_dataframe(vessel_sample_name):
     sample_config = generation_yaml_config['fleet_generation_params'][vessel_sample_name]
     vessel_df_list = []
     total_vessel_num = sum([conf['num'] for conf in sample_config])
@@ -73,7 +80,8 @@ def generate_fleet_dataframe(vessel_sample_name):
         df['name'] = df.index
         df['vessel_type'] = vessel_type_config['type']
         df['speed'] = vessel_type_config['speed']
-        df['fuel_consumption'] = vessel_type_config['fuel_consumption']
+        df['fcs'] = vessel_type_config['fcs']
+        df['fcw'] = vessel_type_config['fcw']
         df['deck_capacity'] = vessel_type_config['deck_capacity']
         df['bulk_capacity'] = vessel_type_config['bulk_capacity']
         df['cost'] = vessel_type_config['cost']
@@ -82,10 +90,16 @@ def generate_fleet_dataframe(vessel_sample_name):
 
 
 def generate_fleet_dataset(vessel_sample_name):
-    vessel_df = generate_fleet_dataframe(vessel_sample_name)
+    vessel_df = generate_vessels_dataframe(vessel_sample_name)
     vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
     fleet = Fleet.from_vessels_list(vessels)
     return fleet
+
+
+def generate_vessels_dataset(vessel_sample_name):
+    vessel_df = generate_vessels_dataframe(vessel_sample_name)
+    vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
+    return vessels
 
 
 def fleet_from_file():

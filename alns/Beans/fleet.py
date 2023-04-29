@@ -1,6 +1,7 @@
 from alns.Beans.vessel import Vessel
 
 
+# not used
 class Fleet:
     def __init__(self) -> None:
         self.pool = []
