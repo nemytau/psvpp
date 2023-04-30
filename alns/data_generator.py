@@ -42,26 +42,26 @@ def generate_installation_dataframe(inst_sample_name):
     return res_df
 
 
-def generate_installation_dataset(inst_sample_name):
+def generate_installation_dataset(inst_gen_params_name):
     """
 
-    :param inst_sample_name:
+    :param inst_gen_params_name:
     :return: list of installations
     :rtype: list[Installation]
     """
-    inst_df = generate_installation_dataframe(inst_sample_name)
+    inst_df = generate_installation_dataframe(inst_gen_params_name)
     insts = inst_df.apply(lambda x: Installation(**(x.to_dict())), axis=1).to_list()
     return insts
 
 
-def generate_base(name):
+def generate_base(base_gen_params_name='FMO'):
     base_config = generation_yaml_config['base_generation_params']
     base = Base(
-        name,
-        base_config[name]['service_time'],
-        tuple(map(int, base_config[name]['time_window'].split(','))),
-        generation_yaml_config['base_coords'][name][0],
-        generation_yaml_config['base_coords'][name][1]
+        base_gen_params_name,
+        base_config[base_gen_params_name]['service_time'],
+        tuple(map(int, base_config[base_gen_params_name]['time_window'].split(','))),
+        generation_yaml_config['base_coords'][base_gen_params_name][0],
+        generation_yaml_config['base_coords'][base_gen_params_name][1]
     )
     return base
 
@@ -88,8 +88,8 @@ def generate_vessels_dataframe(vessel_sample_name):
     return pd.concat(vessel_df_list).reset_index(drop=True)
 
 
-def generate_vessels_dataset(vessel_sample_name):
-    vessel_df = generate_vessels_dataframe(vessel_sample_name)
+def generate_vessels_dataset(vessel_gen_params_name):
+    vessel_df = generate_vessels_dataframe(vessel_gen_params_name)
     vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
     return vessels
 
