@@ -28,6 +28,7 @@ def random_removal(schedule: Schedule, visit_pool: set):
                 voyage.remove_visit(inst)
                 visit_pool.add((inst, voyage.start_time))
             voyage.calc_voyage_end_time(voyage.route)
+    return schedule
 
 
 def worst_removal(schedule, voyage_pool):

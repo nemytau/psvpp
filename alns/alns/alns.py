@@ -18,12 +18,13 @@ class ALNS:
         self.speed_up_coeff = speed_coeff
         self.select_operator = operator_select_type
 
-    def start(self, repetitions):
+    def start(self, repetitions, init_solution=None):
         best_solution = None
         for r in range(repetitions):
             free_visits_pool = set()
+            if not init_solution:
+                init_solution = Schedule(self.vessels, self.insts, self.base)
             # init_solution = Schedule(self.vessels, self.insts, self.base,self.distance_manager)
-            init_solution = Schedule(self.vessels, self.insts, self.base)
             best_solution = init_solution
             current_solution = init_solution
             for i in range(self.iterations_num):
