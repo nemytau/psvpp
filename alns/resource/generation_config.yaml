@@ -1,6 +1,6 @@
 ---
 inst_generation_params:
-  small_1:
+  SMALL_1:
     - type: drill
       num: 4
       time_windows: 2
@@ -25,9 +25,44 @@ inst_generation_params:
       default_time_window: 7, 19
       departure_spread: 1
       deck_service_speed: 10
+  SMALL_2:
+    - type: drill
+      num: 6
+      time_windows: 3
+      demand_mu: 25
+      demand_sigma: 7
+      frequencies:
+        values: [ 1, 2 ]
+        probs: [ 0.4, 0.6 ]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+    - type: prod
+      num: 8
+      time_windows: 5
+      demand_mu: 20
+      demand_sigma: 5
+      frequencies:
+        values: [ 1, 2, 3 ]
+        probs: [ 0.4, 0.3, 0.3 ]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
 
 fleet_generation_params:
-  small_1:
+  SMALL_1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 8
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 0
+  SMALL_2:
     - type: vtype1
       name_prefix: 'v'
       num: 8
