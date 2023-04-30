@@ -1,6 +1,6 @@
 import random
 import sys
-
+from typing import List
 import numpy as np
 
 from alns.Beans.node import Installation, Base
@@ -8,8 +8,6 @@ from alns.Beans.vessel import Vessel
 from alns.Beans.voyage import Voyage
 from alns.utils.utils import daily_visits_from_departure_scenarios
 from alns.utils.distance_manager import DistanceManager
-
-from typing import List
 
 import time
 import pandas as pd

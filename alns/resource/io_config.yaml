@@ -1,20 +1,31 @@
 ---
 data_path:
-  fleet: ['data', 'fleet']
+  vessels: ['data', 'vessels']
   installations: ['data', 'installations']
   base: ['data', 'base']
   solution: ['data', 'solutions']
 
+sample_path:
+  vessels: ['sample', 'vessels']
+  installations: ['sample', 'installations']
+  base: ['sample', 'base']
+  solution: ['sample', 'solutions']
+
 dataset_name:
   installations:
-    small_1: 'i_small_1.pkl'
-  fleet:
-    small_1: 'f_small_1.pkl'
+    prefix: 'i_'
+    suffix: '.pkl'
+  vessels:
+    prefix: 'v_'
+    suffix: '.pkl'
   base:
-    FMO: 'FMO.pkl'
+    prefix: 'b_'
+    suffix: '.pkl'
+#    FMO: 'FMO.pkl'
   solution:
-    sol1_small_1: 'sol1_small_1.pkl'
-    sol2_small_1: 'sol2_small_1.pkl'
-    sol3_small_1: 'sol3_small_1.pkl'
-    sol4_small_1: 'sol4_small_1.pkl'
-    sol5_small_1: 'sol5_small_1.pkl'
+    prefix: 'sol_'
+    suffix: '.pkl'
+#    sol1_small_1: 'sol1_small_1.pkl'
+#    sol2_small_1: 'sol2_small_1.pkl'
+#    sol1_small_2: 'sol1_small_2.pkl'
+#    sol2_small_2: 'sol2_small_2.pkl'
