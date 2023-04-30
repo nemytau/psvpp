@@ -8,6 +8,7 @@ class DSType(Enum):
     VESSELS = 'fleet'
     INSTALLATIONS = 'installations'
     BASE = 'base'
+    SOLUTION = 'solution'
 
 
 def mkdirs():
@@ -40,10 +41,11 @@ def load_dataset(dataset_name, dataset_type):
     return dataset
 
 
-def dump_dataset(dataset, dataset_name, dataset_type):
+def dump_dataset(dataset, dataset_name, dataset_type, makedir=True):
     """
         Dumps dataset.
 
+        :param makedir: flag to data dir for datasets
         :param dataset: dataset object
         :param dataset_name: name of the dataset.
         :type dataset_name: str
@@ -51,8 +53,11 @@ def dump_dataset(dataset, dataset_name, dataset_type):
         :type dataset_type: DSType
         """
     dstype_val = dataset_type.value
-    with open(os.path.join(ROOT_PATH,
+    filepath = os.path.join(ROOT_PATH,
                            *io_config['data_path'][dstype_val],
-                           io_config['dataset_name'][dstype_val][dataset_name]),
+                           io_config['dataset_name'][dstype_val][dataset_name])
+    if makedir:
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath,
               'wb') as f:
         pickle.dump(dataset, f)

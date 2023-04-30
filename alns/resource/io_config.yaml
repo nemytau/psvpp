@@ -12,3 +12,9 @@ dataset_name:
     small_1: 'f_small_1.pkl'
   base:
     FMO: 'FMO.pkl'
+  solution:
+    sol1_small_1: 'sol1_small_1.pkl'
+    sol2_small_1: 'sol2_small_1.pkl'
+    sol3_small_1: 'sol3_small_1.pkl'
+    sol4_small_1: 'sol4_small_1.pkl'
+    sol5_small_1: 'sol5_small_1.pkl'
