@@ -1,7 +1,8 @@
 from alns.Beans.node import Installation
+from typing import List
 
 
-def daily_visits_from_departure_scenarios(installations: list[Installation], period_length=7):
+def daily_visits_from_departure_scenarios(installations: List[Installation], period_length=7):
     """
 
     :param installations: list of installations
@@ -15,4 +16,3 @@ def daily_visits_from_departure_scenarios(installations: list[Installation], per
         for day in scenario:
             visits[day].append(installation)
     return visits
-

@@ -9,6 +9,8 @@ from alns.Beans.voyage import Voyage
 from alns.utils.utils import daily_visits_from_departure_scenarios
 from alns.utils.distance_manager import DistanceManager
 
+from typing import List
+
 import time
 import pandas as pd
 
@@ -28,7 +30,7 @@ class Schedule:
     MAX_INST_PER_VOYAGE = 5
     MAX_ATTEMPTS_TO_INIT = 10
 
-    def __init__(self, vessels: list[Vessel], installations: list[Installation], base: Base, schedule=None):
+    def __init__(self, vessels: List[Vessel], installations: List[Installation], base: Base, schedule=None):
         self.vessels = vessels
         self.schedule = {}
         self.installations = installations
@@ -84,7 +86,7 @@ class Schedule:
                 if can_insert:
                     self.insert_voyage(voyage, vessel)
                     free_vessels.remove(vessel)
-                    vessel.add_departure_day(day)
+                    # vessel.add_departure_day(day)
                     break
 
     def insert_voyage(self, voyage, vessel):
@@ -159,3 +161,6 @@ class Schedule:
                            }
                     rows.append(row)
         return pd.DataFrame(rows)
+
+    def get_occupied_vessels_number(self):
+        return len([x for x in self.schedule.values() if x])

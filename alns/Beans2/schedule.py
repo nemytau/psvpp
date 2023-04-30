@@ -1,12 +1,13 @@
 import random
 import sys
 
-from alns.Beans.installation1 import Installation
-from alns.Beans.vessel1 import Vessel
-from alns.Beans.voyage1 import Voyage
+from alns.Beans2.installation import Installation
+from alns.Beans2.vessel import Vessel
+from alns.Beans2.voyage import Voyage
 from alns.utils.utils import *
 from alns.utils.distance_manager import DistanceManager
-from alns.Beans.base1 import Base
+from alns.Beans2.base import Base
+
 
 import time
 
@@ -30,7 +31,7 @@ class Schedule:
 
     def generate_init_solution(self):
         start = time.process_time()
-        weekly_scenarios = build_weekly_departure_scnarios(self.installations)
+        weekly_scenarios = daily_visits_from_departure_scenarios(self.installations)
         # weekly_scenarios = [[3, 4, 6], [0, 1, 7, 8], [2, 3, 4, 5], [6, 9], [4], [0, 7], [2]]
         print("weekly scen -> " + str(time.process_time() - start))
         for day, daily_departure in enumerate(weekly_scenarios):
@@ -39,7 +40,7 @@ class Schedule:
             for inst_to_visit in daily_departure:
                 start = time.process_time()
 
-                voyage = self._get_free_voyage(voyage_pool, day, self.installations[inst_to_visit])
+                voyage = self._get_free_voyage(voyage_pool, day, inst_to_visit)
 
                 print("get voyage -> " + str(time.process_time() - start))
 
@@ -48,7 +49,7 @@ class Schedule:
                     sys.exit()
                 start = time.process_time()
 
-                voyage.add_visit(self.installations[inst_to_visit], self.installations[inst_to_visit].deck_demand)
+                voyage.add_visit(inst_to_visit, inst_to_visit.deck_demand)
 
                 print("add visit -> " + str(time.process_time() - start))
                 self.vessel_last_voyage_end_time[voyage.vessel.name] = voyage.end_time

@@ -1,6 +1,6 @@
-from alns.Beans.vessel1 import Vessel
-from alns.Beans.installation1 import Installation
-from alns.Beans.base1 import Base
+from alns.Beans2.vessel import Vessel
+from alns.Beans2.installation import Installation
+from alns.Beans2.base import Base
 
 DAYS = 7
 HOURS = 24

@@ -22,7 +22,8 @@ class ALNS:
         best_solution = None
         for r in range(repetitions):
             free_visits_pool = set()
-            init_solution = Schedule(self.vessels, self.insts, self.base,self.distance_manager)
+            # init_solution = Schedule(self.vessels, self.insts, self.base,self.distance_manager)
+            init_solution = Schedule(self.vessels, self.insts, self.base)
             best_solution = init_solution
             current_solution = init_solution
             for i in range(self.iterations_num):
@@ -48,7 +49,7 @@ class ALNS:
 
     def get_operators_combination(self, solution):
         if self.select_operator == "Stochastic":
-            return [random_removal, random_removal, worst_removal]
+            return [random_removal, deep_greedy_insertion, worst_removal]
         elif self.select_operator == "RL":
             return []
 
