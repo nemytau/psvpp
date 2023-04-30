@@ -14,25 +14,25 @@ def main():
     vessels = generate_vessels_dataset(dataset_name)
     base = generate_base(base_name)
 
-    io.dump_dataset(insts, dataset_name, io.DSType.INSTALLATIONS)
-    io.dump_dataset(vessels, dataset_name, io.DSType.VESSELS)
-    io.dump_dataset(base, base_name, io.DSType.BASE)
-
-    insts = io.load_dataset(dataset_name, io.DSType.INSTALLATIONS)
-    vessels = io.load_dataset(dataset_name, io.DSType.VESSELS)
-    base = io.load_dataset(base_name, io.DSType.BASE)
-
-    schedule = Schedule(vessels, insts, base)
-
-    # alns = ALNS(
-    #     installations=insts,
-    #     base=base,
-    #     fleet=fleet.pool,
-    #     iterations=int(get_config()["alns"]["iterations"]),
-    #     speed_coeff=float(get_config()["alns"]["speed_up_coeff"]),
-    #     operator_select_type="Stochastic")
+    # io.dump_dataset(insts, dataset_name, io.DSType.INSTALLATIONS)
+    # io.dump_dataset(vessels, dataset_name, io.DSType.VESSELS)
+    # io.dump_dataset(base, base_name, io.DSType.BASE)
     #
-    # alns.start(int(get_config()["alns"]["repetitions"]))
+    # insts = io.load_dataset(dataset_name, io.DSType.INSTALLATIONS)
+    # vessels = io.load_dataset(dataset_name, io.DSType.VESSELS)
+    # base = io.load_dataset(base_name, io.DSType.BASE)
+
+    # schedule = Schedule(vessels, insts, base)
+
+    alns = ALNS(
+        installations=insts,
+        base=base,
+        fleet=vessels,
+        iterations=int(get_config()["alns"]["iterations"]),
+        speed_coeff=float(get_config()["alns"]["speed_up_coeff"]),
+        operator_select_type="Stochastic")
+
+    alns.start(int(get_config()["alns"]["repetitions"]))
 
 
 if __name__ == '__main__':
