@@ -2,6 +2,7 @@ class Vessel:
 
     def __init__(self,
                  name: str,
+                 idx: int,
                  deck_capacity: int,
                  bulk_capacity: int,
                  speed: float,
@@ -11,6 +12,7 @@ class Vessel:
                  cost: int,
                  ) -> None:
         self.name = name
+        self.idx = idx
         self.deck_capacity = deck_capacity
         self.bulk_capacity = bulk_capacity
         self.speed = speed
@@ -38,4 +40,4 @@ class Vessel:
         return self.deck_capacity < other.deck_capacity
 
     def __hash__(self):
-        return self.name
+        return self.idx

@@ -77,6 +77,7 @@ def generate_vessels_dataframe(vessel_sample_name):
     for i, vessel_type_config in enumerate(sample_config):
         df = pd.DataFrame(index=range(vessel_type_config['num']))
         df['name'] = df.index
+        df['idx'] = df.index.astype(int)
         df['vessel_type'] = vessel_type_config['type']
         df['speed'] = vessel_type_config['speed']
         df['fcs'] = vessel_type_config['fcs']

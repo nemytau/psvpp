@@ -21,15 +21,27 @@ class Voyage:
         self.deck_load = 0
         self.start_time = start_day * HOURS + DEPARTURE_TIME
         self.start_day = start_day
-        self.end_time = None
+        self.end_time = self.start_time
         self.base = base
         self.distance_manager = distance_manager
         # self.variable_cost = 0
 
+    def __hash__(self):
+        return hash((self.start_time, self.vessel.idx))
+
     def __repr__(self):
-        route = '-'.join([i.name for i in self.route])
+        route = '-'.join([str(i.idx) for i in self.route])
         route = f'{self.base.name}-{route}-{self.base.name}'
         return f'{route:>25}: [{self.start_time} - {self.end_time:.2f}]'
+
+    def __str__(self):
+        return f'{self.vessel.idx}:{self.start_day}'
+
+    def __deepcopy__(self):
+        copy = type(self)(self.base, self.distance_manager, self.start_day)
+        copy.vessel = self.vessel
+        copy.route = [r for r in self.route]
+        return copy
 
     def check_overlap(self, other):
         """
@@ -39,6 +51,9 @@ class Voyage:
         :return: True if voyages overlap, otherwise False
         :rtype: bool
         """
+        if self.start_day == other.start_day:
+            return True
+        # TODO: check if this is correct
         if other.end_time is None:
             e2 = other.earliest_end_time(speed=self.vessel.speed)
         else:
@@ -109,12 +124,25 @@ class Voyage:
         end_time = end_time + edges[-1][2] / speed
         return end_time
 
+    def total_wait_time(self):
+        voyage_duration = self.end_time - self.start_time
+        total_service_time = self.total_service_time()
+        total_sailing_time = self.total_sailing_time()
+        return voyage_duration - total_sailing_time - total_service_time
+
+    def total_sailing_time(self):
+        return sum([e[2] for e in self.edges])
+
+    def total_service_time(self):
+        return sum([i.service_time for i in self.route])
+
     def calc_variable_cost(self):
         voyage_duration = self.end_time - self.start_time
-        total_service_time = sum([i.service_time for i in self.route])
-        total_sailing_time = sum([e[2] for e in self.edges])
+        total_service_time = self.total_service_time()
+        total_sailing_time = self.total_sailing_time()
         total_waiting_time = voyage_duration - total_sailing_time - total_service_time
-        return (total_service_time+total_waiting_time) * self.vessel.fcw + total_sailing_time * self.vessel.fcs
+        variable_cost = (total_service_time+total_waiting_time) * self.vessel.fcw + total_sailing_time * self.vessel.fcs
+        return np.around(variable_cost, 2)
 
     def add_visit(self, new_inst):
         """
@@ -126,6 +154,8 @@ class Voyage:
         self.route.append(new_inst)
         self.deck_load += new_inst.deck_demand
 
+    # rename to remove inst from route
+    # add remove visit method for Visit
     def remove_visit(self, installation: Installation):
         """
         removes installation from rout and recalculates time and cost of voyage
