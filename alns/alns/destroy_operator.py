@@ -7,7 +7,8 @@ from alns.alns.mutation_service import added_costs_for_visits_removal, update_re
 
 eps_min = float(get_config()['alns.random_removal']['eps_min'])
 eps_max = float(get_config()['alns.random_removal']['eps_max'])
-
+num_to_remove = int(get_config()['alns.worst_removal']['num_to_remove'])
+p = float(get_config()['alns.worst_removal']['determinism_parameter'])
 
 def random_removal_vlad(schedule: Schedule, visit_pool: set):
     voyage_list = list(np.concatenate(schedule.schedule.values()).flat)
@@ -49,35 +50,41 @@ def random_removal(schedule: Schedule):
     return removed_insts_pool
 
 
-def worst_removal(schedule, n_remove_visits, p=5):
+# def worst_removal_old(schedule, n_remove_visits, voyages=None, p=5):
+#     removed_insts_pool = []
+#     all_visits = schedule.all_visits(voyages=voyages)
+#     visit_added_costs = added_costs_for_visits_removal(visits=all_visits, sch=schedule)
+#     # print(visit_added_costs)
+#     random.seed(42)
+#     while len(removed_insts_pool) < n_remove_visits:
+#         y = random.uniform(0, 1)
+#         idx_visit_to_remove = round(pow(y, p) * len(visit_added_costs))
+#         visit, _ = visit_added_costs[idx_visit_to_remove]
+#         if visit.inst.idx == 14:
+#             print("14")
+#         schedule.remove_visit(visit)
+#         removed_insts_pool.append(visit.inst)
+#         visit_added_costs = update_removal_added_costs(visit_added_costs, visit, schedule)
+#     return removed_insts_pool
+
+
+def worst_removal(schedule, n_remove_visits=None, voyages=None):
+    if n_remove_visits is None:
+        n_remove_visits = num_to_remove
     removed_insts_pool = []
-    all_visits = schedule.all_visits()
-    visit_added_costs = added_costs_for_visits_removal(visits=all_visits, sch=schedule)
-    # print(visit_added_costs)
+    inst_voyage_list = schedule.visited_inst_voyage_list(voyages=voyages)
+    visit_added_costs = added_costs_for_visits_removal(inst_voyage_list, sch=schedule)
     random.seed(42)
     while len(removed_insts_pool) < n_remove_visits:
         y = random.uniform(0, 1)
         idx_visit_to_remove = round(pow(y, p) * len(visit_added_costs))
-        visit, _ = visit_added_costs[idx_visit_to_remove]
-        schedule.remove_visit(visit)
-        removed_insts_pool.append(visit.inst)
-        visit_added_costs = update_removal_added_costs(visit_added_costs, visit, schedule)
+        (inst, voyage), _ = visit_added_costs[idx_visit_to_remove]
+        if voyage is None:
+            print("None")
+        schedule.remove_visits_from_voyage(inst, voyage)
+        removed_insts_pool.append(inst)
+        visit_added_costs = update_removal_added_costs(visit_added_costs, inst, voyage, schedule)
     return removed_insts_pool
-
-
-def worst_removal_freak(schedule, n_remove_visits, p=5):
-    removed_visits_pool = []
-    all_visits = schedule.all_visits()
-    visit_added_costs = added_costs_for_visits_removal(visits=all_visits, sch=schedule)
-    random.seed(42)
-    while len(removed_visits_pool) < n_remove_visits:
-        y = random.uniform(0, 1)
-        idx_visit_to_remove = round(pow(y, p) * len(visit_added_costs))
-        visit, _ = visit_added_costs[idx_visit_to_remove]
-        schedule.remove_visit(visit)
-        removed_visits_pool.append(visit)
-        visit_added_costs = update_removal_added_costs(visit_added_costs, visit, schedule)
-    return removed_visits_pool
 
 
 def shaw_removal(schedule, voyage_pool):
