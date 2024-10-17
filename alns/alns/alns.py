@@ -89,6 +89,7 @@ class ALNS:
             _temperature_init = s_0.total_cost
             self._temperature = _temperature_init
             for j in range(self.num_iterations):
+                iteration_start_time = datetime.now()
                 self._temperature = self._temperature * self.cooling_rate
                 s_1 = s.shallow_copy()
                 iteration_start_cost = s_1.total_cost
@@ -101,6 +102,8 @@ class ALNS:
                 pool_empty = repair_operator(inst_pool, s_1)
                 s_1.drop_empty_voyages()
                 s_1.update()
+                operators_cumm_time = timedelta(0)
+                operators_cumm_time += datetime.now() - restoration_start_time
                 self.logger.debug(f"[Restoration] time:{format_td(datetime.now() - restoration_start_time)}, "
                                   f"stage cost change: {s_1.total_cost - iteration_start_cost:0.2f}, "
                                   f"pool empty: {pool_empty}, feasible: {s_1.feasible}")
@@ -112,6 +115,7 @@ class ALNS:
                             operator_start_cost = s_1.total_cost
                             improve_operator_start_time = datetime.now()
                             s_1 = improve_operator(s_1)
+                            operators_cumm_time += datetime.now() - improve_operator_start_time
                             self.logger.debug(f"[Improve] {improve_operator.__name__:30} "
                                               f"time:{format_td(datetime.now() - improve_operator_start_time)}, "
                                               f"cost change: {s_1.total_cost - operator_start_cost:>6.2f}")
@@ -137,7 +141,9 @@ class ALNS:
                     else:
                         s = s_star
                         self.logger.debug(f"Continue with best solution: {s_star.total_cost:0.2f}")
-                    self.logger.debug(f"Iteration {j+1} ends")
+                    iteration_end_time = datetime.now()
+                    self.logger.debug(f"Iteration {j+1} ends, total_time: {format_td(iteration_end_time-iteration_start_time)}," +
+                                      f"added time: {format_td(iteration_end_time - iteration_start_time - operators_cumm_time)}")
             self.logger.info('*'*50)
             self.logger.info('Restart completed, best solution found:')
             self.logger.info(f"Total cost: {s_star.total_cost:0.2f}")
