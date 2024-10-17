@@ -164,7 +164,7 @@ def deep_greedy_relocation(schedule):
     sch = schedule.shallow_copy()
     curr_schedule = schedule.shallow_copy()
 
-    # TODO: Remove comments in this block
+    # TODO: Remove comments in this block or remove comments at allы???
     # 06.09.2024 I guess by removing comments it was meant to remove them with contains
     # I decided that these relocation added costs are not calculated correctly, as in the calculation of insertion
     # added costs some options are elimenated by the spread requirement. So, I decided to recalculate them from scratch

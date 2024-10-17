@@ -46,14 +46,6 @@ class ALNS:
         self._init_algorithm()
 
     def _init_logging(self):
-        # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-        # self.logger = logging.getLogger(__name__)
-        # self.logger.setLevel(logging.INFO)
-        # handler = logging.FileHandler(f"ALNS_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
-        # handler.setLevel(logging.INFO)
-        # formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        # handler.setFormatter(formatter)
-        # self.logger.addHandler(handler)
         logging.basicConfig(
             filename=f"logs/ALNS_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log",
             level=logging.DEBUG,  # Set the desired logging level (e.g., DEBUG, INFO, WARNING, ERROR)
@@ -70,8 +62,8 @@ class ALNS:
             self.improve_operators = [number_of_voyages_reduction, fleet_size_and_cost_reduction,
                                       deep_greedy_relocation, deep_greedy_swap]
             self.improve_operators_sequence = [
-                number_of_voyages_reduction,
-                fleet_size_and_cost_reduction,
+                #number_of_voyages_reduction,
+                #fleet_size_and_cost_reduction,
                 deep_greedy_relocation,
                 fleet_size_and_cost_reduction,
                 deep_greedy_swap_plain,
