@@ -139,3 +139,12 @@ data/
 
 #main
 test1.py
+
+#time tracker
+output.json
+
+# .xlsx
+*.xlsx
+
+# VSCode shit
+.VSCode

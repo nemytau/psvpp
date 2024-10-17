@@ -25,6 +25,7 @@ class Base(Node):
         self.longitude = longitude
         self.latitude = latitude
         self.location = Coord(longitude, latitude)
+        self.adjTW = (8, 8)
 
     def __repr__(self):
         return f'Base : {self.name}, location: {self.location}'
@@ -51,14 +52,30 @@ class Installation(Node):
         self.location = Coord(longitude, latitude)
         self.departure_spread: int = departure_spread
         self.deck_service_speed: float = deck_service_speed
-        self.time_window: list = time_window
         self.service_time: float = self.deck_demand / self.deck_service_speed
+        self.time_window: list = time_window
+        self.adjTW = self.adjust_time_window_for_service(time_window)
         # self.departure_scenarios = self._generate_departure_scenarios()
         # self.departure_days = self.random_departure_scenario()
 
     @classmethod
     def from_df(cls, df):
         pass
+
+    def adjust_time_window_for_service(self, time_window):
+        """
+        Adjusts the time window for offshore installations by subtracting the service time.
+
+        If an installation has a time window ([start_time, end_time]), this method subtracts
+        the provided service time from both the start and end times. If the installation
+        does not have a time window, it remains unchanged.
+        :param time_window:
+        :return:
+        """
+        if time_window[1] == 24:
+            return time_window
+        else:
+            return time_window[0], time_window[1] - self.service_time
 
     def __eq__(self, other):
         return self.name == other.name
@@ -67,9 +84,10 @@ class Installation(Node):
         return self.idx
 
     def __repr__(self):
-        return f'{self.name}, id:{self.idx} freq:{self.visit_frequency}' \
-               f' demand:{self.deck_demand} serv_time:{self.service_time}' \
-               f' TW:{self.time_window}'
+        # return f'{self.name}, id:{self.idx} freq:{self.visit_frequency}' \
+        #        f' demand:{self.deck_demand} serv_time:{self.service_time}' \
+        #        f' TW:{self.time_window}'
+        return f'{self.idx}'
 
     def _generate_departure_scenarios(self, avail_dep_days=range(7)):
         """

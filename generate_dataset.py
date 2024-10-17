@@ -4,7 +4,7 @@ from alns.utils import io
 
 
 def main():
-    gen_param_name = 'SMALL_2'
+    gen_param_name = 'SMALL_1'
     dataset_name = 'test1'
 
     # !!! SAMPLE - for common datasets, DATA - for local

@@ -1,6 +1,7 @@
 from alns.Beans.node import Installation
 from alns.utils import io
 from alns.data_generator import *
+from datetime import timedelta
 
 
 def daily_visits_from_departure_scenarios(installations: list[Installation], period_length=7):
@@ -19,15 +20,16 @@ def daily_visits_from_departure_scenarios(installations: list[Installation], per
     return visits
 
 
-def generate_data(gen_param_name, dataset_name, base_name='FMO', source=io.IOSource.DATA):
+def generate_data(gen_param_name, dataset_name, base_name='FMO', source=io.IOSource.DATA, save=True):
     insts = generate_installation_dataset(gen_param_name)
     vessels = generate_vessels_dataset(gen_param_name)
     base = generate_base(base_name)
 
-    io.dump_dataset(insts, gen_param_name, dataset_name, io.DSType.INSTALLATIONS, source=source)
-    io.dump_dataset(vessels, gen_param_name, dataset_name, io.DSType.VESSELS, source=source)
-    io.dump_dataset(base, gen_param_name, dataset_name, io.DSType.BASE, source=source)
-
+    if save:
+        io.dump_dataset(insts, gen_param_name, dataset_name, io.DSType.INSTALLATIONS, source=source)
+        io.dump_dataset(vessels, gen_param_name, dataset_name, io.DSType.VESSELS, source=source)
+        io.dump_dataset(base, gen_param_name, dataset_name, io.DSType.BASE, source=source)
+    return insts, vessels, base
 
 def load_data(gen_param_name, dataset_name, source=io.IOSource.DATA):
     insts = io.load_dataset(gen_param_name, dataset_name, io.DSType.INSTALLATIONS, source=source)
@@ -37,6 +39,15 @@ def load_data(gen_param_name, dataset_name, source=io.IOSource.DATA):
 
 
 def load_solution(gen_param_name, dataset_name, sol_idx=0, source=io.IOSource.DATA):
+    """
+
+    :param gen_param_name:
+    :param dataset_name:
+    :param sol_idx:
+    :param source:
+    :return:
+    :rtype: Schedule
+    """
     solution = io.load_dataset(gen_param_name, dataset_name, io.DSType.SOLUTION, sol_idx=sol_idx, source=source)
     return solution
 
@@ -44,3 +55,8 @@ def load_solution(gen_param_name, dataset_name, sol_idx=0, source=io.IOSource.DA
 def dump_solution(solution, gen_param_name, dataset_name, sol_idx=None, source=io.IOSource.DATA):
     dump_path = io.dump_dataset(solution, gen_param_name, dataset_name, io.DSType.SOLUTION, sol_idx=sol_idx, source=source)
     print(f'Solution saved at {dump_path}')
+
+def format_td(td: timedelta) -> str:
+    total_seconds = int(td.total_seconds())
+    milliseconds = td.microseconds // 1000
+    return f"{total_seconds:>2}.{milliseconds:<3} s"
