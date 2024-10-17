@@ -145,3 +145,6 @@ output.json
 
 # .xlsx
 *.xlsx
+
+# VSCode shit
+.VSCode
