@@ -8,7 +8,7 @@
             "name": "Run ALNS",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/main.py",
+            "program": "${workspaceFolder}/rust_main.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "python": "/Users/timothy/opt/miniconda3/envs/py39/bin/python",
