@@ -5,6 +5,8 @@ from alns.Beans.node import Installation, Base
 from alns.Beans.vessel import Vessel
 
 
+NO_TIME_WINDOW = '0, 24'
+
 def generate_installation_dataframe(inst_sample_name):
     sample_config = generation_yaml_config['inst_generation_params'][inst_sample_name]
     inst_df_list = []
@@ -31,7 +33,7 @@ def generate_installation_dataframe(inst_sample_name):
         df['latitude'] = coords[inst_type_indices, 1]
         df['departure_spread'] = inst_type_config['departure_spread']
         df['deck_service_speed'] = inst_type_config['deck_service_speed']
-        df['time_window'] = '0, 24'
+        df['time_window'] = NO_TIME_WINDOW
         df.loc[df.sample(inst_type_config['time_windows']).index,
                'time_window'] = inst_type_config['default_time_window']
         df['time_window'] = df['time_window'].str.split(',').map(tuple)
