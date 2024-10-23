@@ -66,6 +66,24 @@ pub struct Node {
     pub time_window: TimeWindow, // Time window for visiting the node
 }
 
+impl Node {
+    pub fn new(
+        id: u32,
+        name: String,
+        location: Location,
+        service_time: f64,
+        time_window: TimeWindow,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            location,
+            service_time,
+            time_window,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Installation {
     pub node: Node,               // Base node properties
@@ -97,20 +115,21 @@ impl Installation {
     }
 }
 
-impl Node {
+#[derive(Debug, Clone, Deserialize)]
+pub struct Base {
+    pub node: Node,  // Base just holds a Node for now
+}
+
+impl Base {
     pub fn new(
-        id: u32,
+        idx: u32,
         name: String,
         location: Location,
         service_time: f64,
         time_window: TimeWindow,
     ) -> Self {
         Self {
-            id,
-            name,
-            location,
-            service_time,
-            time_window,
+            node: Node::new(idx, name, location, service_time, time_window),
         }
     }
 }

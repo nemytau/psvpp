@@ -2,12 +2,12 @@ use std::error::Error;
 use std::fs::File;
 use csv::ReaderBuilder;
 use serde::Deserialize;
-use crate::structs::node::{Installation, Location, TimeWindow};
-use crate::structs::vessel::Vessel;
+use crate::structs::node::{Installation, Location, TimeWindow, Base};
 use std::str::FromStr;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Deserialize)]
-struct InstallationCSV {
+pub struct InstallationCSV {
     idx: u32,
     name: String,
     inst_type: String,
@@ -21,6 +21,27 @@ struct InstallationCSV {
     #[serde(deserialize_with = "parse_time_window")]
     time_window: (u32, u32),  // Parsed as tuple from "(start, end)"
     service_time: f64,  // Changed to f64 to handle the decimal values
+}
+
+impl InstallationCSV {
+    // Convert InstallationCSV to Installation object
+    pub fn to_installation(self) -> Installation {
+        let location = Location::new(self.location.0, self.location.1);
+        let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
+            .expect("Invalid time window");  // Handle error or use unwrap()
+        
+        Installation::new(
+            self.idx,
+            self.name,
+            location,
+            self.service_time, 
+            time_window,
+            self.deck_demand as f64,
+            self.visit_frequency,
+            self.inst_type,
+            self.departure_spread,
+        )
+    }
 }
 
 // Custom deserializer for the location field
@@ -61,53 +82,49 @@ where
     Ok((start, end))
 }
 
-impl InstallationCSV {
-    // Convert InstallationCSV to Installation object
-    fn to_installation(self) -> Installation {
-        let location = Location::new(self.location.0, self.location.1);
-        let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
-            .expect("Invalid time window");  // Handle error or use unwrap()
-        
-        Installation::new(
-            self.idx,
-            self.name,
-            location,
-            self.service_time, 
-            time_window,
-            self.deck_demand as f64,
-            self.visit_frequency,
-            self.inst_type,
-            self.departure_spread,
-        )
-    }
-}
-
-pub fn read_installations_from_csv(file_path: &str) -> Result<Vec<Installation>, Box<dyn Error>> {
-    let file = File::open(file_path)?;
-    let mut rdr = ReaderBuilder::new()
-        .delimiter(b',')  // Set the delimiter (optional)
-        .from_reader(file);
-
-    let mut installations = Vec::new();
-    for result in rdr.deserialize() {
-        let record: InstallationCSV = result?;
-        installations.push(record.to_installation());
-    }
-
-    Ok(installations)
-}
-
-pub fn read_vessels_from_csv(file_path: &str) -> Result<Vec<Vessel>, Box<dyn Error>> {
+pub fn read_from_csv<T>(file_path: &str) -> Result<Vec<T>, Box<dyn Error>>
+where
+    T: DeserializeOwned,
+{
     let file = File::open(file_path)?;
     let mut rdr = ReaderBuilder::new()
         .delimiter(b',')
         .from_reader(file);
 
-    let mut vessels = Vec::new();
+    let mut records = Vec::new();
     for result in rdr.deserialize() {
-        let vessel: Vessel = result?;
-        vessels.push(vessel);
+        let record: T = result?;
+        records.push(record);
     }
 
-    Ok(vessels)
+    Ok(records)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BaseCSV {
+    name: String,
+    idx: u32,
+    service_time: f64,
+    #[serde(deserialize_with = "parse_time_window")]
+    time_window: (u32, u32),
+    longitude: f64,
+    latitude: f64,
+}
+
+impl BaseCSV {
+    // Method to convert BaseCSV to Base
+    pub fn to_base(self) -> Base {
+        let location = Location::new(self.latitude, self.longitude);
+        let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
+            .expect("Invalid time window");
+
+        Base::new(
+            self.idx,
+            self.name,
+            location,
+            self.service_time,
+            time_window,
+        )
+
+    }
 }
