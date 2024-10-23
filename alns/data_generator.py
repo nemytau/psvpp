@@ -78,8 +78,7 @@ def generate_vessels_dataframe(vessel_sample_name):
     total_vessel_num = sum([conf['num'] for conf in sample_config])
     for i, vessel_type_config in enumerate(sample_config):
         df = pd.DataFrame(index=range(vessel_type_config['num']))
-        df['name'] = df.index
-        df['idx'] = df.index.astype(int)
+        df['name'] = df.index # Placeholder for vessel name, not important
         df['vessel_type'] = vessel_type_config['type']
         df['speed'] = vessel_type_config['speed']
         df['fcs'] = vessel_type_config['fcs']
@@ -88,7 +87,13 @@ def generate_vessels_dataframe(vessel_sample_name):
         df['bulk_capacity'] = vessel_type_config['bulk_capacity']
         df['cost'] = vessel_type_config['cost']
         vessel_df_list.append(df)
-    return pd.concat(vessel_df_list).reset_index(drop=True)
+    # Concatenate all DataFrames and reset index
+    vessel_dataframe = pd.concat(vessel_df_list).reset_index(drop=True)
+    
+    # Add 'idx' column with range from 0 to the number of vessels
+    vessel_dataframe['idx'] = range(len(vessel_dataframe))
+    
+    return vessel_dataframe
 
 
 def generate_vessels_dataset(vessel_gen_params_name):

@@ -1,6 +1,7 @@
 class Vessel:
 
     def __init__(self,
+                 idx: int,
                  name: str,
                  idx: int,
                  deck_capacity: int,
@@ -11,6 +12,7 @@ class Vessel:
                  fcw: float,
                  cost: int,
                  ) -> None:
+        self.idx = idx
         self.name = name
         self.idx = idx
         self.deck_capacity = deck_capacity
@@ -24,6 +26,7 @@ class Vessel:
     @classmethod
     def default_charter_vessel(cls, n):
         return cls(
+            idx=n,
             name=f'v{n}',
             deck_capacity=100,
             bulk_capacity=1000,
