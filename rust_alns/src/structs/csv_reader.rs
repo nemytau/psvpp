@@ -3,6 +3,7 @@ use std::fs::File;
 use csv::ReaderBuilder;
 use serde::Deserialize;
 use crate::structs::node::{Installation, Location, TimeWindow};
+use crate::structs::vessel::Vessel;
 use std::str::FromStr;
 
 #[derive(Debug, Deserialize)]
@@ -94,4 +95,19 @@ pub fn read_installations_from_csv(file_path: &str) -> Result<Vec<Installation>,
     }
 
     Ok(installations)
+}
+
+pub fn read_vessels_from_csv(file_path: &str) -> Result<Vec<Vessel>, Box<dyn Error>> {
+    let file = File::open(file_path)?;
+    let mut rdr = ReaderBuilder::new()
+        .delimiter(b',')
+        .from_reader(file);
+
+    let mut vessels = Vec::new();
+    for result in rdr.deserialize() {
+        let vessel: Vessel = result?;
+        vessels.push(vessel);
+    }
+
+    Ok(vessels)
 }
