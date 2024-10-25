@@ -299,45 +299,45 @@ class Voyage:
                     'action': stage['action'],
                     'description': stage['description']}
 
-        stages = []
-        current_time = self.start_time - self.base.service_time
-        edges = self.make_edges(self.route)
-        for i, edge in enumerate(edges):
-            service_i = {'start_time': current_time,
-                         'end_time': current_time + edge[0].service_time,
-                         'action': 'Service'if edge[0].idx != 0 else 'Service at base',
-                         'description': f'{edge[0].idx}'}
-            current_time = service_i['end_time']
-            sailing_ij = {'start_time': current_time,
-                          'end_time': current_time + self.distance_manager.distance(edge[0].name,
-                                                                                    edge[1].name) / self.vessel.speed,
-                          'action': 'Sailing',
-                          'description': f'{edge[0].idx}-{edge[1].idx}'}
-            current_time = sailing_ij['end_time']
-            arrival_time = current_time % HOURS
-            arrival_day = current_time // HOURS
-            if arrival_time < edge[1].adjTW[0]:
-                end_wait_time = arrival_day * HOURS + edge[1].adjTW[0]
-            elif arrival_time > edge[1].adjTW[1]:
-                end_wait_time = (arrival_day + 1) * HOURS + edge[1].adjTW[0]
-            else:
-                end_wait_time = np.nan
-            waiting_j = {'start_time': current_time,
-                         'end_time': end_wait_time,
-                         'action': 'Waiting' if edge[1].idx != 0 else 'Waiting at base',
-                         'description': f'{edge[1].idx}'} if not np.isnan(end_wait_time) else None
-            current_time = end_wait_time if not np.isnan(end_wait_time) else current_time
-            stages.extend([service_i, sailing_ij, waiting_j])
-        stages = [stage for stage in stages if stage is not None]
-        stages_splitted = []
-        for stage in stages:
-            if (stage['start_time'] < PERIOD_LENGTH) & (stage['end_time'] > PERIOD_LENGTH):
-                stages_splitted.extend(split_stage_crossing_horizon(stage))
-            else:
-                stages_splitted.append(stage)
-        stages = stages_splitted
-        stages = [offset_stage_out_of_horizon(stage) if stage['start_time'] > PERIOD_LENGTH else stage for stage in
-                  stages]
-        stages_df = pd.DataFrame(stages)
-        stages_df['Vessel'] = str(self.vessel.name)
-        return stages_df
+            stages = []
+            current_time = self.start_time - self.base.service_time
+            edges = self.make_edges(self.route)
+            for i, edge in enumerate(edges):
+                service_i = {'start_time': current_time,
+                            'end_time': current_time + edge[0].service_time,
+                            'action': 'Service'if edge[0].idx != 0 else 'Service at base',
+                            'description': f'{edge[0].idx}'}
+                current_time = service_i['end_time']
+                sailing_ij = {'start_time': current_time,
+                            'end_time': current_time + self.distance_manager.distance(edge[0].name,
+                                                                                        edge[1].name) / self.vessel.speed,
+                            'action': 'Sailing',
+                            'description': f'{edge[0].idx}-{edge[1].idx}'}
+                current_time = sailing_ij['end_time']
+                arrival_time = current_time % HOURS
+                arrival_day = current_time // HOURS
+                if arrival_time < edge[1].adjTW[0]:
+                    end_wait_time = arrival_day * HOURS + edge[1].adjTW[0]
+                elif arrival_time > edge[1].adjTW[1]:
+                    end_wait_time = (arrival_day + 1) * HOURS + edge[1].adjTW[0]
+                else:
+                    end_wait_time = np.nan
+                waiting_j = {'start_time': current_time,
+                            'end_time': end_wait_time,
+                            'action': 'Waiting' if edge[1].idx != 0 else 'Waiting at base',
+                            'description': f'{edge[1].idx}'} if not np.isnan(end_wait_time) else None
+                current_time = end_wait_time if not np.isnan(end_wait_time) else current_time
+                stages.extend([service_i, sailing_ij, waiting_j])
+            stages = [stage for stage in stages if stage is not None]
+            stages_splitted = []
+            for stage in stages:
+                if (stage['start_time'] < PERIOD_LENGTH) & (stage['end_time'] > PERIOD_LENGTH):
+                    stages_splitted.extend(split_stage_crossing_horizon(stage))
+                else:
+                    stages_splitted.append(stage)
+            stages = stages_splitted
+            stages = [offset_stage_out_of_horizon(stage) if stage['start_time'] > PERIOD_LENGTH else stage for stage in
+                    stages]
+            stages_df = pd.DataFrame(stages)
+            stages_df['Vessel'] = str(self.vessel.name)
+            return stages_df
