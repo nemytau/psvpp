@@ -36,7 +36,7 @@ impl InstallationCSV {
             location,
             self.service_time, 
             time_window,
-            self.deck_demand as f64,
+            self.deck_demand as u32,
             self.visit_frequency,
             self.inst_type,
             self.departure_spread,

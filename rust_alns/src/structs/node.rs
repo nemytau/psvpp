@@ -59,7 +59,7 @@ impl Location {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Node {
-    pub id: u32,
+    pub idx: u32,
     pub name: String,
     pub location: Location,
     pub service_time: f64,       // Service time in minutes
@@ -68,14 +68,14 @@ pub struct Node {
 
 impl Node {
     pub fn new(
-        id: u32,
+        idx: u32,
         name: String,
         location: Location,
         service_time: f64,
         time_window: TimeWindow,
     ) -> Self {
         Self {
-            id,
+            idx,
             name,
             location,
             service_time,
@@ -87,7 +87,7 @@ impl Node {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Installation {
     pub node: Node,               // Base node properties
-    pub demand: f64,              // Demand of the installation (e.g., volume of goods)
+    pub deck_demand: u32,              // Demand of the installation (e.g., volume of goods)
     pub visit_frequency: u32,     // Number of visits required in a given period
     pub installation_type: String, // Type of installation (e.g., "Oil Rig", "Warehouse")
     pub departure_spread: u32,    // Spread of departure times for the installation
@@ -95,19 +95,19 @@ pub struct Installation {
 
 impl Installation {
     pub fn new(
-        id: u32,
+        idx: u32,
         name: String,
         location: Location,
         service_time: f64,
         time_window: TimeWindow,
-        demand: f64,
+        deck_demand: u32,
         visit_frequency: u32,
         installation_type: String,
         departure_spread: u32,
     ) -> Self {
         Self {
-            node: Node::new(id, name, location, service_time, time_window),
-            demand,
+            node: Node::new(idx, name, location, service_time, time_window),
+            deck_demand,
             visit_frequency,
             installation_type,
             departure_spread,
