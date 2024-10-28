@@ -7,7 +7,6 @@ use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, R
 #[derive(Debug, Clone)]
 pub struct Visit {
     installation: Rc<Installation>, // Shared, immutable reference to the installation
-    pub is_assigned: bool,           // Indicates if the visit is fully scheduled
 }
 
 impl Visit {
@@ -15,7 +14,6 @@ impl Visit {
     pub fn new(installation: Rc<Installation>) -> Self {
         Visit {
             installation,
-            is_assigned: false,
         }
     }
 
