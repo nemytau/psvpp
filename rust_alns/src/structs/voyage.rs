@@ -3,20 +3,19 @@ use crate::structs::distance_manager::DistanceManager;
 use crate::structs::visit::Visit;
 use crate::structs::vessel::Vessel;
 use std::rc::Rc;
-use std::cell::RefCell;
 use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
 
 #[derive(Debug, Clone)]
 pub struct Voyage {
-    vessel: Option<Rc<Vessel>>,           // Vessel assigned to this voyage, if any
-    start_time: Option<u32>,              // Start time in hours, if assigned
-    start_day: Option<u32>,               // Start day, if assigned
-    deck_load: u32,                       // Current deck load, should not exceed vessel's capacity
-    end_time: Option<u32>,                // End time in hours, if start_time and vessel are assigned
+    vessel: Option<Rc<Vessel>>,            // Vessel assigned to this voyage, if any
+    start_time: Option<u32>,               // Start time in hours, if assigned
+    start_day: Option<u32>,                // Start day, if assigned
+    deck_load: u32,                        // Current deck load, should not exceed vessel's capacity
+    end_time: Option<u32>,                 // End time in hours, if start_time and vessel are assigned
     distance_manager: Rc<DistanceManager>, // Shared pointer to distance manager
-    base: Rc<Base>,                       // Shared pointer to the base
-    route: Vec<Rc<RefCell<Visit>>>,       // Sequence of visits as references
-    is_scheduled: bool,                   // Indicates if the voyage is complete and scheduled
+    base: Rc<Base>,                        // Shared pointer to the base
+    route: Vec<Visit>,                     // Sequence of owned visits
+    is_scheduled: bool,                    // Indicates if the voyage is complete and scheduled
 }
 
 impl Voyage {
@@ -50,31 +49,14 @@ impl Voyage {
     /// Calculates and updates the start time based on `start_day` and `REL_DEPARTURE_TIME`.
     fn update_start_time(&mut self) {
         if let Some(day) = self.start_day {
-            self.start_time = Some(day * 24 + REL_DEPARTURE_TIME);
+            self.start_time = Some(day * HOURS_IN_DAY + REL_DEPARTURE_TIME);
             self.update_scheduled_status();
         }
     }
 
-    /// Adds a reference to a visit to the route and updates deck load.
-    pub fn add_visit(&mut self, visit: Rc<RefCell<Visit>>) -> Result<(), String> {
-        // Ensure vessel's capacity won't be exceeded
-        if let Some(ref vessel) = self.vessel {
-            let new_load = self.deck_load + visit.borrow().deck_demand();
-            if new_load > vessel.deck_capacity {
-                return Err("Adding this visit would exceed vessel's deck capacity.".to_string());
-            }
-            self.deck_load = new_load;
-        }
-    
-    
-        // Add the visit to the route
-        self.route.push(visit);
-        Ok(())
-    }
-
     /// Marks the voyage as scheduled if it has a vessel, start time, and start day.
     fn update_scheduled_status(&mut self) {
-        self.is_scheduled = self.vessel.is_some() && self.start_time.is_some() && self.start_day.is_some();
+        self.is_scheduled = self.vessel.is_some() && self.start_time.is_some() && self.start_day.is_some() && !self.route.is_empty();
     }
 
     /// Returns the current deck load.
@@ -95,5 +77,10 @@ impl Voyage {
     /// Returns the end time, if calculated.
     pub fn get_end_time(&self) -> Option<u32> {
         self.end_time
+    }
+
+    /// Returns the current route of visits.
+    pub fn get_route(&self) -> &Vec<Visit> {
+        &self.route
     }
 }
