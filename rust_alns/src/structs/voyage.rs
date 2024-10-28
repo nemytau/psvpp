@@ -64,15 +64,8 @@ impl Voyage {
                 return Err("Adding this visit would exceed vessel's deck capacity.".to_string());
             }
             self.deck_load = new_load;
-    
-            // Update visit's vessel assignment (use borrow_mut directly on visit)
-            visit.borrow_mut().assign_vessel(vessel.idx);
         }
     
-        // Update visit's departure day if Voyage has a start_day set
-        if let Some(start_day) = self.start_day {
-            visit.borrow_mut().set_departure_day(start_day);
-        }
     
         // Add the visit to the route
         self.route.push(visit);
