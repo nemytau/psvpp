@@ -7,3 +7,5 @@ pub mod distance_manager;
 pub mod voyage;
 pub mod visit;
 pub mod constants;
+pub mod schedule;
+pub mod transaction;
