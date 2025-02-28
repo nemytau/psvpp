@@ -7,7 +7,7 @@ This project implements an Adaptive Large Neighborhood Search (ALNS) algorithm f
 ## Features
 
 - **ALNS Implementation**: Core heuristic search for optimizing vessel routing.
-- **Reinforcement Learning (RL) Enhancement**: Improves ALNS adaptability using Q-learning and SARSA.
+- **Reinforcement Learning (RL) Enhancement**: Improves ALNS adaptability using RL.
 - **Rust Integration**: Optimized performance for ALNS operators.
 - **Configurable Inputs**: Flexible data input format for vessels, installations, and bases.
 - **Logging and Visualization**: Tracks execution and performance metrics.
