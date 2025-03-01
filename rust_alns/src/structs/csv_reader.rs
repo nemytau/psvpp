@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fs::File;
 use csv::ReaderBuilder;
 use serde::Deserialize;
-use crate::structs::node::{Installation, Location, TimeWindow, Base};
+use crate::structs::node::{Installation, Location, TimeWindow, Base, InstallationBuilder, BaseBuilder};
 use std::str::FromStr;
 use serde::de::DeserializeOwned;
 
@@ -25,23 +25,24 @@ pub struct InstallationCSV {
 
 impl InstallationCSV {
     // Convert InstallationCSV to Installation object
-    pub fn to_installation(self) -> Installation {
+    pub fn to_installation(self) -> Result<Installation, &'static str> {
         let location = Location::new(self.location.0, self.location.1);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");  // Handle error or use unwrap()
         
-        Installation::new(
-            self.idx,
-            self.name,
-            location,
-            self.service_time, 
-            time_window,
-            self.deck_demand as u32,
-            self.visit_frequency,
-            self.inst_type,
-            self.departure_spread,
-        )
-    }
+        let installation = Installation::builder() 
+            .idx(self.idx)
+            .name(self.name)
+            .location(location)
+            .service_time(self.service_time)
+            .time_window(time_window)
+            .deck_demand(self.deck_demand as u32)
+            .visit_frequency(self.visit_frequency)
+            .installation_type(self.inst_type)
+            .departure_spread(self.departure_spread)
+            .build()?;
+        Ok(installation)
+        }
 }
 
 // Custom deserializer for the location field
@@ -113,18 +114,20 @@ pub struct BaseCSV {
 
 impl BaseCSV {
     // Method to convert BaseCSV to Base
-    pub fn to_base(self) -> Base {
+    pub fn to_base(self) -> Result<Base, &'static str> {
         let location = Location::new(self.latitude, self.longitude);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");
 
-        Base::new(
-            self.idx,
-            self.name,
-            location,
-            self.service_time,
-            time_window,
-        )
+        let base = Base::builder()
+            .name(self.name)
+            .idx(self.idx)
+            .service_time(self.service_time)
+            .location(location)
+            .time_window(time_window)
+            .build()?;
+        
+        Ok(base)
 
     }
 }

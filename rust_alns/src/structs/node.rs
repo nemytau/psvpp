@@ -138,6 +138,94 @@ impl InstallationBuilder {
 
     pub fn deck_demand(mut self, deck_demand: u32) -> Self {
         self.deck_demand = deck_demand;
+        self
+    }
+
+    pub fn visit_frequency(mut self, visit_frequency: u32) -> Self {
+        self.visit_frequency = visit_frequency;
+        self
+    }
+
+    pub fn installation_type(mut self, installation_type: String) -> Self {
+        self.installation_type = installation_type;
+        self
+    }
+
+    pub fn departure_spread(mut self, departure_spread: u32) -> Self {
+        self.departure_spread = departure_spread;
+        self
+    }
+
+    pub fn service_time(mut self, service_time: f64) -> Self {
+        self.service_time = service_time;
+        self
+    }
+
+    pub fn time_window(mut self, time_window: TimeWindow) -> Self {
+        self.time_window = time_window;
+        self
+    }
+
+    pub fn build(self) -> Result<Installation, &'static str> {
+        Ok(Installation {
+            node: Node::new(self.idx, self.name, self.location),
+            deck_demand: self.deck_demand,
+            visit_frequency: self.visit_frequency,
+            installation_type: self.installation_type,
+            departure_spread: self.departure_spread,
+            service_time: self.service_time,
+            time_window: self.time_window,
+        })
+    }
+}
+
+impl HasLocation for Installation {
+    fn get_location(&self) -> &Location {
+        &self.node.location
+    }
+}
+
+impl HasTimeWindow for Installation {
+    fn get_time_window(&self) -> &TimeWindow {
+        &self.time_window
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Base {
+    pub node: Node,
+    pub service_time: f64,
+    pub time_window: TimeWindow,
+}
+
+impl Base {
+    pub fn new(
+        idx: u32,
+        name: String,
+        location: Location,
+        service_time: f64,
+        time_window: TimeWindow,
+    ) -> Self {
+        Self {
+            node: Node::new(idx, name, location),
+            service_time,
+            time_window,
+        }
+    }
+}
+
+impl HasLocation for Base {
+    fn get_location(&self) -> &Location {
+        &self.node.location
+    }
+}
+
+impl HasTimeWindow for Base {
+    fn get_time_window(&self) -> &TimeWindow {
+        &self.time_window
+    }
+}
+
 impl Base {
     pub fn builder() -> BaseBuilder {
         BaseBuilder::default()
@@ -189,77 +277,5 @@ impl BaseBuilder {
             service_time: self.service_time.ok_or("service_time is required")?,
             time_window: self.time_window.ok_or("time_window is required")?,
         })
-    }
-}
-        self
-    }
-
-    pub fn service_time(mut self, service_time: f64) -> Self {
-        self.service_time = service_time;
-        self
-    }
-
-    pub fn time_window(mut self, time_window: TimeWindow) -> Self {
-        self.time_window = time_window;
-        self
-    }
-
-    pub fn build(self) -> Installation {
-        Installation {
-            node: Node::new(self.idx, self.name, self.location),
-            deck_demand: self.deck_demand,
-            visit_frequency: self.visit_frequency,
-            installation_type: self.installation_type,
-            departure_spread: self.departure_spread,
-            service_time: self.service_time,
-            time_window: self.time_window,
-        }
-    }
-}
-
-impl HasLocation for Installation {
-    fn get_location(&self) -> &Location {
-        &self.node.location
-    }
-}
-
-impl HasTimeWindow for Installation {
-    fn get_time_window(&self) -> &TimeWindow {
-        &self.time_window
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Base {
-    pub node: Node,
-    pub service_time: f64,
-    pub time_window: TimeWindow,
-}
-
-impl Base {
-    pub fn new(
-        idx: u32,
-        name: String,
-        location: Location,
-        service_time: f64,
-        time_window: TimeWindow,
-    ) -> Self {
-        Self {
-            node: Node::new(idx, name, location),
-            service_time,
-            time_window,
-        }
-    }
-}
-
-impl HasLocation for Base {
-    fn get_location(&self) -> &Location {
-        &self.node.location
-    }
-}
-
-impl HasTimeWindow for Base {
-    fn get_time_window(&self) -> &TimeWindow {
-        &self.time_window
     }
 }
