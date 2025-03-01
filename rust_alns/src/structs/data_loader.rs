@@ -16,7 +16,7 @@ pub fn load_installations(file_path: &str) -> Result<Vec<Installation>, Box<dyn 
     let installations = installation_csvs
         .into_iter()
         .map(|record| record.to_installation())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(installations)
 }
@@ -33,7 +33,7 @@ pub fn load_base(file_path: &str) -> Result<Base, Box<dyn Error>> {
     let base_csv = base_csvs.into_iter().next().ok_or("Empty CSV")?;
 
     // Use the to_base method to convert BaseCSV to Base
-    Ok(base_csv.to_base())
+    base_csv.to_base().map_err(|e| e.into())
 }
 
 // Load all data together
