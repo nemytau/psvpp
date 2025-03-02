@@ -1,7 +1,6 @@
 // distance_manager.rs
 
 use std::f64::consts::PI;
-use crate::structs::node::Node;
 
 use super::node::HasLocation;
 
@@ -24,6 +23,7 @@ fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 #[derive(Debug, Clone)]
 pub struct DistanceManager {
+    // For 2x faster access, store distance in Box<[[f64; MAX]; MAX]> instead of Vec<Vec<f64>>
     distances: Vec<Vec<f64>>, // 2D matrix to store distances in nautical miles
 }
 
@@ -38,7 +38,7 @@ impl DistanceManager {
     pub fn calculate_distances(&mut self, base: &dyn HasLocation, installations: &[&dyn HasLocation]) {
         let num_nodes = installations.len() + 1;
         let mut nodes = Vec::with_capacity(num_nodes);
-        nodes.push(base.clone());
+        nodes.push(base);
         nodes.extend_from_slice(installations);
 
         for i in 0..num_nodes {
@@ -60,5 +60,10 @@ impl DistanceManager {
     // Retrieves the distance between two nodes by their IDs
     pub fn distance(&self, from: usize, to: usize) -> f64 {
         self.distances[from][to]
+    }
+
+    // Retrieves the distance matrix
+    pub fn get_distances(&self) -> &Vec<Vec<f64>> {
+        &self.distances
     }
 }

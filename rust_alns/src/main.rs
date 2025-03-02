@@ -1,5 +1,9 @@
 mod structs;
+mod utils;
 use structs::data_loader;
+use structs::distance_manager::DistanceManager;
+use structs::node::HasLocation;
+use utils::tsp_solver::TSPSolver;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Define the file paths
@@ -24,5 +28,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nBase:");
     println!("{:?}", data.base);
 
+    let mut dm = DistanceManager::new(data.installations.len() + 1);
+    let installations: Vec<&dyn HasLocation> = data.installations.iter().map(|i| i as &dyn HasLocation).collect();
+    dm.calculate_distances(&data.base, &installations);
+    
+    // Test TSP solver on route nodes : 1, 2, 3
+    println!("\nTesting TSP solver:");
+    
+    // Create time windows and service times for each node
+    // For simplicity, let's use: 
+    // - Depot (0): No time window constraint, 0 service time
+    // - Node 1: Time window (8, 16), 2 hrs service time
+    // - Node 2: Time window (10, 18), 3 hrs service time  
+    // - Node 3: Time window (8, 14), 1 hr service time
+    let time_windows = vec![
+        (0.0, 24.0),   // Depot - always open
+        (8.0, 16.0),   // Node 1
+        (10.0, 18.0),  // Node 2
+        (8.0, 14.0),   // Node 3
+    ];
+    
+    let service_times = vec![
+        0.0,  // Depot
+        2.0,  // Node 1
+        3.0,  // Node 2
+        1.0,  // Node 3
+    ];
+    
+    // Create TSP solver with distance matrix from distance manager
+    let tsp_solver = TSPSolver::new(dm.get_distances(), time_windows, service_times);
+    
+    // Solve TSP for nodes 1, 2, 3 with default vessel speed and start time
+    let node_ids = vec![1, 2, 3];
+    let (best_route, total_duration) = tsp_solver.solve_tsp_full_enumeration(node_ids, None, None);
+    
+    println!("Best route: {:?}", best_route);
+    println!("Total voyage duration: {:.2} hours", total_duration);
+    
+    // Display detailed analysis of the best route
+    println!("\nDetailed route analysis:");
+    let analysis = tsp_solver.analyze_route(&best_route, None, None);
+    println!("{}", analysis);
+    
     Ok(())
 }

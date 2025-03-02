@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fs::File;
 use csv::ReaderBuilder;
 use serde::Deserialize;
-use crate::structs::node::{Installation, Location, TimeWindow, Base, InstallationBuilder, BaseBuilder};
+use crate::structs::node::{Installation, Location, TimeWindow, Base};
 use std::str::FromStr;
 use serde::de::DeserializeOwned;
 

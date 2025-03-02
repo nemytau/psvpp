@@ -29,32 +29,21 @@ pub enum Transaction {
         new_vessel_id: Option<u32>,
     },
 }
-
 impl Transaction {
     /// Revert the transaction.
     pub fn revert(self, schedule: &mut Schedule) {
         match self {
             Transaction::RemoveVisitFromVoyage { visit_id, voyage_id } => {
-                if let Some(visit) = schedule.get_visit_by_id(visit_id) {
-                    schedule.add_visit_to_voyage(voyage_id, visit);
-                }
+                // Placeholder for removing a visit from a voyage
             },
             Transaction::AddVisitToVoyage { visit_id, voyage_id } => {
-                schedule.remove_visit_from_voyage(voyage_id, visit_id);
+                // Placeholder for adding a visit to a voyage
             },
             Transaction::ChangeRouteSequence { voyage_id, old_sequence, .. } => {
-                if let Some(voyage) = schedule.get_voyage_mut(voyage_id) {
-                    voyage.set_route_from_ids(&old_sequence, schedule);
-                }
+                // Placeholder for changing the route sequence within a voyage
             },
             Transaction::AssignVesselToVoyage { voyage_id, old_vessel_id, .. } => {
-                if let Some(voyage) = schedule.get_voyage_mut(voyage_id) {
-                    if let Some(old_vessel) = old_vessel_id.and_then(|id| schedule.get_vessel_by_id(id)) {
-                        voyage.set_vessel(Some(old_vessel));
-                    } else {
-                        voyage.set_vessel(None);
-                    }
-                }
+                // Placeholder for assigning a new vessel to a voyage
             },
         }
     }

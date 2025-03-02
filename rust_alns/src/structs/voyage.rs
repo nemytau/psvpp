@@ -4,6 +4,7 @@ use crate::structs::visit::Visit;
 use crate::structs::vessel::Vessel;
 use std::rc::Rc;
 use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
+use std::clone::Clone;
 
 #[derive(Debug, Clone)]
 pub struct Voyage {
@@ -12,15 +13,15 @@ pub struct Voyage {
     start_day: Option<u32>,                // Start day, if assigned
     deck_load: u32,                        // Current deck load, should not exceed vessel's capacity
     end_time: Option<u32>,                 // End time in hours, if start_time and vessel are assigned
-    distance_manager: Rc<DistanceManager>, // Shared pointer to distance manager
-    base: Rc<Base>,                        // Shared pointer to the base
+    distance_manager: DistanceManager,     // Distance manager instance
+    base: Base,                            // Regular Base instance
     route: Vec<Visit>,                     // Sequence of owned visits
     is_scheduled: bool,                    // Indicates if the voyage is complete and scheduled
 }
 
 impl Voyage {
     /// Creates a new `Voyage` instance with references to the base and distance manager.
-    pub fn new(distance_manager: Rc<DistanceManager>, base: Rc<Base>) -> Self {
+    pub fn new(distance_manager: DistanceManager, base: Base) -> Self {
         Voyage {
             vessel: None,
             start_time: None,
@@ -59,6 +60,11 @@ impl Voyage {
         self.is_scheduled = self.vessel.is_some() && self.start_time.is_some() && self.start_day.is_some() && !self.route.is_empty();
     }
 
+    /// Adds a visit to the route without optimizing sequence or checking load.
+    pub fn add_visit(&mut self, visit: Visit) {
+        self.route.push(visit);
+    }
+
     /// Returns the current deck load.
     pub fn get_deck_load(&self) -> u32 {
         self.deck_load
@@ -82,5 +88,36 @@ impl Voyage {
     /// Returns the current route of visits.
     pub fn get_route(&self) -> &Vec<Visit> {
         &self.route
+    }
+
+    pub fn get_vessel_idx(&self) -> Option<u32> {
+        self.vessel.as_ref().map(|v| v.get_idx())
+    }
+
+    /// Helper function to check if two time intervals overlap.
+    fn times_overlap(start1: u32, end1: u32, start2: u32, end2: u32) -> bool {
+        start1 < end2 && end1 > start2
+    }
+
+    pub fn overlaps_with(&self, other: &Voyage) -> bool {
+        // Check if the voyages have overlapping each other
+        if let (Some(start_time), Some(end_time), Some(other_start_time), Some(other_end_time)) = (self.start_time, self.end_time, other.start_time, other.end_time) {
+            // Original times
+            if Voyage::times_overlap(start_time, end_time, other_start_time, other_end_time) {
+                return true;
+            }
+            // Adjusted by horizon length
+            if Voyage::times_overlap(start_time - HOURS_IN_PERIOD, end_time - HOURS_IN_PERIOD, other_start_time, other_end_time) {
+                return true;
+            }
+            if Voyage::times_overlap(start_time, end_time, other_start_time - HOURS_IN_PERIOD, other_end_time - HOURS_IN_PERIOD) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn optimize_route(&mut self) {
+        // LATER: Implement optimization algorithm
     }
 }

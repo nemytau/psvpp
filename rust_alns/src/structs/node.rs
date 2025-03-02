@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::error::Error;
 use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
 use rand::seq::SliceRandom;
+use rand::Rng;
 use rand::thread_rng;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -29,9 +30,9 @@ impl TimeWindow {
                 return Err(TimeWindowError::InvalidStartTime(s));
             }
         }
-
+        // The inequality is strict because 24:00 is a valid time for the end of the time window in case of a full day service
         if let Some(e) = end {
-            if e >= 24 {
+            if e > 24 {
                 return Err(TimeWindowError::InvalidEndTime(e));
             }
         }
@@ -39,6 +40,7 @@ impl TimeWindow {
         Ok(Self { start, end })
     }
 
+    // I am not sure if I ever need 3 last lines of this function
     pub fn contains(&self, timestamp: u32) -> bool {
         match (self.start, self.end) {
             (Some(start), Some(end)) => timestamp >= start && timestamp < end,
@@ -104,6 +106,15 @@ pub struct Installation {
 impl Installation {
     pub fn builder() -> InstallationBuilder {
         InstallationBuilder::default()
+    }
+
+    pub fn generate_visit_scenario(&self) -> Vec<u32> {
+        // TODO: Implement visit scenario generation
+        // Placeholder implementation: random visit days
+        let mut rng = thread_rng();
+        (0..DAYS_IN_PERIOD)
+            .map(|_| if rng.gen_range(0..100) < self.visit_frequency { 1 } else { 0 })
+            .collect()
     }
 }
 
