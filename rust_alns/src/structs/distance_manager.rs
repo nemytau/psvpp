@@ -3,6 +3,8 @@
 use std::f64::consts::PI;
 use crate::structs::node::Node;
 
+use super::node::HasLocation;
+
 // Constant for Earth’s radius in nautical miles
 const EARTH_RADIUS_NM: f64 = 3440.0; // nautical miles
 
@@ -20,7 +22,7 @@ fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     EARTH_RADIUS_NM * c
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DistanceManager {
     distances: Vec<Vec<f64>>, // 2D matrix to store distances in nautical miles
 }
@@ -33,16 +35,20 @@ impl DistanceManager {
     }
 
     // Populates the distance matrix using the coordinates of nodes
-    pub fn calculate_distances(&mut self, nodes: &[Node]) {
-        let num_nodes = nodes.len();
+    pub fn calculate_distances(&mut self, base: &dyn HasLocation, installations: &[&dyn HasLocation]) {
+        let num_nodes = installations.len() + 1;
+        let mut nodes = Vec::with_capacity(num_nodes);
+        nodes.push(base.clone());
+        nodes.extend_from_slice(installations);
+
         for i in 0..num_nodes {
             for j in i + 1..num_nodes {
                 // Calculate the distance in nautical miles using Haversine formula
                 let dist = haversine_distance(
-                    nodes[i].location.latitude,
-                    nodes[i].location.longitude,
-                    nodes[j].location.latitude,
-                    nodes[j].location.longitude,
+                    nodes[i].get_location().latitude,
+                    nodes[i].get_location().longitude,
+                    nodes[j].get_location().latitude,
+                    nodes[j].get_location().longitude,
                 );
                 // Set symmetric values in the distance matrix
                 self.distances[i][j] = dist;
