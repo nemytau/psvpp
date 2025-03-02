@@ -108,14 +108,14 @@ pub struct BaseCSV {
     service_time: f64,
     #[serde(deserialize_with = "parse_time_window")]
     time_window: (u32, u32),
-    longitude: f64,
-    latitude: f64,
+    #[serde(deserialize_with = "parse_location")]
+    location: (f64, f64),  // Parsed as tuple from "[latitude, longitude]"
 }
 
 impl BaseCSV {
     // Method to convert BaseCSV to Base
     pub fn to_base(self) -> Result<Base, &'static str> {
-        let location = Location::new(self.latitude, self.longitude);
+        let location = Location::new(self.location.0, self.location.1);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");
 
