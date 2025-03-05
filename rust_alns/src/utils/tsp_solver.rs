@@ -1,5 +1,15 @@
 use permutohedron::Heap;
 
+/*
+Given  n  installations, where each installation  i :
+	•	Must be visited exactly once.
+	•	Has service time s_i
+	•	Has a distance matrix  D[i][j] .
+	•	Has a time window  [e_i, l_i] , where:
+	•	The visit to city  i  must happen between  e_i  and  l_i of any day k. Could be represented as multiple time window matrix e_i_k, l_i_k
+	•	The ship starts and ends at base - node 0, ship has travelling speed - v.
+	•	The objective is to minimize total time while satisfying constraints.
+*/
 pub struct TSPSolver<'a> {
     distances: &'a Vec<Vec<f64>>,
     time_windows: Vec<(f64, f64)>,
@@ -50,7 +60,12 @@ impl<'a> TSPSolver<'a> {
         (best_route, min_end_time - start_time) // Return total voyage duration as second value
     }
     
-    fn calculate_voyage_end_time(&self, route: &Vec<usize>, vessel_speed: f64, start_time: f64) -> f64 {
+    fn calculate_voyage_end_time(
+        &self, 
+        route: &Vec<usize>, 
+        vessel_speed: f64, 
+        start_time: f64
+    ) -> f64 {
         let mut current_time = start_time;
         
         for i in 0..route.len() - 1 {
@@ -88,11 +103,13 @@ impl<'a> TSPSolver<'a> {
         current_time
     }
 
-    pub fn solve_tsp_branch_and_cut(&self) -> Vec<usize> {
-        // Implement branch and cut TSP solver with time windows here
+    #[allow(dead_code)]
+    pub fn solve_tsp_branch_and_bound(&self) -> Vec<usize> {
+        // Implement branch and bound TSP solver with time windows here
         vec![]
     }
 
+    #[allow(dead_code)]
     pub fn solve_tsp_fast_reinsertion(&self) -> Vec<usize> {
         // Implement fast reinsertion TSP solver with time windows here
         vec![]
