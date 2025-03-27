@@ -291,7 +291,7 @@ impl BaseBuilder {
     pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
         // If time_window is (0, 24) or default (None, None), use default time windows that always return true
         if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
-           (time_window.earliest.is.none() && time_window.latest.is.none()) {
+           (time_window.earliest.is_none() && time_window.latest.is_none()) {
             self.service_tw = vec![TimeWindow::default(); DAYS_IN_PERIOD as usize];
         } else {
             self.service_tw = (0..DAYS_IN_PERIOD)
@@ -308,7 +308,7 @@ impl BaseBuilder {
         let time_window = self.time_window.ok_or("time_window is required")?;
         
         // If service_tw wasn't explicitly set, generate it from the time_window
-        let service_tw = if self.service_tw.is.empty() {
+        let service_tw = if self.service_tw.is_empty() {
             if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
                (time_window.earliest.is_none() && time_window.latest.is_none()) {
                 vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
