@@ -40,7 +40,6 @@ impl TimeWindow {
         Ok(Self { earliest, latest })
     }
 
-    // I am not sure if I ever need 3 last lines of this function
     pub fn contains(&self, timestamp: u32) -> bool {
         match (self.earliest, self.latest) {
             (Some(earliest), Some(latest)) => timestamp >= earliest && timestamp < latest,
@@ -75,11 +74,8 @@ impl Location {
 pub trait HasLocation {
     fn get_location(&self) -> &Location;
 }
-pub trait HasTimeWindow {
-    fn get_time_window(&self) -> &TimeWindow;
-}
 pub trait HasTimeWindows {
-    fn get_time_windows(&self) -> &Vec<TimeWindow>;
+    fn get_service_time_windows(&self) -> &Vec<TimeWindow>;
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct Node {
@@ -103,7 +99,7 @@ pub struct Installation {
     pub departure_spread: u32,
     pub service_time: f64,
     pub time_window: TimeWindow,
-    pub service_TW: Vec<TimeWindow>,  // Changed from time_windows to service_TW
+    pub service_tw: Vec<TimeWindow>,  // Changed from time_windows to service_TW
 }
 
 impl Installation {
@@ -182,7 +178,7 @@ impl InstallationBuilder {
     }
 
     // Creates a time window for each day in the period by adding 24-hour shifts
-    pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
+    pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
         // If time_window is (0, 24) or default (None, None), use default time windows that always return true
         if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
            (time_window.earliest.is_none() && time_window.latest.is_none()) {
@@ -224,7 +220,7 @@ impl InstallationBuilder {
             departure_spread: self.departure_spread,
             service_time: self.service_time,
             time_window: self.time_window,
-            service_TW,
+            service_tw: service_TW,
         })
     }
 }
@@ -235,15 +231,9 @@ impl HasLocation for Installation {
     }
 }
 
-impl HasTimeWindow for Installation {
-    fn get_time_window(&self) -> &TimeWindow {
-        &self.time_window
-    }
-}
-
 impl HasTimeWindows for Installation {
-    fn get_time_windows(&self) -> &Vec<TimeWindow> {
-        &self.service_TW
+    fn get_service_time_windows(&self) -> &Vec<TimeWindow> {
+        &self.service_tw
     }
 }
 
@@ -252,7 +242,7 @@ pub struct Base {
     pub node: Node,
     pub service_time: f64,
     pub time_window: TimeWindow,
-    pub service_TW: Vec<TimeWindow>,  // Changed from time_windows to service_TW
+    pub service_tw: Vec<TimeWindow>,  // Changed from service_TW to service_tw
 }
 
 impl Base {
@@ -268,7 +258,7 @@ pub struct BaseBuilder {
     location: Option<Location>,
     service_time: Option<f64>,
     time_window: Option<TimeWindow>,
-    service_TW: Vec<TimeWindow>,  // Changed from time_windows to service_TW
+    service_tw: Vec<TimeWindow>,  // Changed from service_TW to service_tw
 }
 
 impl BaseBuilder {
@@ -298,13 +288,13 @@ impl BaseBuilder {
     }
 
     // Creates a time window for each day in the period by adding 24-hour shifts
-    pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
+    pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
         // If time_window is (0, 24) or default (None, None), use default time windows that always return true
         if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
-           (time_window.earliest.is_none() && time_window.latest.is_none()) {
-            self.service_TW = vec![TimeWindow::default(); DAYS_IN_PERIOD as usize];
+           (time_window.earliest.is.none() && time_window.latest.is.none()) {
+            self.service_tw = vec![TimeWindow::default(); DAYS_IN_PERIOD as usize];
         } else {
-            self.service_TW = (0..DAYS_IN_PERIOD)
+            self.service_tw = (0..DAYS_IN_PERIOD)
                 .map(|day| TimeWindow::new(
                     time_window.earliest.map(|earliest| (earliest + day * HOURS_IN_DAY) % HOURS_IN_PERIOD),
                     time_window.latest.map(|latest| (latest + day * HOURS_IN_DAY).saturating_sub(self.service_time.unwrap_or(0.0) as u32) % HOURS_IN_PERIOD),
@@ -317,8 +307,8 @@ impl BaseBuilder {
     pub fn build(self) -> Result<Base, &'static str> {
         let time_window = self.time_window.ok_or("time_window is required")?;
         
-        // If service_TW wasn't explicitly set, generate it from the time_window
-        let service_TW = if self.service_TW.is_empty() {
+        // If service_tw wasn't explicitly set, generate it from the time_window
+        let service_tw = if self.service_tw.is.empty() {
             if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
                (time_window.earliest.is_none() && time_window.latest.is_none()) {
                 vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
@@ -331,7 +321,7 @@ impl BaseBuilder {
                     .collect()
             }
         } else {
-            self.service_TW
+            self.service_tw
         };
         
         Ok(Base {
@@ -342,7 +332,7 @@ impl BaseBuilder {
             ),
             service_time: self.service_time.ok_or("service_time is required")?,
             time_window,
-            service_TW,
+            service_tw,
         })
     }
 }
@@ -353,14 +343,8 @@ impl HasLocation for Base {
     }
 }
 
-impl HasTimeWindow for Base {
-    fn get_time_window(&self) -> &TimeWindow {
-        &self.time_window
-    }
-}
-
 impl HasTimeWindows for Base {
-    fn get_time_windows(&self) -> &Vec<TimeWindow> {
-        &self.service_TW
+    fn get_service_time_windows(&self) -> &Vec<TimeWindow> {
+        &self.service_tw
     }
 }
