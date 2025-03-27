@@ -36,7 +36,7 @@ impl InstallationCSV {
             .location(location)
             .service_time(self.service_time)
             .time_window(time_window.clone())
-            .service_TW(time_window)  // Changed from time_windows to service_TW
+            .service_time_windows(time_window)  // Changed from time_windows to service_TW
             .deck_demand(self.deck_demand as u32)
             .visit_frequency(self.visit_frequency)
             .installation_type(self.inst_type)
@@ -126,7 +126,7 @@ impl BaseCSV {
             .service_time(self.service_time)
             .location(location)
             .time_window(time_window.clone())
-            .service_TW(time_window)  // Changed from time_windows to service_TW
+            .service_time_windows(time_window)  // Changed from time_windows to service_TW
             .build()?;
         
         Ok(base)

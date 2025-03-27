@@ -196,7 +196,7 @@ impl InstallationBuilder {
 
     pub fn build(self) -> Result<Installation, &'static str> {
         // Initialize service_TW from time_window if not explicitly set
-        let service_TW = if self.service_tw.is_empty() {
+        let service_tw = if self.service_tw.is_empty() {
             if (self.time_window.earliest == Some(0) && self.time_window.latest == Some(24)) || 
                    (self.time_window.earliest.is_none() && self.time_window.latest.is_none()) {
                     vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
@@ -220,7 +220,7 @@ impl InstallationBuilder {
             departure_spread: self.departure_spread,
             service_time: self.service_time,
             time_window: self.time_window,
-            service_tw: service_TW,
+            service_tw,
         })
     }
 }
