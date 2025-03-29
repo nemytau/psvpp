@@ -1,11 +1,13 @@
 mod structs;
 mod utils;
+use serde::de;
 use structs::data_loader;
 use structs::distance_manager::DistanceManager;
-use structs::node::HasLocation;
+use structs::node::{HasLocation, HasTimeWindows};
 use utils::tsp_solver::TSPSolver;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
     // Define the file paths
     let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
     let vessels_path = "../sample/vessels/SMALL_1/v_test1.csv";
@@ -54,21 +56,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         3.0,  // Node 2
         1.0,  // Node 3
     ];
-    
-    // Create TSP solver with distance matrix from distance manager
-    let tsp_solver = TSPSolver::new(dm.get_distances(), time_windows, service_times);
-    
-    // Solve TSP for nodes 1, 2, 3 with default vessel speed and start time
-    let node_ids = vec![1, 2, 3];
-    let (best_route, total_duration) = tsp_solver.solve_tsp_full_enumeration(node_ids, None, None);
-    
-    println!("Best route: {:?}", best_route);
-    println!("Total voyage duration: {:.2} hours", total_duration);
-    
-    // Display detailed analysis of the best route
-    println!("\nDetailed route analysis:");
-    let analysis = tsp_solver.analyze_route(&best_route, None, None);
-    println!("{}", analysis);
-    
+    Ok(())
+}   
+
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }

@@ -2,7 +2,8 @@ use std::error::Error;
 use std::fs::File;
 use csv::ReaderBuilder;
 use serde::Deserialize;
-use crate::structs::node::{Installation, Location, TimeWindow, Base};
+use crate::structs::node::{Installation, Location, Base};
+use crate::structs::time_window::TimeWindow;
 use std::str::FromStr;
 use serde::de::DeserializeOwned;
 
@@ -19,7 +20,7 @@ pub struct InstallationCSV {
     #[serde(skip_deserializing)] 
     _deck_service_speed: u32,
     #[serde(deserialize_with = "parse_time_window")]
-    time_window: (u32, u32),  // Parsed as tuple from "(start, end)"
+    time_window: (f64, f64),  // Changed from (u32, u32) to (f64, f64)
     service_time: f64,  // Changed to f64 to handle the decimal values
 }
 
@@ -66,7 +67,7 @@ where
 }
 
 // Custom deserializer for the time_window field
-fn parse_time_window<'de, D>(deserializer: D) -> Result<(u32, u32), D::Error>
+fn parse_time_window<'de, D>(deserializer: D) -> Result<(f64, f64), D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -78,8 +79,8 @@ where
         return Err(serde::de::Error::custom("Invalid time window format"));
     }
 
-    let start = u32::from_str(parts[0].trim()).map_err(serde::de::Error::custom)?;
-    let end = u32::from_str(parts[1].trim()).map_err(serde::de::Error::custom)?;
+    let start = f64::from_str(parts[0].trim()).map_err(serde::de::Error::custom)?;
+    let end = f64::from_str(parts[1].trim()).map_err(serde::de::Error::custom)?;
     
     Ok((start, end))
 }
@@ -108,7 +109,7 @@ pub struct BaseCSV {
     idx: u32,
     service_time: f64,
     #[serde(deserialize_with = "parse_time_window")]
-    time_window: (u32, u32),
+    time_window: (f64, f64),  // Changed from (u32, u32) to (f64, f64)
     #[serde(deserialize_with = "parse_location")]
     location: (f64, f64),  // Parsed as tuple from "[latitude, longitude]"
 }

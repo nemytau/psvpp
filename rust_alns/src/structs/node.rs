@@ -4,51 +4,7 @@ use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, R
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::thread_rng;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct TimeWindow {
-    pub earliest: Option<u32>, // Start of the time window in hours (None if open all day)
-    pub latest: Option<u32>,   // End of the time window in hours (None if open all day)
-}
-
-impl Default for TimeWindow {
-    fn default() -> Self {
-        Self { earliest: None, latest: None }
-    }
-}
-
-#[derive(Debug)]
-pub enum TimeWindowError {
-    InvalidRange((u32, u32, u32)),
-}
-
-impl TimeWindow {
-    pub fn new(earliest: Option<u32>, latest: Option<u32>) -> Result<Self, TimeWindowError> {
-        if let (Some(earliest), Some(latest)) = (earliest, latest) {
-            if earliest >= HOURS_IN_PERIOD || latest > HOURS_IN_PERIOD {
-                return Err(TimeWindowError::InvalidRange((1, earliest, latest)));
-            }
-            if earliest > latest && !((earliest % HOURS_IN_DAY == 0) && (latest % HOURS_IN_DAY == 0) && (latest == earliest + HOURS_IN_DAY)) {
-                return Err(TimeWindowError::InvalidRange((2, earliest, latest)));
-            }
-            // Check if the time window is within a single day or spans exactly one full day (like 0-24, 24-48, etc.)
-            if earliest / HOURS_IN_DAY != latest / HOURS_IN_DAY && 
-               !((earliest % HOURS_IN_DAY == 0) && (latest % HOURS_IN_DAY == 0) && (latest == earliest + HOURS_IN_DAY)) {
-                return Err(TimeWindowError::InvalidRange((3, earliest, latest)));
-            }
-        }
-        Ok(Self { earliest, latest })
-    }
-
-    pub fn contains(&self, timestamp: u32) -> bool {
-        match (self.earliest, self.latest) {
-            (Some(earliest), Some(latest)) => timestamp >= earliest && timestamp < latest,
-            (Some(earliest), None) => timestamp >= earliest && timestamp < 24,
-            (None, Some(latest)) => timestamp < latest,
-            (None, None) => true,
-        }
-    }
-}
+use crate::structs::time_window::TimeWindow;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Location {
@@ -76,7 +32,15 @@ pub trait HasLocation {
 }
 pub trait HasTimeWindows {
     fn get_service_time_windows(&self) -> &Vec<TimeWindow>;
+    fn get_tw(&self) -> (Option<f64>, Option<f64>);
 }
+
+// New composite trait that combines HasLocation and HasTimeWindows
+pub trait HasLocationAndTW: HasLocation + HasTimeWindows {}
+
+// Blanket implementation for any type that implements both required traits
+impl<T: HasLocation + HasTimeWindows> HasLocationAndTW for T {}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Node {
     pub idx: u32,
@@ -115,6 +79,10 @@ impl Installation {
             .map(|_| if rng.gen_range(0..100) < self.visit_frequency { 1 } else { 0 })
             .collect()
     }
+    
+    pub fn get_service_time(&self) -> f64 {
+        self.service_time
+    }
 }
 #[derive(Default)]
 pub struct InstallationBuilder {
@@ -132,6 +100,22 @@ pub struct InstallationBuilder {
 
 
 impl InstallationBuilder {
+    // Private helper method to generate service time windows
+    fn create_service_time_windows(&self, time_window: &TimeWindow) -> Vec<TimeWindow> {
+        // If time_window is (0, 24) or default (None, None), use default time windows that always return true
+        if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
+           (time_window.earliest.is_none() && time_window.latest.is_none()) {
+            vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
+        } else {
+            (0..DAYS_IN_PERIOD)
+                .map(|day| TimeWindow::new(
+                    time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64)),
+                    time_window.latest.map(|latest| (latest + day as f64 * HOURS_IN_DAY as f64) - self.service_time),
+                ).unwrap())
+                .collect()
+        }
+    }
+
     pub fn idx(mut self, idx: u32) -> Self {
         self.idx = idx;
         self
@@ -179,35 +163,14 @@ impl InstallationBuilder {
 
     // Creates a time window for each day in the period by adding 24-hour shifts
     pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
-        // If time_window is (0, 24) or default (None, None), use default time windows that always return true
-        if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
-           (time_window.earliest.is_none() && time_window.latest.is_none()) {
-            self.service_tw = vec![TimeWindow::default(); DAYS_IN_PERIOD as usize];
-        } else {
-            self.service_tw = (0..DAYS_IN_PERIOD)
-                .map(|day| TimeWindow::new(
-                    time_window.earliest.map(|earliest| (earliest + day * HOURS_IN_DAY)),
-                    time_window.latest.map(|latest| (latest + day * HOURS_IN_DAY).saturating_sub(self.service_time as u32)),
-                ).unwrap())
-                .collect();
-        }
+        self.service_tw = self.create_service_time_windows(&time_window);
         self
     }
 
     pub fn build(self) -> Result<Installation, &'static str> {
         // Initialize service_TW from time_window if not explicitly set
         let service_tw = if self.service_tw.is_empty() {
-            if (self.time_window.earliest == Some(0) && self.time_window.latest == Some(24)) || 
-                   (self.time_window.earliest.is_none() && self.time_window.latest.is_none()) {
-                    vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
-            } else {
-                (0..DAYS_IN_PERIOD)
-                    .map(|day| TimeWindow::new(
-                        self.time_window.earliest.map(|earliest| (earliest + day * HOURS_IN_DAY)),
-                        self.time_window.latest.map(|latest| (latest + day * HOURS_IN_DAY).saturating_sub(self.service_time as u32)),
-                    ).unwrap())
-                    .collect()
-            }
+            self.create_service_time_windows(&self.time_window)
         } else {
             self.service_tw
         };
@@ -235,6 +198,10 @@ impl HasTimeWindows for Installation {
     fn get_service_time_windows(&self) -> &Vec<TimeWindow> {
         &self.service_tw
     }
+    fn get_tw(&self) -> (Option<f64>, Option<f64>) {
+        let tw = self.get_service_time_windows();
+        (tw[0].earliest, tw[0].latest)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -242,7 +209,7 @@ pub struct Base {
     pub node: Node,
     pub service_time: f64,
     pub time_window: TimeWindow,
-    pub service_tw: Vec<TimeWindow>,  // Changed from service_TW to service_tw
+    pub service_tw: Vec<TimeWindow>,
 }
 
 impl Base {
@@ -290,16 +257,16 @@ impl BaseBuilder {
     // Creates a time window for each day in the period by adding 24-hour shifts
     pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
         // If time_window is (0, 24) or default (None, None), use default time windows that always return true
-        if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
+        if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
            (time_window.earliest.is_none() && time_window.latest.is_none()) {
             self.service_tw = vec![TimeWindow::default(); DAYS_IN_PERIOD as usize];
         } else {
             self.service_tw = (0..DAYS_IN_PERIOD)
                 .map(|day| TimeWindow::new(
-                    time_window.earliest.map(|earliest| (earliest + day * HOURS_IN_DAY) % HOURS_IN_PERIOD),
-                    time_window.latest.map(|latest| (latest + day * HOURS_IN_DAY).saturating_sub(self.service_time.unwrap_or(0.0) as u32) % HOURS_IN_PERIOD),
+                    time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64) % HOURS_IN_PERIOD as f64),
+                    time_window.latest.map(|latest| (latest + day as f64 * HOURS_IN_DAY as f64 - self.service_time.unwrap_or(0.0)) % HOURS_IN_PERIOD as f64),
                 ).unwrap())
-                .collect();
+                .collect()
         }
         self
     }
@@ -307,16 +274,16 @@ impl BaseBuilder {
     pub fn build(self) -> Result<Base, &'static str> {
         let time_window = self.time_window.ok_or("time_window is required")?;
         
-        // If service_tw wasn't explicitly set, generate it from the time_window
-        let service_tw = if self.service_tw.is_empty() {
-            if (time_window.earliest == Some(0) && time_window.latest == Some(24)) || 
-               (time_window.earliest.is_none() && time_window.latest.is_none()) {
-                vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
-            } else {
+    // If service_tw wasn't explicitly set, generate it from the time_window
+    let service_tw = if self.service_tw.is_empty() {
+        if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
+        (time_window.earliest.is_none() && time_window.latest.is_none()) {
+            vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
+    } else {
                 (0..DAYS_IN_PERIOD)
                     .map(|day| TimeWindow::new(
-                        time_window.earliest.map(|earliest| (earliest + day * HOURS_IN_DAY) % HOURS_IN_PERIOD),
-                        time_window.latest.map(|latest| (latest + day * HOURS_IN_DAY).saturating_sub(self.service_time.unwrap_or(0.0) as u32) % HOURS_IN_PERIOD),
+                        time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64) % HOURS_IN_PERIOD as f64),
+                        time_window.latest.map(|latest| (latest + day as f64 * HOURS_IN_DAY as f64 - self.service_time.unwrap_or(0.0)) % HOURS_IN_PERIOD as f64),
                     ).unwrap())
                     .collect()
             }
@@ -346,5 +313,9 @@ impl HasLocation for Base {
 impl HasTimeWindows for Base {
     fn get_service_time_windows(&self) -> &Vec<TimeWindow> {
         &self.service_tw
+    }
+    fn get_tw(&self) -> (Option<f64>, Option<f64>) {
+        let tw = self.get_service_time_windows();
+        (tw[0].earliest, tw[0].latest)
     }
 }

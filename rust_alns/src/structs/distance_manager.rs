@@ -66,4 +66,8 @@ impl DistanceManager {
     pub fn get_distances(&self) -> &Vec<Vec<f64>> {
         &self.distances
     }
+
+    pub fn get_distance_matrix(&self) -> &Vec<Vec<f64>> {
+        &self.distances
+    }
 }
