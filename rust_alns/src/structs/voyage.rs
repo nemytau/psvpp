@@ -35,4 +35,35 @@ impl Voyage {
             is_feasible: None,
         }
     }
+    // Creates a new voyage object with a specific id
+    pub fn new_with_id(id: usize) -> Self {
+        Self {
+            id,
+            vessel_id: None,
+            departure_day: None,
+            visit_ids: Vec::new(),
+            duration: None,
+            distance: None,
+            is_feasible: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_new_with_id() {
+        let id = 42;
+        let voyage = Voyage::new_with_id(id);
+        
+        assert_eq!(voyage.id, id);
+        assert_eq!(voyage.vessel_id, None);
+        assert_eq!(voyage.departure_day, None);
+        assert!(voyage.visit_ids.is_empty());
+        assert_eq!(voyage.duration, None);
+        assert_eq!(voyage.distance, None);
+        assert_eq!(voyage.is_feasible, None);
+    }
 }
