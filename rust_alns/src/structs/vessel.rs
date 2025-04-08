@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Vessel {
     pub idx: u32,                 
     pub name: String,
@@ -41,4 +41,5 @@ impl Vessel {
     pub fn get_idx(&self) -> u32 {
         self.idx
     }
+
 }

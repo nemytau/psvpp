@@ -43,19 +43,19 @@ impl<T: HasLocation + HasTimeWindows> HasLocationAndTW for T {}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Node {
-    pub idx: u32,
     pub name: String,
     pub location: Location,
 }
 
 impl Node {
-    pub fn new(idx: u32, name: String, location: Location) -> Self {
-        Self { idx, name, location }
+    pub fn new(name: String, location: Location) -> Self {
+        Self { name, location }
     }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Installation {
+    pub id: usize,
     pub node: Node,
     pub deck_demand: u32,
     pub visit_frequency: u32,
@@ -63,7 +63,7 @@ pub struct Installation {
     pub departure_spread: u32,
     pub service_time: f64,
     pub time_window: TimeWindow,
-    pub service_tw: Vec<TimeWindow>,  // Changed from time_windows to service_TW
+    pub service_tw: Vec<TimeWindow>,
 }
 
 impl Installation {
@@ -86,7 +86,7 @@ impl Installation {
 }
 #[derive(Default)]
 pub struct InstallationBuilder {
-    idx: u32,
+    id: usize,
     name: String,
     location: Location,
     deck_demand: u32,
@@ -95,9 +95,8 @@ pub struct InstallationBuilder {
     departure_spread: u32,
     service_time: f64,
     time_window: TimeWindow,
-    service_tw: Vec<TimeWindow>,  // Changed from time_windows to service_TW
+    service_tw: Vec<TimeWindow>,
 }
-
 
 impl InstallationBuilder {
     // Private helper method to generate service time windows
@@ -116,8 +115,8 @@ impl InstallationBuilder {
         }
     }
 
-    pub fn idx(mut self, idx: u32) -> Self {
-        self.idx = idx;
+    pub fn id(mut self, id: usize) -> Self {
+        self.id = id;
         self
     }
 
@@ -176,7 +175,8 @@ impl InstallationBuilder {
         };
         
         Ok(Installation {
-            node: Node::new(self.idx, self.name, self.location),
+            id: self.id,
+            node: Node::new(self.name, self.location),
             deck_demand: self.deck_demand,
             visit_frequency: self.visit_frequency,
             installation_type: self.installation_type,
@@ -206,6 +206,7 @@ impl HasTimeWindows for Installation {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Base {
+    pub id: usize,
     pub node: Node,
     pub service_time: f64,
     pub time_window: TimeWindow,
@@ -220,17 +221,17 @@ impl Base {
 
 #[derive(Default)]
 pub struct BaseBuilder {
-    idx: Option<u32>,
+    id: Option<usize>,
     name: Option<String>,
     location: Option<Location>,
     service_time: Option<f64>,
     time_window: Option<TimeWindow>,
-    service_tw: Vec<TimeWindow>,  // Changed from service_TW to service_tw
+    service_tw: Vec<TimeWindow>,
 }
 
 impl BaseBuilder {
-    pub fn idx(mut self, idx: u32) -> Self {
-        self.idx = Some(idx);
+    pub fn id(mut self, id: usize) -> Self {
+        self.id = Some(id);
         self
     }
 
@@ -274,12 +275,12 @@ impl BaseBuilder {
     pub fn build(self) -> Result<Base, &'static str> {
         let time_window = self.time_window.ok_or("time_window is required")?;
         
-    // If service_tw wasn't explicitly set, generate it from the time_window
-    let service_tw = if self.service_tw.is_empty() {
-        if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
-        (time_window.earliest.is_none() && time_window.latest.is_none()) {
-            vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
-    } else {
+        // If service_tw wasn't explicitly set, generate it from the time_window
+        let service_tw = if self.service_tw.is_empty() {
+            if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
+            (time_window.earliest.is_none() && time_window.latest.is_none()) {
+                vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
+            } else {
                 (0..DAYS_IN_PERIOD)
                     .map(|day| TimeWindow::new(
                         time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64) % HOURS_IN_PERIOD as f64),
@@ -292,8 +293,8 @@ impl BaseBuilder {
         };
         
         Ok(Base {
+            id: self.id.ok_or("id is required")?,
             node: Node::new(
-                self.idx.ok_or("idx is required")?,
                 self.name.ok_or("name is required")?,
                 self.location.ok_or("location is required")?,
             ),

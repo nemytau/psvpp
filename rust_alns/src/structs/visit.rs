@@ -6,28 +6,23 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// Question: Should departure_day and vessel_id be Visit fields?
 #[derive(Debug, Clone)]
 pub struct Visit {
-    idx: u32, // Unique identifier for the visit (not the installation)
-    installation: Installation, // Installation to visit
+    pub id: usize,
+    pub installation_id: usize,
+    pub departure_day: Option<usize>,
+    pub assigned_voyage_id: Option<usize>,
+    pub is_assigned: bool,
 }
 
 impl Visit {
     /// Creates a new visit to a given installation.
-    pub fn new(installation: Installation) -> Self {
-        static COUNTER: AtomicU32 = AtomicU32::new(1);
-        let idx = COUNTER.fetch_add(1, Ordering::SeqCst);
+    pub fn new(id: usize, installation_id: usize) -> Self {
         Visit {
-            idx,
-            installation,
+            id,
+            installation_id,
+            departure_day: None,
+            assigned_voyage_id: None,
+            is_assigned: false,
         }
-    }
-
-    /// Returns the ID of the installation (delegated from Installation).
-    pub fn installation_id(&self) -> u32 {
-        self.installation.node.idx
-    }
-
-    /// Returns the deck demand for the installation.
-    pub fn deck_demand(&self) -> u32 {
-        self.installation.deck_demand
+        
     }
 }

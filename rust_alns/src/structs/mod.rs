@@ -10,3 +10,4 @@ pub mod constants;
 pub mod schedule;
 pub mod transaction;
 pub mod time_window;
+pub mod solution;

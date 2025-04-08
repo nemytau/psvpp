@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 
 #[derive(Debug, Deserialize)]
 pub struct InstallationCSV {
-    idx: u32,
+    id: usize,
     name: String,
     inst_type: String,
     deck_demand: u32,
@@ -32,7 +32,7 @@ impl InstallationCSV {
             .expect("Invalid time window");  // Handle error or use unwrap()
         
         let installation = Installation::builder() 
-            .idx(self.idx)
+            .id(self.id)
             .name(self.name)
             .location(location)
             .service_time(self.service_time)
@@ -106,7 +106,7 @@ where
 #[derive(Debug, Deserialize)]
 pub struct BaseCSV {
     name: String,
-    idx: u32,
+    id: usize,
     service_time: f64,
     #[serde(deserialize_with = "parse_time_window")]
     time_window: (f64, f64),  // Changed from (u32, u32) to (f64, f64)
@@ -123,7 +123,7 @@ impl BaseCSV {
 
         let base = Base::builder()
             .name(self.name)
-            .idx(self.idx)
+            .id(self.id)
             .service_time(self.service_time)
             .location(location)
             .time_window(time_window.clone())
