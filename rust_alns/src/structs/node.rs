@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::error::Error;
 use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
 use rand::seq::SliceRandom;
@@ -31,8 +32,12 @@ pub trait HasLocation {
     fn get_location(&self) -> &Location;
 }
 pub trait HasTimeWindows {
-    fn get_service_time_windows(&self) -> &Vec<TimeWindow>;
-    fn get_tw(&self) -> (Option<f64>, Option<f64>);
+    fn get_service_time_windows(&self) -> &TimeWindow;
+    fn earliest_departure_after_service(&self, arrival_time: f64) -> f64;
+    fn get_tw(&self) -> (Option<f64>, Option<f64>) {
+        let tw = self.get_service_time_windows();
+        (tw.earliest, tw.latest)
+    }
 }
 
 // New composite trait that combines HasLocation and HasTimeWindows
@@ -63,7 +68,7 @@ pub struct Installation {
     pub departure_spread: u32,
     pub service_time: f64,
     pub time_window: TimeWindow,
-    pub service_tw: Vec<TimeWindow>,
+    pub service_time_window: TimeWindow,
 }
 
 impl Installation {
@@ -71,13 +76,43 @@ impl Installation {
         InstallationBuilder::default()
     }
 
-    pub fn generate_visit_scenario(&self) -> Vec<u32> {
-        // TODO: Implement visit scenario generation
-        // Placeholder implementation: random visit days
-        let mut rng = thread_rng();
-        (0..DAYS_IN_PERIOD)
-            .map(|_| if rng.gen_range(0..100) < self.visit_frequency { 1 } else { 0 })
-            .collect()
+    // Generates a departure scenario for the installation. Returns a vector of days.
+    // The days are represented as indices in the range [0, DAYS_IN_PERIOD).
+    pub fn generate_departure_scenario(
+        &self,
+        rng: &mut impl Rng,
+    ) -> Vec<usize> {
+        let visit_count = self.visit_frequency as usize;
+        let departure_spread = self.departure_spread as i32;
+        assert!(visit_count > 0);
+        assert!(DAYS_IN_PERIOD >= visit_count as u32);
+
+        let mut scenario = BTreeSet::new();
+        let mut attempts = 0;
+        const MAX_TRIES: usize = 100;
+
+        while scenario.len() < visit_count && attempts < MAX_TRIES {
+            let day = rng.gen_range(0..DAYS_IN_PERIOD);
+            let valid = scenario.iter().all(|&d| {
+                let diff = (d as i32 - day as i32).abs();
+                let wrapped = DAYS_IN_PERIOD as i32 - diff;
+                diff.min(wrapped) >= departure_spread
+            });
+        
+            if valid {
+                scenario.insert(day as usize);
+            }
+            attempts += 1;
+        }
+
+        if scenario.len() < visit_count {
+            panic!(
+                "Could not generate a departure scenario for installation {} with frequency {}",
+                self.id, visit_count
+            );
+        }
+
+        scenario.into_iter().collect()
     }
     
     pub fn get_service_time(&self) -> f64 {
@@ -95,26 +130,10 @@ pub struct InstallationBuilder {
     departure_spread: u32,
     service_time: f64,
     time_window: TimeWindow,
-    service_tw: Vec<TimeWindow>,
+    service_time_window: TimeWindow,
 }
 
 impl InstallationBuilder {
-    // Private helper method to generate service time windows
-    fn create_service_time_windows(&self, time_window: &TimeWindow) -> Vec<TimeWindow> {
-        // If time_window is (0, 24) or default (None, None), use default time windows that always return true
-        if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
-           (time_window.earliest.is_none() && time_window.latest.is_none()) {
-            vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
-        } else {
-            (0..DAYS_IN_PERIOD)
-                .map(|day| TimeWindow::new(
-                    time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64)),
-                    time_window.latest.map(|latest| (latest + day as f64 * HOURS_IN_DAY as f64) - self.service_time),
-                ).unwrap())
-                .collect()
-        }
-    }
-
     pub fn id(mut self, id: usize) -> Self {
         self.id = id;
         self
@@ -159,21 +178,13 @@ impl InstallationBuilder {
         self.time_window = time_window;
         self
     }
-
-    // Creates a time window for each day in the period by adding 24-hour shifts
-    pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
-        self.service_tw = self.create_service_time_windows(&time_window);
+    
+    pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
+        self.service_time_window = time_window;
         self
     }
 
     pub fn build(self) -> Result<Installation, &'static str> {
-        // Initialize service_TW from time_window if not explicitly set
-        let service_tw = if self.service_tw.is_empty() {
-            self.create_service_time_windows(&self.time_window)
-        } else {
-            self.service_tw
-        };
-        
         Ok(Installation {
             id: self.id,
             node: Node::new(self.name, self.location),
@@ -183,7 +194,7 @@ impl InstallationBuilder {
             departure_spread: self.departure_spread,
             service_time: self.service_time,
             time_window: self.time_window,
-            service_tw,
+            service_time_window: self.service_time_window,
         })
     }
 }
@@ -195,12 +206,23 @@ impl HasLocation for Installation {
 }
 
 impl HasTimeWindows for Installation {
-    fn get_service_time_windows(&self) -> &Vec<TimeWindow> {
-        &self.service_tw
+    fn get_service_time_windows(&self) -> &TimeWindow {
+        &self.service_time_window
     }
-    fn get_tw(&self) -> (Option<f64>, Option<f64>) {
-        let tw = self.get_service_time_windows();
-        (tw[0].earliest, tw[0].latest)
+    fn earliest_departure_after_service(&self, arrival_time: f64) -> f64 {
+        let service_tw = &self.service_time_window;
+        if service_tw.is_open {
+            return arrival_time + self.service_time;
+        }
+        let relative_arrival_time = arrival_time % HOURS_IN_DAY as f64;
+        if service_tw.contains(relative_arrival_time) {
+            return arrival_time + self.service_time;
+        }
+        if relative_arrival_time < service_tw.earliest.unwrap() {
+            return service_tw.earliest.unwrap() + self.service_time;
+        } else {
+            return HOURS_IN_DAY as f64 - service_tw.latest.unwrap() + service_tw.earliest.unwrap() + self.service_time;
+        }
     }
 }
 
@@ -210,7 +232,7 @@ pub struct Base {
     pub node: Node,
     pub service_time: f64,
     pub time_window: TimeWindow,
-    pub service_tw: Vec<TimeWindow>,
+    pub service_time_window: TimeWindow,
 }
 
 impl Base {
@@ -226,7 +248,7 @@ pub struct BaseBuilder {
     location: Option<Location>,
     service_time: Option<f64>,
     time_window: Option<TimeWindow>,
-    service_tw: Vec<TimeWindow>,
+    service_time_window: Option<TimeWindow>,
 }
 
 impl BaseBuilder {
@@ -254,43 +276,23 @@ impl BaseBuilder {
         self.time_window = Some(time_window);
         self
     }
-
-    // Creates a time window for each day in the period by adding 24-hour shifts
-    pub fn service_time_windows(mut self, time_window: TimeWindow) -> Self {
-        // If time_window is (0, 24) or default (None, None), use default time windows that always return true
-        if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
-           (time_window.earliest.is_none() && time_window.latest.is_none()) {
-            self.service_tw = vec![TimeWindow::default(); DAYS_IN_PERIOD as usize];
-        } else {
-            self.service_tw = (0..DAYS_IN_PERIOD)
-                .map(|day| TimeWindow::new(
-                    time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64) % HOURS_IN_PERIOD as f64),
-                    time_window.latest.map(|latest| (latest + day as f64 * HOURS_IN_DAY as f64 - self.service_time.unwrap_or(0.0)) % HOURS_IN_PERIOD as f64),
-                ).unwrap())
-                .collect()
-        }
+    
+    pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
+        self.service_time_window = Some(time_window);
         self
     }
 
     pub fn build(self) -> Result<Base, &'static str> {
         let time_window = self.time_window.ok_or("time_window is required")?;
+        let service_time = self.service_time.ok_or("service_time is required")?;
         
-        // If service_tw wasn't explicitly set, generate it from the time_window
-        let service_tw = if self.service_tw.is_empty() {
-            if (time_window.earliest == Some(0.0) && time_window.latest == Some(24.0)) || 
-            (time_window.earliest.is_none() && time_window.latest.is_none()) {
-                vec![TimeWindow::default(); DAYS_IN_PERIOD as usize]
-            } else {
-                (0..DAYS_IN_PERIOD)
-                    .map(|day| TimeWindow::new(
-                        time_window.earliest.map(|earliest| (earliest + day as f64 * HOURS_IN_DAY as f64) % HOURS_IN_PERIOD as f64),
-                        time_window.latest.map(|latest| (latest + day as f64 * HOURS_IN_DAY as f64 - self.service_time.unwrap_or(0.0)) % HOURS_IN_PERIOD as f64),
-                    ).unwrap())
-                    .collect()
-            }
-        } else {
-            self.service_tw
-        };
+        // Calculate service time window if not explicitly set
+        let service_time_window = self.service_time_window.unwrap_or_else(|| {
+            TimeWindow::new(
+                time_window.earliest,
+                time_window.latest.map(|latest| latest - service_time),
+            ).unwrap_or_default()
+        });
         
         Ok(Base {
             id: self.id.ok_or("id is required")?,
@@ -298,9 +300,9 @@ impl BaseBuilder {
                 self.name.ok_or("name is required")?,
                 self.location.ok_or("location is required")?,
             ),
-            service_time: self.service_time.ok_or("service_time is required")?,
+            service_time,
             time_window,
-            service_tw,
+            service_time_window,
         })
     }
 }
@@ -312,11 +314,123 @@ impl HasLocation for Base {
 }
 
 impl HasTimeWindows for Base {
-    fn get_service_time_windows(&self) -> &Vec<TimeWindow> {
-        &self.service_tw
+    fn get_service_time_windows(&self) -> &TimeWindow {
+        &self.service_time_window
     }
-    fn get_tw(&self) -> (Option<f64>, Option<f64>) {
-        let tw = self.get_service_time_windows();
-        (tw[0].earliest, tw[0].latest)
+    fn earliest_departure_after_service(&self, arrival_time: f64) -> f64 {
+        let service_tw = &self.service_time_window;
+        if service_tw.is_open {
+            return arrival_time + self.service_time;
+        }
+        let relative_arrival_time = arrival_time % HOURS_IN_DAY as f64;
+        if service_tw.contains(relative_arrival_time) {
+            return arrival_time + self.service_time;
+        }
+        if relative_arrival_time < service_tw.earliest.unwrap() {
+            return service_tw.earliest.unwrap() + self.service_time;
+        } else {
+            return HOURS_IN_DAY as f64 - service_tw.latest.unwrap() + service_tw.earliest.unwrap() + self.service_time;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{SeedableRng, rngs::StdRng};
+    use crate::structs::constants::DAYS_IN_PERIOD;
+
+    fn assert_valid_scenario(scenario: &[usize], freq: usize, spread: i32) {
+        assert_eq!(scenario.len(), freq, "Wrong number of visit days");
+        for (i, &day1) in scenario.iter().enumerate() {
+            for &day2 in scenario.iter().skip(i + 1) {
+                let diff = (day1 as i32 - day2 as i32).abs();
+                let wrapped = DAYS_IN_PERIOD as i32 - diff;
+                assert!(
+                    diff.min(wrapped) >= spread,
+                    "Spread condition violated: day1={}, day2={}, spread={}",
+                    day1, day2, spread
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_departure_scenario_normal_case() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let freq = 3;
+        let spread = 2;
+        let installation = Installation::builder()
+            .id(1)
+            .name("Test".into())
+            .location(Location::new(0.0, 0.0))
+            .visit_frequency(freq)
+            .departure_spread(spread)
+            .build()
+            .unwrap();
+
+        let scenario = installation.generate_departure_scenario(&mut rng);
+        assert_valid_scenario(&scenario, freq as usize, spread as i32);
+    }
+
+    #[test]
+    fn test_departure_scenario_minimal_case() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let freq = 1;
+        let spread = 0;
+        let installation = Installation::builder()
+            .id(2)
+            .name("OneVisit".into())
+            .location(Location::new(0.0, 0.0))
+            .visit_frequency(freq)
+            .departure_spread(spread)
+            .build()
+            .unwrap();
+
+        let scenario = installation.generate_departure_scenario(&mut rng);
+        assert_valid_scenario(&scenario, freq as usize, spread as i32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Could not generate a departure scenario")]
+    fn test_departure_scenario_too_tight_to_fit() {
+        let mut rng = StdRng::seed_from_u64(99);
+        let freq = 4;
+        let spread = 3; // 4 * 3 = 12 > DAYS_IN_PERIOD, so not all can be placed
+        let installation = Installation::builder()
+            .id(3)
+            .name("TooTight".into())
+            .location(Location::new(0.0, 0.0))
+            .visit_frequency(freq)
+            .departure_spread(spread)
+            .build()
+            .unwrap();
+
+        let scenario = installation.generate_departure_scenario(&mut rng);
+        assert!(
+            scenario.len() < freq as usize,
+            "Scenario should fail to place all days with too tight spread"
+        );
+    }
+
+    #[test]
+    fn test_departure_scenario_determinism() {
+        let freq = 3;
+        let spread = 1;
+        let installation = Installation::builder()
+            .id(4)
+            .name("Repeatable".into())
+            .location(Location::new(0.0, 0.0))
+            .visit_frequency(freq)
+            .departure_spread(spread)
+            .build()
+            .unwrap();
+
+        let mut rng1 = StdRng::seed_from_u64(123);
+        let mut rng2 = StdRng::seed_from_u64(123);
+
+        let s1 = installation.generate_departure_scenario(&mut rng1);
+        let s2 = installation.generate_departure_scenario(&mut rng2);
+        assert_eq!(s1, s2, "Same seed should produce same scenario");
     }
 }

@@ -1,14 +1,16 @@
 use std::error::Error;
 use std::fs::File;
 use csv::ReaderBuilder;
-use serde::Deserialize;
+use serde::{ser, Deserialize};
 use crate::structs::node::{Installation, Location, Base};
+use crate::structs::vessel::Vessel;
 use crate::structs::time_window::TimeWindow;
 use std::str::FromStr;
 use serde::de::DeserializeOwned;
 
 #[derive(Debug, Deserialize)]
 pub struct InstallationCSV {
+    #[serde(rename = "idx")]
     id: usize,
     name: String,
     inst_type: String,
@@ -30,14 +32,15 @@ impl InstallationCSV {
         let location = Location::new(self.location.0, self.location.1);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");  // Handle error or use unwrap()
-        
+        let service_time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1 - self.service_time))
+            .expect("Invalid service time window");  // Handle error or use unwrap()
         let installation = Installation::builder() 
             .id(self.id)
             .name(self.name)
             .location(location)
             .service_time(self.service_time)
-            .time_window(time_window.clone())
-            .service_time_windows(time_window)  // Changed from time_windows to service_TW
+            .time_window(time_window)
+            .service_TW(service_time_window.clone())
             .deck_demand(self.deck_demand as u32)
             .visit_frequency(self.visit_frequency)
             .installation_type(self.inst_type)
@@ -106,6 +109,7 @@ where
 #[derive(Debug, Deserialize)]
 pub struct BaseCSV {
     name: String,
+    #[serde(rename = "idx")]
     id: usize,
     service_time: f64,
     #[serde(deserialize_with = "parse_time_window")]
@@ -120,16 +124,46 @@ impl BaseCSV {
         let location = Location::new(self.location.0, self.location.1);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");
-
+        let service_time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1 - self.service_time))
+            .expect("Invalid service time window");
         let base = Base::builder()
             .name(self.name)
             .id(self.id)
             .service_time(self.service_time)
             .location(location)
-            .time_window(time_window.clone())
-            .service_time_windows(time_window)  // Changed from time_windows to service_TW
+            .time_window(time_window)
+            .service_TW(service_time_window.clone())
             .build()?;
         
         Ok(base)
+    }
+}
+#[derive(Debug, Deserialize)]
+pub struct VesselCSV {
+    #[serde(rename = "idx")]
+    pub id: usize,
+    pub name: String,
+    pub deck_capacity: f64,
+    pub bulk_capacity: f64,
+    pub speed: f64,
+    pub vessel_type: String,
+    pub fcs: f64,
+    pub fcw: f64,
+    pub cost: f64,
+}
+
+impl VesselCSV {
+    pub fn to_vessel(self) -> Result<Vessel, &'static str> {
+        Vessel::builder()
+            .id(self.id)
+            .name(self.name)
+            .deck_capacity(self.deck_capacity)
+            .bulk_capacity(self.bulk_capacity)
+            .speed(self.speed)
+            .vessel_type(self.vessel_type)
+            .fuel_consumption_sailing(self.fcs)
+            .fuel_consumption_waiting(self.fcw)
+            .cost(self.cost)
+            .build()
     }
 }

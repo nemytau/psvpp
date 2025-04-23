@@ -1,33 +1,171 @@
 use core::time;
+use std::time::Duration;
 use permutohedron::Heap;
-use crate::structs::{constants::{DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD}, time_window::TimeWindow};
+use crate::structs::{constants::{DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD}, problem_data::ProblemData, time_window::TimeWindow, visit::Visit, voyage::Voyage};
+
+pub struct TSPResult {
+    pub route: Vec<usize>,
+    pub sailing_time: f64,
+    pub waiting_time: f64,
+    pub arrival_time: f64,
+    pub end_time: f64, // Absolute end time, including wait at depot and service at depot
+}
 
 /*
 Given  n  installations, where each installation  i :
 	•	Must be visited exactly once.
 	•	Has service time s_i
 	•	Has a distance matrix  D[i][j] .
-	•	Has a time window  [e_i, l_i] , where:
-	•	The visit to city  i  must happen between  e_i  and  l_i of any day k. Could be represented as multiple time window matrix e_i_k, l_i_k
+	•	Has a time window  [e_i, l_i].
 	•	The ship starts and ends at base - node 0, ship has travelling speed - v.
 	•	The objective is to minimize total time while satisfying constraints.
+    •	Base is node 0, route starts and ends at base.
 */
+
+// NOTE: Problem formulation says that time windows are same for all days, but in the code we have a vector of time windows for each day.
+// This is a simplification, but it allows for more flexibility in the future: different time windows for different days.
 pub struct TSPSolver {
-    // All fields now take ownership of their data
     distances: Vec<Vec<f64>>,
-    service_time_windows: Vec<Vec<TimeWindow>>,
+    daily_time_windows: Vec<TimeWindow>,
     service_times: Vec<f64>,
-    num_nodes: usize,
+    num_nodes: usize
 }
 
 impl TSPSolver {
     pub fn new(
         distances: Vec<Vec<f64>>, 
-        service_time_windows: Vec<Vec<TimeWindow>>,
+        daily_time_windows: Vec<TimeWindow>,
         service_times: Vec<f64>
     ) -> Self {
         let num_nodes = distances.len();
-        TSPSolver { distances, service_time_windows, service_times, num_nodes }
+        TSPSolver { 
+            distances,
+            daily_time_windows,
+            service_times,
+            num_nodes
+        }
+    }
+    pub fn new_from_problem_data(
+        problem_data: &ProblemData,
+    ) -> Self {
+        let distances = problem_data.distance_manager.distances().clone();
+
+        let mut daily_time_windows = Vec::with_capacity(problem_data.installations.len() + 1);
+        daily_time_windows.push(problem_data.base.service_time_window.clone());
+        daily_time_windows.extend(
+            problem_data.installations.iter()
+                .map(|installation| installation.service_time_window.clone())
+        );
+
+        let mut service_times = Vec::with_capacity(problem_data.installations.len() + 1);
+        service_times.push(problem_data.base.service_time);
+        service_times.extend(
+            problem_data.installations.iter()
+                .map(|installation| installation.get_service_time())
+        );
+
+        TSPSolver::new(distances, daily_time_windows, service_times)
+    }
+
+    // TODO: Consider following comment:
+    // During solve_for_voyage, accept a Vec<&Installation> or Vec<&dyn HasLocationAndTW>.
+    // Let Visit remain a planning layer, but decouple it from optimization core.
+    pub fn solve_for_voyage(&self, voyage: &Voyage, visits: &[&Visit]) -> TSPResult {
+        let speed = voyage.speed().unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
+        let start_time = voyage.start_time().unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
+        self.solve_internal(visits, speed, start_time)
+    }
+
+    pub fn solve_with_speed(&self, visits: &[&Visit], speed: f64, start_time: f64) -> TSPResult {
+        self.solve_internal(visits, speed, start_time)
+    }
+
+    pub fn solve_and_get_end_time(
+        &self,
+        visits: &[&Visit],
+        speed: f64,
+        start_time: f64
+    ) -> f64 {
+        self.solve_internal(visits, speed, start_time).end_time
+    }
+
+    // I f*cked up in this method. I have to lookup for each installation its corresponding visit id which is O(n^2).
+    // It is not critical since we have at maximum 5-10 visits on the route, but it is not optimal.
+    // Possible fixes:
+    // 1. Create a map of installation id to visit id in the constructor of the solver. It will decrease the time complexity to O(n).
+    // 2. Create hashmap here, it will be O(n) but we have to create it every time we call this method.
+    // 3. Use visit ids internally, it will increase distance matrix size, but it will be O(1) lookup.
+    // 4. Shift visit focus on installations and use installations ids as input. It requires more changes in the architecture.
+    fn solve_internal(&self, visits: &[&Visit], speed: f64, start_time: f64) -> TSPResult {
+        // Create ordered parallel vectors
+        let inst_ids: Vec<usize> = visits.iter().map(|v| v.installation_id()).collect();
+        let visit_ids: Vec<usize> = visits.iter().map(|v| v.id()).collect();
+
+        // Solve TSP using installation IDs
+        let (best_route, _) = self.solve_tsp_branch_and_bound(inst_ids.clone(), Some(speed), Some(start_time));
+        let (sailing_time, waiting_time, arrival_time, end_time) = 
+            self.calculate_voyage_details(&best_route, speed, start_time);
+
+        // Strip depot from route
+        let route_without_depot: Vec<usize> = if best_route.len() >= 2 {
+            best_route[1..best_route.len()-1]
+                .iter()
+                .filter_map(|inst_id| {
+                    inst_ids.iter().position(|&id| id == *inst_id).map(|i| visit_ids[i])
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        TSPResult {
+            route: route_without_depot,
+            sailing_time,
+            waiting_time,
+            arrival_time,
+            end_time,
+        }
+    }
+    
+    fn calculate_voyage_details(
+        &self,
+        route: &Vec<usize>,
+        vessel_speed: f64,
+        start_time: f64
+    ) -> (f64, f64, f64, f64) { // (sailing_time, waiting_time, arrival_time, end_time)
+        let mut current_time = start_time;
+        let mut total_sailing_time = 0.0;
+        let mut total_waiting_time = 0.0;
+        
+        for i in 0..route.len() - 1 {
+            let current_node = route[i];
+            let next_node = route[i + 1];
+            let travel_time = self.distances[current_node][next_node] / vessel_speed;
+            
+            // Track sailing time
+            total_sailing_time += travel_time;
+            
+            // Update time considering travel
+            current_time += travel_time;
+            
+            // Only apply time window constraints for non-depot nodes
+            if next_node != 0 {
+                // Calculate wait time
+                let wait_time = self.compute_wait_time(next_node, current_time).unwrap_or(0.0);
+                total_waiting_time += wait_time;
+                
+                // Update time with wait and service
+                current_time += wait_time;
+                current_time += self.service_times[next_node];
+            }
+        }
+        
+        let arrival_time = current_time;
+        // For end_time, check if there's a wait time at the depot
+        let wait_at_depot = self.compute_wait_time(0, arrival_time).unwrap_or(0.0);
+        let end_time = arrival_time + wait_at_depot + self.service_times[0];
+        
+        (total_sailing_time, total_waiting_time, arrival_time, end_time)
     }
 
     pub fn solve_tsp_full_enumeration(
@@ -94,7 +232,7 @@ impl TSPSolver {
     }
 
     // TODO: Implement cost calculation by adding fuel consumption and other factors
-    #[allow(dead_code)]
+    // node_ids - the list of nodes to visit EXCLUDING depot
     pub fn solve_tsp_branch_and_bound(
         &self, 
         node_ids: Vec<usize>, 
@@ -187,43 +325,24 @@ impl TSPSolver {
         node: usize,
         arrival_time: f64,
     ) -> Option<f64> {
-        let relative_arrival_day = ((arrival_time / HOURS_IN_DAY as f64).floor() as usize) % DAYS_IN_PERIOD as usize;
-        let relative_arrival_time = arrival_time % (HOURS_IN_PERIOD as f64);
-        // Try today’s window first
-        let today_tw = &self.service_time_windows[node][relative_arrival_day];
-        if today_tw.contains(relative_arrival_time) {
+        let local_hour = arrival_time % (HOURS_IN_DAY as f64);
+        let tw = &self.daily_time_windows[node];
+        
+        // Check if arrival time is within the time window
+        if tw.contains(local_hour) {
             return Some(0.0); // No wait needed
-        }
+        } 
         else {
-            let earliest = today_tw.earliest.unwrap_or(0.0);
-            let wait_time = earliest - relative_arrival_time;
-            if wait_time > 0.0 && wait_time <= HOURS_IN_DAY as f64 {
-                return Some(wait_time); // Wait until the time window opens
-            }
-            if wait_time < 0.0 {
-
-            }
-        }
-        // Try next day's window if value was not found yet(assumes next day is valid)
-        let next_day = (relative_arrival_day + 1) % DAYS_IN_PERIOD as usize;
-        let next_tw = &self.service_time_windows[node][next_day];
-        let earliest = next_tw.earliest.unwrap_or(0.0);
-        let wait_time = earliest - relative_arrival_time;
-        if wait_time < 0.0 {
-            // Case when arrival time on the first week and time window on the next week
-            let wait_time = (HOURS_IN_PERIOD as f64) + wait_time;
-            if wait_time > HOURS_IN_DAY as f64 {
-                println!("Wait time exceeds 24 hours, wait time calculation in tsp_solver.rs is incorrect");
-                None // Cannot wait — violates next day's window
-            } else if wait_time < 0.0 {
-                println!("Wait time is negative, wait time calculation in tsp_solver.rs is incorrect");
-                None // Cannot wait — violates next day's window
+            // Need to wait until the time window opens
+            let earliest = tw.earliest.unwrap_or(0.0);
+        if local_hour < earliest {
+            // Wait until the time window opens today
+                return Some(earliest - local_hour);
             } else {
-                Some(wait_time)
+// Wait until the time window opens tomorrow
+                return Some(HOURS_IN_DAY as f64 + earliest - local_hour);
             }
-        } else {
-            Some(wait_time)
-        }
+                }
     }
 
     #[allow(dead_code)]
@@ -271,7 +390,7 @@ impl TSPSolver {
                 // Convert to time of day
                 let arrival_day = (arrival_time / (HOURS_IN_DAY as f64)).floor() as u32;
                 let arrival_time_of_day = arrival_time % (HOURS_IN_DAY as f64);
-                let tw = &self.service_time_windows[next_node][arrival_day as usize];
+                let tw = &self.daily_time_windows[next_node];
                 result.push_str(&format!(
                     " (day {:.0}, time of day: {:.2}h, time window: [{:.2}, {:.2}])\n", 
                     arrival_day, arrival_time_of_day, tw.earliest.unwrap_or(0.0), tw.latest.unwrap_or(HOURS_IN_DAY as f64)
@@ -320,18 +439,6 @@ mod tests {
     use crate::structs::node::{Base, Installation};
     use crate::structs::time_window::TimeWindow;
     use crate::structs::constants::{HOURS_IN_DAY, DAYS_IN_PERIOD};
-    
-    /// Helper to create a full week of default time windows for one node
-    fn make_weekly_tw(earliest: f64, latest: f64) -> Vec<TimeWindow> {
-        let mut tws = Vec::with_capacity(DAYS_IN_PERIOD as usize);
-        for day in 0..DAYS_IN_PERIOD {
-            tws.push(TimeWindow::new(
-                Some(earliest + day as f64 * HOURS_IN_DAY as f64),
-                Some(latest + day as f64 * HOURS_IN_DAY as f64)
-            ).unwrap());
-        }
-        tws
-    }
 
     fn new_solver_with_single_node_and_tw(earliest: f64, latest: f64) -> TSPSolver {
         let distances = vec![
@@ -339,13 +446,15 @@ mod tests {
             vec![24.0, 0.0],
         ];
         let service_times = vec![8.0, 1.0];
-        let service_time_windows = vec![make_weekly_tw(8.0, 8.0), make_weekly_tw(earliest, latest)];
-        TSPSolver::new(distances, service_time_windows, service_times)
+        let daily_time_windows = vec![
+            TimeWindow::new(Some(8.0), Some(8.0)).unwrap(),
+            TimeWindow::new(Some(earliest), Some(latest)).unwrap(),
+        ];
+        TSPSolver::new(distances, daily_time_windows, service_times)
     }
-
+    
     #[test]
-    fn test_tsp_solver() {
-        // Test the TSP solver with a simple example
+    fn test_tsp_solver(){    // Test the TSP solver implementation
         let distances = vec![
             vec![0.0, 50.0, 60.0, 70.0],
             vec![50.0, 0.0, 40.0, 30.0],
@@ -359,14 +468,11 @@ mod tests {
             (Some(11.0), Some(15.0)),
         ];
 
-        let service_time_windows: Vec<Vec<TimeWindow>> = 
-            raw_tw_per_node.iter()
-                .map(|&(earliest, latest)| {
-                    make_weekly_tw(earliest.unwrap_or(0.0), latest.unwrap_or(24.0))
-                })
-                .collect();
+        let daily_time_windows = raw_tw_per_node.iter()
+            .map(|&(earliest, latest)| TimeWindow::new(earliest, latest).unwrap())
+            .collect::<Vec<_>>();
         let service_times = vec![1.0, 2.0, 3.0, 4.0];
-        let tsp_solver = TSPSolver::new(distances.clone(), service_time_windows.clone(), service_times.clone());
+        let tsp_solver = TSPSolver::new(distances.clone(), daily_time_windows.clone(), service_times.clone());
         
         let node_ids = vec![1, 2, 3];
         let (best_route, total_duration) = tsp_solver.solve_tsp_full_enumeration(node_ids.clone(), None, None);

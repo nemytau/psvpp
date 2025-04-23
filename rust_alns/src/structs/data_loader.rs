@@ -1,6 +1,6 @@
 use crate::structs::node::{Base, Installation};
 use crate::structs::vessel::Vessel;
-use crate::structs::csv_reader::{InstallationCSV, BaseCSV, read_from_csv};
+use crate::structs::csv_reader::{InstallationCSV, BaseCSV, read_from_csv, VesselCSV};
 use std::error::Error;
 
 pub struct Data {
@@ -23,7 +23,13 @@ pub fn load_installations(file_path: &str) -> Result<Vec<Installation>, Box<dyn 
 
 // Load Vessels
 pub fn load_vessels(file_path: &str) -> Result<Vec<Vessel>, Box<dyn Error>> {
-    let vessels: Vec<Vessel> = read_from_csv(file_path)?;
+    let vessel_csvs: Vec<VesselCSV> = read_from_csv(file_path)?;
+
+    let vessels = vessel_csvs
+        .into_iter()
+        .map(|record| record.to_vessel())
+        .collect::<Result<Vec<_>, _>>()?;
+
     Ok(vessels)
 }
 

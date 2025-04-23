@@ -1,10 +1,13 @@
 mod structs;
 mod utils;
+mod operators;
+use structs::problem_data::ProblemData;
 use serde::de;
 use structs::data_loader;
 use structs::distance_manager::DistanceManager;
 use structs::node::{HasLocation, HasTimeWindows};
 use utils::tsp_solver::TSPSolver;
+use operators::initial_solution::construct_initial_solution;
 
 
 fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
@@ -59,7 +62,54 @@ fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }   
 
+use structs::context::Context;
+use rand::thread_rng;
+
+fn test_main() -> Result<(), Box<dyn std::error::Error>> {
+    let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
+    let vessels_path = "../sample/vessels/SMALL_1/v_test1.csv";
+    let base_path = "../sample/base/SMALL_1/b_test1.csv";
+
+    let data = data_loader::read_data(installations_path, vessels_path, base_path)?;
+    let problem_data = ProblemData::new(data.vessels.clone(), data.installations.clone(), data.base.clone());
+    let tsp_solver = TSPSolver::new_from_problem_data(&problem_data);
+    let context = Context {
+        problem: problem_data,
+        tsp_solver,
+    };
+
+    let mut rng = thread_rng();
+    let solution = construct_initial_solution(&context, &mut rng);
+
+    println!("Constructed solution:");
+    println!("Total voyages: {}", solution.voyages.len());
+    println!("Total visits: {}", solution.visits.len());
+    println!("Feasibility (light): {}", solution.is_feasible_light());
+    println!("Feasibility (deep): {}", solution.is_feasible_deep());
+
+    for voyage in &solution.voyages {
+        println!("Voyage ID: {}", voyage.id);
+        println!("Visit IDs: {:?}", voyage.visit_ids);
+        println!("Sailing time: {:?}", voyage.sailing_time);
+        println!("Waiting time: {:?}", voyage.waiting_time);
+        println!("Arrival time: {:?}", voyage.arrival_time);
+        println!("End time at base: {:?}", voyage.end_time_at_base);
+        println!("Is feasible: {}", voyage.is_feasible);
+    }
+    for visit in &solution.visits {
+        println!("Visit ID: {}", visit.id());
+        println!("Installation ID: {}", visit.installation_id());
+        println!("Departure day: {:?}", visit.departure_day);
+        println!("Service time: {:?}", visit.service_time());
+        println!("Time window: {:?}", context.problem.get_time_window(visit.installation_id()));
+    }
+    // Print the schedule
+    println!("Schedule: {:?}", solution.schedule);
+
+    Ok(())
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    test_main()?;
     Ok(())
 }
