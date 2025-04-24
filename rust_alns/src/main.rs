@@ -1,14 +1,18 @@
+mod operators;
 mod structs;
 mod utils;
-mod operators;
-use structs::problem_data::ProblemData;
-use serde::de;
+
+use rand::thread_rng;
+
+
+use operators::initial_solution::construct_initial_solution;
+use structs::context::Context;
 use structs::data_loader;
 use structs::distance_manager::DistanceManager;
 use structs::node::{HasLocation, HasTimeWindows};
+use structs::problem_data::ProblemData;
+use utils::serialization::{dump_explicit_schedule_to_json, dump_schedule_to_json};
 use utils::tsp_solver::TSPSolver;
-use operators::initial_solution::construct_initial_solution;
-
 
 fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
     // Define the file paths
@@ -62,9 +66,6 @@ fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }   
 
-use structs::context::Context;
-use rand::thread_rng;
-
 fn test_main() -> Result<(), Box<dyn std::error::Error>> {
     let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
     let vessels_path = "../sample/vessels/SMALL_1/v_test1.csv";
@@ -77,7 +78,6 @@ fn test_main() -> Result<(), Box<dyn std::error::Error>> {
         problem: problem_data,
         tsp_solver,
     };
-
     let mut rng = thread_rng();
     let solution = construct_initial_solution(&context, &mut rng);
 
@@ -89,23 +89,23 @@ fn test_main() -> Result<(), Box<dyn std::error::Error>> {
 
     for voyage in &solution.voyages {
         println!("Voyage ID: {}", voyage.id);
-        println!("Visit IDs: {:?}", voyage.visit_ids);
-        println!("Sailing time: {:?}", voyage.sailing_time);
-        println!("Waiting time: {:?}", voyage.waiting_time);
-        println!("Arrival time: {:?}", voyage.arrival_time);
-        println!("End time at base: {:?}", voyage.end_time_at_base);
         println!("Is feasible: {}", voyage.is_feasible);
-    }
-    for visit in &solution.visits {
-        println!("Visit ID: {}", visit.id());
-        println!("Installation ID: {}", visit.installation_id());
-        println!("Departure day: {:?}", visit.departure_day);
-        println!("Service time: {:?}", visit.service_time());
-        println!("Time window: {:?}", context.problem.get_time_window(visit.installation_id()));
     }
     // Print the schedule
     println!("Schedule: {:?}", solution.schedule);
 
+    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis.json")?;
+    dump_explicit_solution(&solution, &context, "../output/explicit_schedule.json")?;
+    Ok(())
+}
+
+pub fn dump_solution(solution: &structs::solution::Solution, vessels: &Vec<structs::vessel::Vessel>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    dump_schedule_to_json(solution, vessels, path);
+    Ok(())
+}
+
+pub fn dump_explicit_solution(solution: &structs::solution::Solution, context: &Context, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    dump_explicit_schedule_to_json(solution, context, path);
     Ok(())
 }
 

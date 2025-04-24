@@ -18,6 +18,7 @@ pub struct Schedule {
     /// voyage_id → end time
     pub voyage_end_times: HashMap<usize, f64>,
     /// (vessel_id, day) → voyage_ids
+    // TODO: Change Vec<usize> to usize
     pub vessel_day_voyages: HashMap<(usize, usize), Vec<usize>>,
 
     /// installation_id → set of visit_ids

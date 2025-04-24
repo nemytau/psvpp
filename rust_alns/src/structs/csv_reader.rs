@@ -32,15 +32,12 @@ impl InstallationCSV {
         let location = Location::new(self.location.0, self.location.1);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");  // Handle error or use unwrap()
-        let service_time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1 - self.service_time))
-            .expect("Invalid service time window");  // Handle error or use unwrap()
         let installation = Installation::builder() 
             .id(self.id)
             .name(self.name)
             .location(location)
             .service_time(self.service_time)
             .time_window(time_window)
-            .service_TW(service_time_window.clone())
             .deck_demand(self.deck_demand as u32)
             .visit_frequency(self.visit_frequency)
             .installation_type(self.inst_type)
@@ -124,17 +121,13 @@ impl BaseCSV {
         let location = Location::new(self.location.0, self.location.1);
         let time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1))
             .expect("Invalid time window");
-        let service_time_window = TimeWindow::new(Some(self.time_window.0), Some(self.time_window.1 - self.service_time))
-            .expect("Invalid service time window");
         let base = Base::builder()
             .name(self.name)
             .id(self.id)
             .service_time(self.service_time)
             .location(location)
             .time_window(time_window)
-            .service_TW(service_time_window.clone())
             .build()?;
-        
         Ok(base)
     }
 }

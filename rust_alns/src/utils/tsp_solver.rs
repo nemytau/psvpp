@@ -96,6 +96,7 @@ impl TSPSolver {
     // 2. Create hashmap here, it will be O(n) but we have to create it every time we call this method.
     // 3. Use visit ids internally, it will increase distance matrix size, but it will be O(1) lookup.
     // 4. Shift visit focus on installations and use installations ids as input. It requires more changes in the architecture.
+    // 5. Store visit_ids in voyage and route as sequence of installation ids. Probably right solution.
     fn solve_internal(&self, visits: &[&Visit], speed: f64, start_time: f64) -> TSPResult {
         // Create ordered parallel vectors
         let inst_ids: Vec<usize> = visits.iter().map(|v| v.installation_id()).collect();
@@ -127,6 +128,17 @@ impl TSPSolver {
         }
     }
     
+    pub fn get_time_window(
+        &self,
+        node_id: usize,
+    ) -> Option<(f64, f64)> {
+        if node_id < self.daily_time_windows.len() {
+            let tw = &self.daily_time_windows[node_id];
+            Some((tw.earliest.unwrap_or(0.0), tw.latest.unwrap_or(HOURS_IN_DAY as f64)))
+        } else {
+            None
+        }
+    }
     fn calculate_voyage_details(
         &self,
         route: &Vec<usize>,
@@ -320,7 +332,7 @@ impl TSPSolver {
         }
     }
 
-    fn compute_wait_time(
+    pub fn compute_wait_time(
         &self,
         node: usize,
         arrival_time: f64,
@@ -440,7 +452,7 @@ mod tests {
     use crate::structs::time_window::TimeWindow;
     use crate::structs::constants::{HOURS_IN_DAY, DAYS_IN_PERIOD};
 
-    fn new_solver_with_single_node_and_tw(earliest: f64, latest: f64) -> TSPSolver {
+    fn new_solver_with_single_node_and_tw(earliest: Option<f64>, latest: Option<f64>) -> TSPSolver {
         let distances = vec![
             vec![0.0, 24.0],
             vec![24.0, 0.0],
@@ -448,7 +460,7 @@ mod tests {
         let service_times = vec![8.0, 1.0];
         let daily_time_windows = vec![
             TimeWindow::new(Some(8.0), Some(8.0)).unwrap(),
-            TimeWindow::new(Some(earliest), Some(latest)).unwrap(),
+            TimeWindow::new(earliest, latest).unwrap(),
         ];
         TSPSolver::new(distances, daily_time_windows, service_times)
     }
@@ -492,7 +504,7 @@ mod tests {
     /// Case 1: Arrival within time window => wait = 0
     #[test]
     fn test_wait_time_computation_tw_case_1() {
-        let solver = new_solver_with_single_node_and_tw(9.0, 13.0);
+        let solver = new_solver_with_single_node_and_tw(Some(9.0), Some(13.0));
         let arrival = 10.0; // within today's time window
         let wait = solver.compute_wait_time(1, arrival);
         println!("Case 1: wait = {:?}", wait);
@@ -501,7 +513,7 @@ mod tests {
     /// Case 2: Arrival before time window => wait = earliest - arrival
     #[test]
     fn test_wait_time_computation_tw_case_2() {
-        let solver = new_solver_with_single_node_and_tw(9.0, 13.0);
+        let solver = new_solver_with_single_node_and_tw(Some(9.0), Some(13.0));
         let arrival = 8.0;
         let wait = solver.compute_wait_time(1, arrival);
         println!("Case 2: wait = {:?}", wait);
@@ -510,7 +522,7 @@ mod tests {
     /// Case 3: Arrival today, but today’s time window is invalid → use tomorrow
     #[test]
     fn test_wait_time_computation_tw_case_3() {
-        let mut solver = new_solver_with_single_node_and_tw(9.0, 13.0);
+        let mut solver = new_solver_with_single_node_and_tw(Some(9.0), Some(13.0));
         
         let arrival = 22.0; // near end of day 0
         let wait = solver.compute_wait_time(1, arrival);
@@ -521,7 +533,7 @@ mod tests {
     /// Case 4: Arrival on same weekday, next week → wait = 0
     #[test]
     fn test_wait_time_computation_tw_case_4() {
-        let solver = new_solver_with_single_node_and_tw(9.0, 13.0);
+        let solver = new_solver_with_single_node_and_tw(Some(9.0), Some(13.0));
         let arrival = 10.0 + (HOURS_IN_DAY * DAYS_IN_PERIOD) as f64; // next Monday at 09:00
         let wait = solver.compute_wait_time(1, arrival);
         println!("Case 4: wait = {:?}", wait);
@@ -530,7 +542,7 @@ mod tests {
     /// Case 5: Arrival next week, wait till next day
     #[test]
     fn test_wait_time_computation_tw_case_5() {
-        let mut solver = new_solver_with_single_node_and_tw(9.0, 13.0);
+        let mut solver = new_solver_with_single_node_and_tw(Some(9.0), Some(13.0));
         let arrival = 14.0 + DAYS_IN_PERIOD as f64 * HOURS_IN_DAY as f64; // next Tuesday 09:00
         let expected = 9.0 + (1.0 + DAYS_IN_PERIOD as f64) * HOURS_IN_DAY as f64 - arrival; // next Wednesday 09:00 - arrival
         let wait = solver.compute_wait_time(1, arrival);
@@ -540,7 +552,7 @@ mod tests {
     /// Case 6: Arrival on last day (Sunday), after time window → wait until next week's window
     #[test]
     fn test_wait_time_computation_tw_case_6() {
-        let solver = new_solver_with_single_node_and_tw(9.0, 13.0);
+        let solver = new_solver_with_single_node_and_tw(Some(9.0), Some(13.0));
 
         let sunday = DAYS_IN_PERIOD - 1; // Sunday = day 6 (0-based)
         let arrival = (sunday as f64) * HOURS_IN_DAY as f64 + 20.0; // Sunday at 20:00
@@ -551,5 +563,23 @@ mod tests {
         let wait = solver.compute_wait_time(1, arrival);
         println!("Case 6: wait = {:?}, expected = {}", wait, expected);
         assert!((wait.unwrap() - expected).abs() < 1e-6);
+    }
+    /// Case 7: Arrival at 11:30 p.m. on Tuesday, service 1 hour, installation TW setup as [0, 24]
+    #[test]
+    fn test_wait_time_computation_tw_case_7() {
+        let solver = new_solver_with_single_node_and_tw(Some(0.0), Some(24.0));
+        let arrival = HOURS_IN_DAY as f64 * 1.0 + 23.5; // Tuesday at 11:30 p.m.
+        let wait = solver.compute_wait_time(1, arrival);
+        println!("Case 7: wait = {:?}", wait);
+        assert_eq!(wait, Some(0.0));
+    }
+    /// Case 8: Arrival at 11:30 p.m. on Tuesday, service 1 hour, installation TW setup as [None, None]
+    #[test]
+    fn test_wait_time_computation_tw_case_8() {
+        let solver = new_solver_with_single_node_and_tw(None, None);
+        let arrival = HOURS_IN_DAY as f64 * 1.0 + 23.5; // Tuesday at 11:30 p.m.
+        let wait = solver.compute_wait_time(1, arrival);
+        println!("Case 8: wait = {:?}", wait);
+        assert_eq!(wait, Some(0.0));
     }
 }

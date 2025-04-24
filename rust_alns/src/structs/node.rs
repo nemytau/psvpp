@@ -130,7 +130,7 @@ pub struct InstallationBuilder {
     departure_spread: u32,
     service_time: f64,
     time_window: TimeWindow,
-    service_time_window: TimeWindow,
+    service_time_window: Option<TimeWindow>,
 }
 
 impl InstallationBuilder {
@@ -180,11 +180,25 @@ impl InstallationBuilder {
     }
     
     pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
-        self.service_time_window = time_window;
+        self.service_time_window = Some(time_window);
         self
     }
 
     pub fn build(self) -> Result<Installation, &'static str> {
+        // Calculate service time window if not explicitly set
+        let service_time_window = self.service_time_window.unwrap_or_else(|| {
+            let tw = &self.time_window;
+            let service_time = self.service_time;
+            if let (Some(start), Some(end)) = (tw.earliest, tw.latest) {
+                if (end - start).abs() >= 24.0 {
+                    TimeWindow::new(Some(start), Some(end)).unwrap_or_default()
+                } else {
+                    TimeWindow::new(Some(start), Some(end - service_time)).unwrap_or_default()
+                }
+            } else {
+                TimeWindow::new(tw.earliest, tw.latest).unwrap_or_default()
+            }
+        });
         Ok(Installation {
             id: self.id,
             node: Node::new(self.name, self.location),
@@ -194,7 +208,7 @@ impl InstallationBuilder {
             departure_spread: self.departure_spread,
             service_time: self.service_time,
             time_window: self.time_window,
-            service_time_window: self.service_time_window,
+            service_time_window,
         })
     }
 }
@@ -288,10 +302,15 @@ impl BaseBuilder {
         
         // Calculate service time window if not explicitly set
         let service_time_window = self.service_time_window.unwrap_or_else(|| {
-            TimeWindow::new(
-                time_window.earliest,
-                time_window.latest.map(|latest| latest - service_time),
-            ).unwrap_or_default()
+            if let (Some(start), Some(end)) = (time_window.earliest, time_window.latest) {
+                if (end - start).abs() >= 24.0 {
+                    TimeWindow::new(Some(start), Some(end)).unwrap_or_default()
+                } else {
+                    TimeWindow::new(Some(start), Some(end - service_time)).unwrap_or_default()
+                }
+            } else {
+                TimeWindow::new(time_window.earliest, time_window.latest).unwrap_or_default()
+            }
         });
         
         Ok(Base {

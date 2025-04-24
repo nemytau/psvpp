@@ -101,7 +101,7 @@ impl Solution {
             for (i, (start_i, end_i)) in times.iter().enumerate() {
                 for (j, (start_j, end_j)) in times.iter().enumerate() {
                     if i != j &&
-                        crate::utils::utils::intervals_overlap(**start_i, **end_i, **start_j, **end_j)
+                        crate::utils::utils::cyclic_intervals_overlap(**start_i, **end_i, **start_j, **end_j, crate::structs::constants::HOURS_IN_PERIOD as f64)
                     {
                         return false;
                     }
