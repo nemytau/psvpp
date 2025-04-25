@@ -102,3 +102,113 @@ pytest tests/
 
 For questions or collaboration, reach out to nemytov.t@gmail.com .
 
+
+```
+psvpp
+├─ README.md
+├─ alns
+│  ├─ Beans
+│  │  ├─ __init__.py
+│  │  ├─ node.py
+│  │  ├─ schedule.py
+│  │  ├─ vessel.py
+│  │  ├─ visit.py
+│  │  └─ voyage.py
+│  ├─ __init__.py
+│  ├─ alns
+│  │  ├─ __init__.py
+│  │  ├─ alns.py
+│  │  ├─ destroy_operator.py
+│  │  ├─ improve_operator.py
+│  │  ├─ mutation_service.py
+│  │  └─ repair_operator.py
+│  ├─ data_generator.py
+│  ├─ resource
+│  │  ├─ __init__.py
+│  │  ├─ generation_config.yaml
+│  │  └─ io_config.yaml
+│  ├─ rl
+│  │  ├─ __init__.py
+│  │  ├─ q-learn
+│  │  │  ├─ __init__.py
+│  │  │  └─ q learning.py
+│  │  └─ sarsa
+│  │     ├─ __init__.py
+│  │     └─ sarsa.py
+│  └─ utils
+│     ├─ __init__.py
+│     ├─ coord.py
+│     ├─ distance_manager.py
+│     ├─ io.py
+│     ├─ tsp_solver.py
+│     └─ utils.py
+├─ alns_main.py
+├─ config
+│  ├─ __init__.py
+│  ├─ config_utils.py
+│  └─ settings.ini
+├─ coop_case.py
+├─ generate_dataset.py
+├─ logs
+├─ main.py
+├─ rust_alns
+│  ├─ Cargo.lock
+│  ├─ Cargo.toml
+│  ├─ src
+│  │  ├─ lib.rs
+│  │  ├─ main.rs
+│  │  ├─ operators
+│  │  ├─ structs
+│  │  │  ├─ constants.rs
+│  │  │  ├─ csv_reader.rs
+│  │  │  ├─ data_loader.rs
+│  │  │  ├─ distance_manager.rs
+│  │  │  ├─ mod.rs
+│  │  │  ├─ node.rs
+│  │  │  ├─ schedule.rs
+│  │  │  ├─ time_window.rs
+│  │  │  ├─ transaction.rs
+│  │  │  ├─ vessel.rs
+│  │  │  ├─ visit.rs
+│  │  │  └─ voyage.rs
+│  │  └─ utils
+│  │     ├─ mod.rs
+│  │     └─ tsp_solver.rs
+│  └─ tests
+├─ rust_main.py
+├─ sample
+│  ├─ base
+│  │  ├─ SMALL_1
+│  │  │  ├─ b_test1.csv
+│  │  │  └─ b_test1.pkl
+│  │  ├─ SMALL_2
+│  │  │  └─ b_test1.pkl
+│  │  └─ SMALL_3
+│  │     └─ b_test1.pkl
+│  ├─ installations
+│  │  ├─ SMALL_1
+│  │  │  ├─ i_test1.csv
+│  │  │  └─ i_test1.pkl
+│  │  ├─ SMALL_2
+│  │  │  └─ i_test1.pkl
+│  │  └─ SMALL_3
+│  │     └─ i_test1.pkl
+│  ├─ solutions
+│  │  ├─ SMALL_2
+│  │  │  └─ sol_test1_2.pkl
+│  │  └─ SMALL_3
+│  │     └─ sol_test1_1.pkl
+│  └─ vessels
+│     ├─ SMALL_1
+│     │  ├─ v_test1.csv
+│     │  └─ v_test1.pkl
+│     ├─ SMALL_2
+│     │  └─ v_test1.pkl
+│     └─ SMALL_3
+│        └─ v_test1.pkl
+├─ tests
+│  └─ operators
+│     └─ greedy.py
+└─ visualization.ipynb
+
+```
