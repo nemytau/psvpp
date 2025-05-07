@@ -65,8 +65,7 @@ impl Solution {
     }
 
     pub fn optimize_voyage_route(&mut self, voyage: &mut Voyage, context: &Context) {
-        let voyage_visits = self.get_visits_for_voyage(voyage);
-        let result = context.tsp_solver.solve_for_voyage(voyage, &voyage_visits);
+        let result = context.tsp_solver.solve_for_voyage(voyage);
         voyage.update_from_tsp_result(result);
     }
 

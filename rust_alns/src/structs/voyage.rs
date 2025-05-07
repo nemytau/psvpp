@@ -120,7 +120,7 @@ impl Voyage {
     }
 
     pub fn update_from_tsp_result(&mut self, result: TSPResult) {
-        self.visit_ids = result.route;
+        self.visit_ids = result.visit_ids_seq;
         self.sailing_time = Some(result.sailing_time);
         self.waiting_time = Some(result.waiting_time);
         self.arrival_time = Some(result.arrival_time);
@@ -155,6 +155,18 @@ impl Voyage {
             self.need_update = true;
         }
         removed
+    }
+
+    // Calculates the lowest insertion cost of a visit into the voyage
+    pub fn best_insertion_cost(&self, context: &Context, visit: usize) -> f64 {
+        return 0.0;
+    }
+    pub fn insertion_cost(&self, context: &Context, visit: usize, position: usize) -> f64 {
+        return 0.0;
+    }
+
+    pub fn get_visit_sequence(&self) -> Vec<usize> {
+        self.visit_ids.clone()
     }
 }
 

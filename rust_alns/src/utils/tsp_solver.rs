@@ -1,10 +1,11 @@
 use core::time;
+use std::collections::HashMap;
 use std::time::Duration;
 use permutohedron::Heap;
 use crate::structs::{constants::{DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD}, problem_data::ProblemData, time_window::TimeWindow, visit::Visit, voyage::Voyage};
 
 pub struct TSPResult {
-    pub route: Vec<usize>,
+    pub visit_ids_seq: Vec<usize>,
     pub sailing_time: f64,
     pub waiting_time: f64,
     pub arrival_time: f64,
@@ -28,21 +29,24 @@ pub struct TSPSolver {
     distances: Vec<Vec<f64>>,
     daily_time_windows: Vec<TimeWindow>,
     service_times: Vec<f64>,
-    num_nodes: usize
+    num_nodes: usize,
+    pub visit_to_installation: HashMap<usize, usize>,
 }
 
 impl TSPSolver {
     pub fn new(
         distances: Vec<Vec<f64>>, 
         daily_time_windows: Vec<TimeWindow>,
-        service_times: Vec<f64>
+        service_times: Vec<f64>,
+        visit_to_installation: HashMap<usize, usize>,
     ) -> Self {
         let num_nodes = distances.len();
         TSPSolver { 
             distances,
             daily_time_windows,
             service_times,
-            num_nodes
+            num_nodes,
+            visit_to_installation,
         }
     }
     pub fn new_from_problem_data(
@@ -64,32 +68,74 @@ impl TSPSolver {
                 .map(|installation| installation.get_service_time())
         );
 
-        TSPSolver::new(distances, daily_time_windows, service_times)
+        let visits = problem_data.generate_visits();
+        // IMPORTANT: installation_id == index in the distance matrix
+        let visit_to_installation: HashMap<usize, usize> = visits.iter()
+            .map(|v| (v.id(), v.installation_id()))
+            .collect();
+
+        TSPSolver::new(distances, daily_time_windows, service_times, visit_to_installation)
     }
 
     // TODO: Consider following comment:
     // During solve_for_voyage, accept a Vec<&Installation> or Vec<&dyn HasLocationAndTW>.
     // Let Visit remain a planning layer, but decouple it from optimization core.
-    pub fn solve_for_voyage(&self, voyage: &Voyage, visits: &[&Visit]) -> TSPResult {
+    // It is not really solving for the voyage, it only takes the speed from the voyage, but
+    // it is solving for the visits provided.
+    pub fn solve_for_voyage(&self, voyage: &Voyage) -> TSPResult {
         let speed = voyage.speed().unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
         let start_time = voyage.start_time().unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
-        self.solve_internal(visits, speed, start_time)
+        self.solve_internal(voyage.get_visit_sequence(), speed, start_time)
     }
 
-    pub fn solve_with_speed(&self, visits: &[&Visit], speed: f64, start_time: f64) -> TSPResult {
-        self.solve_internal(visits, speed, start_time)
+    // Tries inserting an extra visit in every possible position in the route, evaluates the cost/time,
+    // and returns the best route and costs/times.
+    pub fn solve_with_extra_visit(&self, voyage: &Voyage, extra_visit: &Visit) -> TSPResult {
+        let current_visit_sequence = voyage.get_visit_sequence();
+        let speed = voyage.speed().unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
+        let start_time = voyage.start_time().unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
+
+        let mut best_route = Vec::new();
+        let mut best_cost = f64::INFINITY;
+        let mut best_sailing_time = 0.0;
+        let mut best_waiting_time = 0.0;
+        let mut best_arrival_time = 0.0;
+        let mut best_end_time = 0.0;
+
+        for i in 0..current_visit_sequence.len() {
+            let mut updated_visit_sequence = current_visit_sequence.to_vec();
+            updated_visit_sequence.insert(i, extra_visit.installation_id());
+            
+            let result = self.visit_sequence_to_result(&updated_visit_sequence, speed, start_time);
+            if result.end_time < best_cost {
+                best_route = result.visit_ids_seq.clone();
+                best_cost = result.end_time;
+                best_sailing_time = result.sailing_time;
+                best_waiting_time = result.waiting_time;
+                best_arrival_time = result.arrival_time;
+                best_end_time = result.end_time;
+            }
+        }
+
+        TSPResult {
+            visit_ids_seq: best_route,
+            sailing_time: best_sailing_time,
+            waiting_time: best_waiting_time,
+            arrival_time: best_arrival_time,
+            end_time: best_end_time,
+        }
     }
 
     pub fn solve_and_get_end_time(
         &self,
-        visits: &[&Visit],
+        visit_ids: &[usize],
         speed: f64,
         start_time: f64
     ) -> f64 {
-        self.solve_internal(visits, speed, start_time).end_time
+        self.solve_internal(visit_ids.to_vec(), speed, start_time).end_time
     }
 
-    // I f*cked up in this method. I have to lookup for each installation its corresponding visit id which is O(n^2).
+    // I f*cked up this method. I have to lookup for each installation its corresponding visit id which is O(n^2).
     // It is not critical since we have at maximum 5-10 visits on the route, but it is not optimal.
     // Possible fixes:
     // 1. Create a map of installation id to visit id in the constructor of the solver. It will decrease the time complexity to O(n).
@@ -97,11 +143,10 @@ impl TSPSolver {
     // 3. Use visit ids internally, it will increase distance matrix size, but it will be O(1) lookup.
     // 4. Shift visit focus on installations and use installations ids as input. It requires more changes in the architecture.
     // 5. Store visit_ids in voyage and route as sequence of installation ids. Probably right solution.
-    fn solve_internal(&self, visits: &[&Visit], speed: f64, start_time: f64) -> TSPResult {
-        // Create ordered parallel vectors
-        let inst_ids: Vec<usize> = visits.iter().map(|v| v.installation_id()).collect();
-        let visit_ids: Vec<usize> = visits.iter().map(|v| v.id()).collect();
-
+    // Fixed (?), still n2 though.
+    fn solve_internal(&self, visit_ids: Vec<usize>, speed: f64, start_time: f64) -> TSPResult {
+        // Convert visit IDs to installation IDs
+        let inst_ids: Vec<usize> = self.visit_ids_to_installation_ids_sequence(&visit_ids);
         // Solve TSP using installation IDs
         let (best_route, _) = self.solve_tsp_branch_and_bound(inst_ids.clone(), Some(speed), Some(start_time));
         let (sailing_time, waiting_time, arrival_time, end_time) = 
@@ -109,18 +154,14 @@ impl TSPSolver {
 
         // Strip depot from route
         let route_without_depot: Vec<usize> = if best_route.len() >= 2 {
-            best_route[1..best_route.len()-1]
-                .iter()
-                .filter_map(|inst_id| {
-                    inst_ids.iter().position(|&id| id == *inst_id).map(|i| visit_ids[i])
-                })
-                .collect()
+            best_route[1..best_route.len()-1].to_vec()
         } else {
             Vec::new()
         };
-
+        // Convert installation IDs back to visit IDs
+        let route_without_depot = self.installation_ids_to_visit_ids_sequence(&route_without_depot, &visit_ids);
         TSPResult {
-            route: route_without_depot,
+            visit_ids_seq: route_without_depot,
             sailing_time,
             waiting_time,
             arrival_time,
@@ -128,6 +169,33 @@ impl TSPSolver {
         }
     }
     
+    fn visit_ids_to_installation_ids_sequence(
+        &self,
+        visit_ids: &[usize],
+    ) -> Vec<usize> {
+        visit_ids.iter()
+            .filter_map(|&visit_id| self.visit_to_installation.get(&visit_id))
+            .cloned()
+            .collect()
+    }
+    fn installation_ids_to_visit_ids_sequence(
+        &self,
+        installation_ids: &[usize],
+        visit_ids: &[usize],
+    ) -> Vec<usize> {
+        let mut remaining_visits: Vec<usize> = visit_ids.to_vec();
+        let mut result = Vec::with_capacity(installation_ids.len());
+    
+        for &inst_id in installation_ids {
+            if let Some(pos) = remaining_visits.iter().position(|&vid| {
+                self.visit_to_installation.get(&vid) == Some(&inst_id)
+            }) {
+                result.push(remaining_visits.remove(pos));
+            }
+        }
+    
+        result
+    }
     pub fn get_time_window(
         &self,
         node_id: usize,
@@ -139,6 +207,43 @@ impl TSPSolver {
             None
         }
     }
+    fn visit_sequence_to_result(
+        &self,
+        visit_sequence: &Vec<usize>,
+        vessel_speed: f64,
+        start_time: f64
+    ) -> TSPResult {
+        let route = self.visit_sequence_to_route(visit_sequence);
+        let (sailing_time, waiting_time, arrival_time, end_time) = 
+            self.calculate_voyage_details(&route, vessel_speed, start_time);        
+        TSPResult {
+            visit_ids_seq: visit_sequence.clone(),
+            sailing_time,
+            waiting_time,
+            arrival_time,
+            end_time,
+        }
+    }
+
+    fn visit_sequence_to_route(
+        &self,
+        visit_sequence: &Vec<usize>,
+    ) -> Vec<usize> {
+        let inst_sequence: Vec<usize> = self.visit_ids_to_installation_ids_sequence(visit_sequence);
+        self.inst_sequence_to_route(&inst_sequence)
+    }
+    fn inst_sequence_to_route(
+        &self,
+        inst_sequence: &Vec<usize>,
+    ) -> Vec<usize> {
+        let mut route = vec![0]; // Start at depot
+        route.extend(inst_sequence);
+        route.push(0); // End at depot
+        route
+    }
+
+    // Calculate the voyage details including sailing time, waiting time, arrival time, and end time
+    // Expected to have the route starting and ending at the depot (node 0)
     fn calculate_voyage_details(
         &self,
         route: &Vec<usize>,
@@ -182,7 +287,7 @@ impl TSPSolver {
 
     pub fn solve_tsp_full_enumeration(
         &self, 
-        node_ids: Vec<usize>, 
+        inst_indices: Vec<usize>, 
         vessel_speed: Option<f64>, 
         start_time: Option<f64>
     ) -> (Vec<usize>, f64) {
@@ -190,11 +295,11 @@ impl TSPSolver {
         let vessel_speed = vessel_speed.unwrap_or(12.0);
         let start_time = start_time.unwrap_or(16.0);
         
-        if node_ids.is_empty() {
+        if inst_indices.is_empty() {
             return (vec![], start_time);
         }
         
-        let mut nodes: Vec<usize> = node_ids.into_iter().filter(|&id| id != 0).collect();
+        let mut nodes: Vec<usize> = inst_indices.into_iter().filter(|&id| id != 0).collect();
         let heap = Heap::new(&mut nodes);
         let mut min_end_time = f64::INFINITY;
         let mut best_route = Vec::new();
@@ -220,34 +325,15 @@ impl TSPSolver {
         vessel_speed: f64, 
         start_time: f64
     ) -> f64 {
-        let mut current_time = start_time;
-        
-        for i in 0..route.len() - 1 {
-            let current_node = route[i];
-            let next_node = route[i + 1];
-            let travel_time = self.distances[current_node][next_node] / vessel_speed;
-            
-            // Update time considering travel
-            current_time += travel_time;
-            
-            // Only apply time window constraints for non-depot nodes
-            if next_node != 0 {
-                // Convert to time of day
-                let wait_time = self.compute_wait_time(next_node, current_time).unwrap_or(0.0);
-                current_time += wait_time;
-                // Add service time
-                current_time += self.service_times[next_node];
-            }
-        }
-        
-        current_time
+        // Arrival time to the depot
+        self.calculate_voyage_details(route, vessel_speed, start_time).2
     }
 
     // TODO: Implement cost calculation by adding fuel consumption and other factors
-    // node_ids - the list of nodes to visit EXCLUDING depot
+    // inst_indices - the list of nodes to visit EXCLUDING depot
     pub fn solve_tsp_branch_and_bound(
         &self, 
-        node_ids: Vec<usize>, 
+        inst_indices: Vec<usize>, 
         vessel_speed: Option<f64>, 
         start_time: Option<f64>
     ) -> (Vec<usize>, f64) {
@@ -268,7 +354,7 @@ impl TSPSolver {
             0,
             init_time,
             0.0,
-            &node_ids,
+            &inst_indices,
             &mut visited,
             &mut current_route,
             &mut best_route,
@@ -462,7 +548,10 @@ mod tests {
             TimeWindow::new(Some(8.0), Some(8.0)).unwrap(),
             TimeWindow::new(earliest, latest).unwrap(),
         ];
-        TSPSolver::new(distances, daily_time_windows, service_times)
+        let mut visit_to_installation = HashMap::new();
+        visit_to_installation.insert(0, 0);
+        visit_to_installation.insert(1, 1);
+        TSPSolver::new(distances, daily_time_windows, service_times, visit_to_installation)
     }
     
     #[test]
@@ -484,15 +573,20 @@ mod tests {
             .map(|&(earliest, latest)| TimeWindow::new(earliest, latest).unwrap())
             .collect::<Vec<_>>();
         let service_times = vec![1.0, 2.0, 3.0, 4.0];
-        let tsp_solver = TSPSolver::new(distances.clone(), daily_time_windows.clone(), service_times.clone());
+        let inst_indices = vec![1, 2, 3];
+        let visit_indices = vec![1, 2, 3];
+        let mut visit_to_installation = HashMap::new();
+        for i in 0..visit_indices.len() {
+            visit_to_installation.insert(visit_indices[i], inst_indices[i]);
+        }
+        let tsp_solver = TSPSolver::new(distances.clone(), daily_time_windows.clone(), service_times.clone(), visit_to_installation.clone());
         
-        let node_ids = vec![1, 2, 3];
-        let (best_route, total_duration) = tsp_solver.solve_tsp_full_enumeration(node_ids.clone(), None, None);
-        let (bb_route, bb_duration) = tsp_solver.solve_tsp_branch_and_bound(node_ids.clone(), None, None);
+        let (best_route, total_duration) = tsp_solver.solve_tsp_full_enumeration(inst_indices.clone(), None, None);
+        let (bb_route, bb_duration) = tsp_solver.solve_tsp_branch_and_bound(inst_indices.clone(), None, None);
 
-        assert_eq!(best_route.len(), node_ids.len() + 2); // Including depot
+        assert_eq!(best_route.len(), inst_indices.len() + 2); // Including depot
         assert_eq!(total_duration > 0.0, true);
-        assert_eq!(bb_route.len(), node_ids.len() + 2); // Including depot
+        assert_eq!(bb_route.len(), inst_indices.len() + 2); // Including depot
         assert_eq!(bb_duration > 0.0, true);
         assert_eq!(best_route, bb_route); // Both methods should yield the same route
         assert_eq!(total_duration, bb_duration); // Both methods should yield the same duration

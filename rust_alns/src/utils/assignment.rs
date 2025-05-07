@@ -21,7 +21,6 @@ pub fn assign_smallest_available_vessel(
 
     let start_time = voyage.start_time().unwrap();
     let tsp_solver = &context.tsp_solver;
-    let voyage_visits = solution.get_visits_for_voyage(voyage);
     let schedule = &solution.schedule;
     
     for vessel in vessels {
@@ -29,7 +28,7 @@ pub fn assign_smallest_available_vessel(
             continue; // not enough capacity
         }
         let end_time = tsp_solver.solve_and_get_end_time(
-            &voyage_visits,
+            &voyage.visit_ids,
             vessel.speed,
             start_time,
         );
