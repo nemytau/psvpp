@@ -6,6 +6,8 @@ use rand::thread_rng;
 
 
 use operators::initial_solution::construct_initial_solution;
+use crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages;
+use crate::operators::traits::DestroyOperator;
 use structs::context::Context;
 use structs::data_loader;
 use structs::distance_manager::DistanceManager;
@@ -79,7 +81,7 @@ fn test_main() -> Result<(), Box<dyn std::error::Error>> {
         tsp_solver,
     };
     let mut rng = thread_rng();
-    let solution = construct_initial_solution(&context, &mut rng);
+    let mut solution = construct_initial_solution(&context, &mut rng);
 
     println!("Constructed solution:");
     println!("Total voyages: {}", solution.voyages.len());
@@ -96,6 +98,18 @@ fn test_main() -> Result<(), Box<dyn std::error::Error>> {
 
     dump_solution(&solution, &context.problem.vessels, "../output/solution_vis.json")?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule.json")?;
+
+    // Apply destroy operator
+    let destroy_operator = RandomVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8 };
+    destroy_operator.apply(&mut solution, &context, &mut rng);
+
+    // Output unassigned visits
+    println!("Unassigned visits after destroy:");
+    for (i, visit) in solution.visits.iter().enumerate() {
+        if !visit.is_assigned {
+            println!("Visit index: {}, Visit ID: {}", i, visit.id());
+        }
+    }
     Ok(())
 }
 

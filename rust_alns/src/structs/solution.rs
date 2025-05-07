@@ -29,7 +29,7 @@ impl Solution {
             is_feasible: false,
         }
     }
-    // Assumed that voyage is feasible
+    // Assumed that voyage is feasible and insertion is valid
     pub fn add_voyage(&mut self, voyage: Voyage) {
         self.schedule.assign_voyage(&voyage, &self.visits);
         for visit_id in &voyage.visit_ids {
@@ -47,6 +47,23 @@ impl Solution {
         // You can call the construct_initial_solution function here
         // e.g., construct_initial_solution(&self.visits, &context.problem.vessels);
     }
+
+    pub fn unassign_visits(&mut self, visit_ids: &[usize]) {
+        for visit_index in visit_ids {
+            if let Some(visit) = self.visits.get_mut(*visit_index) {
+                visit.unassign();
+            }
+        }
+        // Removes visits from voyages without recalculating voyages and the schedule
+        for voyage in &mut self.voyages {
+            // NOTE: It passes ALL visit_ids to remove, even if they are not in the voyage
+            // This is a potential performance issue, but it is safe
+            voyage.remove_visits(visit_ids);
+        }
+        // Update schedule to match updated voyages
+        self.schedule.set_need_update(true); // Use setter method
+    }
+
     pub fn optimize_voyage_route(&mut self, voyage: &mut Voyage, context: &Context) {
         let voyage_visits = self.get_visits_for_voyage(voyage);
         let result = context.tsp_solver.solve_for_voyage(voyage, &voyage_visits);
@@ -147,4 +164,8 @@ impl Solution {
         true
     }
 
+    // Returns unassigned visits
+    pub fn get_unassigned_visits(&self) -> Vec<&Visit> {
+        self.visits.iter().filter(|v| !v.is_assigned).collect()
+    }
 }

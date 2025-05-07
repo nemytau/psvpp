@@ -23,15 +23,19 @@ pub struct Schedule {
 
     /// installation_id → set of visit_ids
     pub departures_by_installation: HashMap<usize, BTreeSet<usize>>,
+
+    /// Indicates if the schedule needs an update
+    need_update: bool, // Made private
 }
 
-impl Schedule{
+impl Schedule {
     pub fn empty() -> Self {
         Schedule {
             voyage_start_times: HashMap::new(),
             voyage_end_times: HashMap::new(),
             vessel_day_voyages: HashMap::new(),
             departures_by_installation: HashMap::new(),
+            need_update: false,
         }
     }
     pub fn assign_voyage(&mut self, voyage: &Voyage, visits: &[Visit]) {
@@ -48,6 +52,17 @@ impl Schedule{
                 .insert(*visit_id);
         }
     }
+
+    /// Getter for need_update
+    pub fn needs_update(&self) -> bool {
+        self.need_update
+    }
+
+    /// Setter for need_update
+    pub fn set_need_update(&mut self, value: bool) {
+        self.need_update = value;
+    }
+
     pub fn is_vessel_available_for_period(
         &self, 
         vessel_id: usize, 
