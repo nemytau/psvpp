@@ -1,4 +1,5 @@
 use core::panic;
+use log::{info, debug, warn, error};
 use rand::RngCore;
 use crate::structs::{context::Context, solution::Solution};
 use crate::operators::traits::RepairOperator;
@@ -7,9 +8,11 @@ pub struct DeepGreedyInsertion;
 
 impl RepairOperator for DeepGreedyInsertion {
     fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
+        info!(target: "operator::repair", "[DeepGreedyInsertion] Invoked");
         // Always ensure schedule is up-to-date before any cost-based insertion logic.
         solution.ensure_schedule_is_updated();
         let mut uninserted_visits: Vec<usize> = solution.get_unassigned_visits().iter().map(|v| v.id()).collect();
+        let mut iteration = 0;
         while !uninserted_visits.is_empty() {
             let mut best_insertion: Option<(usize, usize, f64)> = None;
             for &visit_id in &uninserted_visits {
@@ -23,46 +26,32 @@ impl RepairOperator for DeepGreedyInsertion {
             }
 
             if let Some((visit_id, voyage_id, cost)) = best_insertion {
-                // --- LOGGING START ---
-                println!("[DeepGreedyInsertion] Chosen insertion: visit_id={}, voyage_id={}, cost={}", visit_id, voyage_id, cost);
+                debug!(target: "operator::repair", "[DeepGreedyInsertion] Iteration {}: Chosen insertion: visit_id={}, voyage_id={}, cost={}", iteration, visit_id, voyage_id, cost);
                 if let Some(voyage_cell) = solution.voyages.iter().find(|v| v.borrow().id == voyage_id) {
                     let voyage = voyage_cell.borrow();
-                    println!("  Target voyage: id={}, vessel_id={:?}, start_time={:?}, end_time={:?}, visit_ids={:?}",
+                    debug!(target: "operator::repair", "  Target voyage: id={}, vessel_id={:?}, start_time={:?}, end_time={:?}, visit_ids={:?}",
                         voyage.id, voyage.vessel_id, voyage.start_time(), voyage.end_time(), voyage.visit_ids);
-                    if let Some(vessel_id) = voyage.vessel_id {
-                        let other_voyages: Vec<_> = solution.voyages.iter()
-                            .filter_map(|v| {
-                                let v = v.borrow();
-                                if v.vessel_id == Some(vessel_id) && v.id != voyage_id {
-                                    Some((v.id, v.start_time(), v.end_time()))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        println!("  Other voyages for vessel {}:", vessel_id);
-                        for (oid, st, et) in &other_voyages {
-                            println!("    voyage_id={}, start_time={:?}, end_time={:?}", oid, st, et);
-                        }
-                    }
                 }
                 let possible = solution.visit_insertion_is_possible(context, visit_id, voyage_id);
-                println!("  visit_insertion_is_possible for visit {} into voyage {}: {}", visit_id, voyage_id, possible);
-                // --- LOGGING END ---
+                debug!(target: "operator::repair", "  visit_insertion_is_possible for visit {} into voyage {}: {}", visit_id, voyage_id, possible);
                 if solution.greedy_insert_visit(visit_id, voyage_id, context).is_ok() {
                     solution.ensure_schedule_is_updated(); // Ensure schedule is up-to-date before next iteration
                     uninserted_visits.retain(|&v_id| v_id != visit_id);
                 } else {
-                    panic!("Failed to insert visit {} into voyage {}", visit_id, voyage_id);
+                    error!(target: "operator::repair", "Failed to insert visit {} into voyage {}", visit_id, voyage_id);
+                    break;
                 }
             } else {
-                break; // No feasible insertions left
+                warn!(target: "operator::repair", "No feasible insertions left at iteration {}", iteration);
+                break;
             }
+            iteration += 1;
         }
         // After all modifications, update the schedule for consistency
         if solution.schedule.needs_update() {
             solution.ensure_schedule_is_updated();
         }
+        info!(target: "operator::repair", "[DeepGreedyInsertion] Completed");
     }
 
     fn requires_consistency(&self) -> bool {

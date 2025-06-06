@@ -7,6 +7,7 @@ use crate::structs::{
     context::Context,  
 };
 use crate::utils::assignment::assign_smallest_available_vessel;
+use log::{info, debug, warn, error};
 use rand::Rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
@@ -19,8 +20,9 @@ pub fn construct_initial_solution(
     context: &Context,
     rng: &mut impl Rng,
 ) -> Solution {
+    info!(target: "operator::initial", "[InitialSolution] Construction started");
     let base_visits = context.problem.generate_visits();
-    'outer: for _ in 0..MAX_ATTEMPTS {
+    'outer: for attempt in 0..MAX_ATTEMPTS {
         let mut solution = Solution::new(base_visits.clone());
         let mut day_to_visits: HashMap<usize, Vec<usize>> = HashMap::new();
         // === 1. Randomly select one feasible departure scenario per installation ===
@@ -72,19 +74,27 @@ pub fn construct_initial_solution(
                 solution.update_voyage_load(&mut voyage);
                 if assign_smallest_available_vessel(&mut voyage, context, &mut solution) {
                     solution.optimize_voyage_route(&mut voyage, context);
+                    let cost = voyage.objective_cost(context);
+                    info!(target: "operator::initial", "[InitialSolution] Day {}, Voyage {} assigned vessel {:?}, cost={}", day, voyage.id, voyage.vessel_id, cost);
                     solution.add_voyage(voyage);
                 } else {
+                    warn!(target: "operator::initial", "[InitialSolution] Failed to assign vessel for voyage on day {}", day);
                     break 'outer;
                 }
             }
             if !unassigned.is_empty() {
+                warn!(target: "operator::initial", "[InitialSolution] Unassigned visits remain for day {}", day);
                 continue 'outer;
             }
         }
-        if solution.is_feasible() {
+        if solution.is_fully_feasible(context) {
+            info!(target: "operator::initial", "[InitialSolution] Feasible solution found on attempt {}", attempt);
             return solution;
+        } else {
+            warn!(target: "operator::initial", "[InitialSolution] Infeasible solution on attempt {}", attempt);
         }
     }
+    error!(target: "operator::initial", "[InitialSolution] Failed to generate feasible initial solution after {} attempts", MAX_ATTEMPTS);
     panic!("Failed to generate feasible initial solution after {MAX_ATTEMPTS} attempts");
 }
 

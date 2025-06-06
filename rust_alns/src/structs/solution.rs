@@ -76,12 +76,9 @@ impl Solution {
             .collect()
     }
 
-    pub fn is_feasible(&self) -> bool {
-        self.is_feasible_light()
-    }
-
-    /// Lightweight feasibility check: runtime-suitable
-    pub fn is_feasible_light(&self) -> bool {
+    /// Checks if the solution is complete, meaning all visits are assigned to voyages.
+    /// This does not check feasibility, only completeness.
+    pub fn is_complete_solution(&self) -> bool {
         
         // TODO: Spread of departures check
 
@@ -91,8 +88,8 @@ impl Solution {
         true
     }
 
-    /// Heavy feasibility and consistency check: for testing and debugging
-    pub fn is_feasible_deep(&mut self, context: &Context) -> bool {
+    /// Checks if the solution meets all the constraints. Might be incomplete.
+    pub fn is_fully_feasible(&mut self, context: &Context) -> bool {
         self.ensure_consistency_updated(context);
         use itertools::Itertools;
         use crate::structs::constants::HOURS_IN_PERIOD;

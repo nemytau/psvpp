@@ -2,6 +2,7 @@ mod operators;
 mod structs;
 mod utils;
 
+use log::{info, debug, warn, error};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -93,8 +94,8 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Total voyages: {}", solution.voyages.len());
     println!("Total visits: {}", solution.all_visits().len());
-    println!("Feasibility (light): {}", solution.is_feasible_light());
-    println!("Feasibility (deep): {}", solution.is_feasible_deep(&context));
+    println!("Feasibility (light): {}", solution.is_complete_solution());
+    println!("Feasibility (deep): {}", solution.is_fully_feasible(&context));
 
     // Print the schedule
     println!("Schedule: {:?}", solution.get_schedule(&context));
@@ -110,8 +111,8 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     solution.ensure_consistency_updated(&context);
 
     // Feasibility check after destroy
-    println!("Feasibility after destroy (light): {}", solution.is_feasible_light());
-    println!("Feasibility after destroy (deep): {}", solution.is_feasible_deep(&context));
+    println!("Feasibility after destroy (light): {}", solution.is_complete_solution());
+    println!("Feasibility after destroy (deep): {}", solution.is_fully_feasible(&context));
 
     // Output unassigned visits
     println!("Unassigned visits after destroy:");
@@ -130,8 +131,8 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     repair_operator.apply(&mut solution, &context, &mut rng);
 
     // Feasibility check after repair
-    println!("Feasibility after repair (light): {}", solution.is_feasible_light());
-    println!("Feasibility after repair (deep): {}", solution.is_feasible_deep(&context));
+    println!("Feasibility after repair (light): {}", solution.is_complete_solution());
+    println!("Feasibility after repair (deep): {}", solution.is_fully_feasible(&context));
 
     println!("Applied DeepGreedyInsertion repair operator.");
     // Optionally, print unassigned visits after repair
@@ -176,16 +177,16 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
         tsp_solver,
     };
 
-    let mut infeasible_initial = 0;
-    let mut infeasible_initial_light = 0;
-    let mut infeasible_initial_deep = 0;
-    let mut infeasible_destroy = 0;
-    let mut infeasible_destroy_light = 0;
-    let mut infeasible_destroy_deep = 0;
-    let mut infeasible_repair = 0;
-    let mut infeasible_repair_light = 0;
-    let mut infeasible_repair_deep = 0;
-    let mut repair_infeasible_seeds = Vec::new();
+    let mut incomplete_initial = 0;
+    let mut incomplete_initial_complete = 0;
+    let mut incomplete_initial_feasible = 0;
+    let mut incomplete_destroy = 0;
+    let mut incomplete_destroy_complete = 0;
+    let mut incomplete_destroy_feasible = 0;
+    let mut incomplete_repair = 0;
+    let mut incomplete_repair_complete = 0;
+    let mut incomplete_repair_feasible = 0;
+    let mut repair_incomplete_seeds = Vec::new();
 
     let destroy_operator = RandomVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8 };
     let repair_operator = DeepGreedyInsertion;
@@ -193,45 +194,59 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
     for seed in 0..100u64 {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut solution = operators::initial_solution::construct_initial_solution(&context, &mut rng);
+        let initial_cost = solution.total_cost;
+        info!(target: "alns::iteration", "Seed {}: Initial solution cost = {}", seed, initial_cost);
         // Initial solution feasibility
-        let initial_light = solution.is_feasible_light();
-        let initial_deep = solution.is_feasible_deep(&context);
-        if !initial_light || !initial_deep {
-            infeasible_initial += 1;
-            if !initial_light { infeasible_initial_light += 1; }
-            if !initial_deep { infeasible_initial_deep += 1; }
+        let is_complete_initial = solution.is_complete_solution();
+        let is_feasible_initial = solution.is_fully_feasible(&context);
+        if !is_complete_initial || !is_feasible_initial {
+            warn!(target: "alns::iteration", "Seed {}: Initial solution incomplete or infeasible (complete={}, feasible={})", seed, is_complete_initial, is_feasible_initial);
+            incomplete_initial += 1;
+            if !is_complete_initial { incomplete_initial_complete += 1; }
+            if !is_feasible_initial { incomplete_initial_feasible += 1; }
         }
         // After destroy
         destroy_operator.apply(&mut solution, &context, &mut rng);
-        let destroy_light = solution.is_feasible_light();
-        let destroy_deep = solution.is_feasible_deep(&context);
-        if !destroy_light || !destroy_deep {
-            infeasible_destroy += 1;
-            if !destroy_light { infeasible_destroy_light += 1; }
-            if !destroy_deep { infeasible_destroy_deep += 1; }
+        let destroy_cost = solution.total_cost;
+        info!(target: "alns::iteration", "Seed {}: After destroy cost = {}", seed, destroy_cost);
+        let is_complete_destroy = solution.is_complete_solution();
+        let is_feasible_destroy = solution.is_fully_feasible(&context);
+        if !is_complete_destroy || !is_feasible_destroy {
+            warn!(target: "alns::iteration", "Seed {}: Destroy incomplete or infeasible (complete={}, feasible={})", seed, is_complete_destroy, is_feasible_destroy);
+            incomplete_destroy += 1;
+            if !is_complete_destroy { incomplete_destroy_complete += 1; }
+            if !is_feasible_destroy { incomplete_destroy_feasible += 1; }
         }
         // After repair
         solution.ensure_consistency_updated(&context);
         repair_operator.apply(&mut solution, &context, &mut rng);
-        let repair_light = solution.is_feasible_light();
-        let repair_deep = solution.is_feasible_deep(&context);
-        if !repair_light || !repair_deep {
-            infeasible_repair += 1;
-            if !repair_light { infeasible_repair_light += 1; }
-            if !repair_deep { infeasible_repair_deep += 1; }
-            repair_infeasible_seeds.push(seed);
+        let repair_cost = solution.total_cost;
+        info!(target: "alns::iteration", "Seed {}: After repair cost = {}", seed, repair_cost);
+        let is_complete_repair = solution.is_complete_solution();
+        let is_feasible_repair = solution.is_fully_feasible(&context);
+        if !is_complete_repair || !is_feasible_repair {
+            error!(target: "alns::iteration", "Seed {}: Repair incomplete or infeasible (complete={}, feasible={})", seed, is_complete_repair, is_feasible_repair);
+            incomplete_repair += 1;
+            if !is_complete_repair { incomplete_repair_complete += 1; }
+            if !is_feasible_repair { incomplete_repair_feasible += 1; }
+            repair_incomplete_seeds.push(seed);
         }
+        debug!(target: "alns::iteration", "Seed {}: Cost change: initial={} -> destroy={} -> repair={}", seed, initial_cost, destroy_cost, repair_cost);
     }
-    println!("Infeasibility stats over 100 seeds:");
-    println!("Initial solution: {} infeasible ({} light, {} deep)", infeasible_initial, infeasible_initial_light, infeasible_initial_deep);
-    println!("After destroy:    {} infeasible ({} light, {} deep)", infeasible_destroy, infeasible_destroy_light, infeasible_destroy_deep);
-    println!("After repair:     {} infeasible ({} light, {} deep)", infeasible_repair, infeasible_repair_light, infeasible_repair_deep);
-    println!("Seeds where repair operator led to infeasibility: {:?}", repair_infeasible_seeds);
+    println!("Feasibility stats over 100 seeds:");
+    println!("Initial solution: {} not fully feasible ({} incomplete, {} not feasible)", incomplete_initial, incomplete_initial_complete, incomplete_initial_feasible);
+    println!("After destroy:    {} not fully feasible ({} incomplete, {} not feasible)", incomplete_destroy, incomplete_destroy_complete, incomplete_destroy_feasible);
+    println!("After repair:     {} not fully feasible ({} incomplete, {} not feasible)", incomplete_repair, incomplete_repair_complete, incomplete_repair_feasible);
+    println!("Seeds where repair operator led to infeasibility: {:?}", repair_incomplete_seeds);
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logger
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    info!(target: "alns::main", "ALNS process started");
     test_feasibility_over_seeds()?;
     // test_main(0)?;
+    info!(target: "alns::main", "ALNS process finished");
     Ok(())
 }
