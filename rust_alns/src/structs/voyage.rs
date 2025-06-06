@@ -5,7 +5,7 @@ use crate::structs::node::{Base, Installation};
 use crate::structs::distance_manager::DistanceManager;
 use crate::structs::visit::Visit;
 use crate::structs::vessel::Vessel;
-use crate::utils::tsp_solver::{TSPSolver, TSPResult};
+use crate::utils::tsp_solver::{self, TSPResult, TSPSolver};
 use core::panic;
 use std::rc::Rc;
 use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
@@ -29,16 +29,15 @@ pub struct Voyage {
     pub waiting_time: Option<f64>,       // Total waiting time at installations
     pub arrival_time: Option<f64>,       // Time when vessel arrives back at the base [0, +∞)
     pub end_time_at_base: Option<f64>,   // (arrival_time + wait_time + service_time) [0, +∞)
-    pub is_feasible: bool,
-    pub load: Option<u32>,       
-    pub need_update: bool, // Indicates if the voyage needs an update
+    pub load: Option<u32>,
+    pub route_dirty: bool,     // Indicates if routing needs recomputation
+    pub state_dirty: bool,     // Indicates if derived state (load, feasibility) needs update
 }
 
 impl Voyage {       
     // Creates a new voyage object
     pub fn new() -> Self {
         let id = VOYAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
-
         Self {
             id,
             vessel_id: None,
@@ -49,10 +48,9 @@ impl Voyage {
             waiting_time: None,
             arrival_time: None,
             end_time_at_base: None,
-            is_feasible: false,
             load: Some(0),
-
-            need_update: false, // Initialize to false
+            route_dirty: false,
+            state_dirty: false,
         }
     }
     // Creates a new voyage object with a specific id
@@ -67,9 +65,9 @@ impl Voyage {
             waiting_time: None,
             arrival_time: None,
             end_time_at_base: None,
-            is_feasible: false,
             load: Some(0),
-            need_update: false, // Initialize to false
+            route_dirty: false,
+            state_dirty: false,
         }
     }
 
@@ -85,9 +83,9 @@ impl Voyage {
             waiting_time: None,
             arrival_time: None,
             end_time_at_base: None,
-            is_feasible: false,
             load: None, // Load is not set yet
-            need_update: true, // Initialize to false
+            route_dirty: true,
+            state_dirty: true,
         }
     }
     
@@ -103,6 +101,10 @@ impl Voyage {
         self.load
     }
 
+    pub fn set_load(&mut self, load: u32) {
+        self.load = Some(load);
+    }
+
     pub fn start_time(&self) -> Option<f64> {
         Some(self.departure_day.unwrap() as f64 * HOURS_IN_DAY as f64 + REL_DEPARTURE_TIME as f64)
     }
@@ -111,7 +113,7 @@ impl Voyage {
         self.end_time_at_base
     }
 
-    pub fn assign_vessel(&mut self, vessel: &Vessel, context: &Context) {
+    pub fn assign_vessel(&mut self, vessel: &Vessel, _context: &Context) {
         self.vessel_id = Some(vessel.id);
         self.voyage_speed = Some(vessel.speed);
         // self.optimize_route(context);
@@ -119,22 +121,20 @@ impl Voyage {
         panic!("Voyage::assign_vessel: Not implemented yet");
     }
 
-    pub fn update_from_tsp_result(&mut self, result: TSPResult) {
+    pub fn apply_tsp_result(&mut self, result: TSPResult) {
         self.visit_ids = result.visit_ids_seq;
         self.sailing_time = Some(result.sailing_time);
         self.waiting_time = Some(result.waiting_time);
         self.arrival_time = Some(result.arrival_time);
         self.end_time_at_base = Some(result.end_time);
-        self.need_update = true; // Set to true after update
+        self.route_dirty = false;
+        // We conservatively assume state is dirty to ensure load and feasibility are re-evaluated.
+        self.state_dirty = true;
     }
 
-    pub fn update_load(&mut self, visits: &[Visit]) {
-        let total_load = self.visit_ids
-            .iter()
-            .filter_map(|id| visits.iter().find(|v| v.id() == *id))
-            .map(|v| v.demand())
-            .sum();
-        self.load = Some(total_load);
+    pub fn finalize_state(&mut self, total_load: u32) {
+        self.set_load(total_load);
+        self.state_dirty = false;
     }
 
     pub fn select_visits_to_remove(&self, n: usize, rng: &mut dyn rand::RngCore) -> Vec<usize> {
@@ -152,21 +152,46 @@ impl Voyage {
         self.visit_ids.retain(|id| !visit_ids_to_remove.contains(id));
         let removed = before - self.visit_ids.len();
         if removed > 0 {
-            self.need_update = true;
+            self.route_dirty = true;
+            self.state_dirty = true;
         }
         removed
     }
 
-    // Calculates the lowest insertion cost of a visit into the voyage
-    pub fn best_insertion_cost(&self, context: &Context, visit: usize) -> f64 {
-        return 0.0;
+    pub fn added_cost_from_result(&self, new_result: &TSPResult, context: &Context) -> f64 {
+        let old_cost = self.objective_cost(context);
+        let new_cost = new_result.arrival_time;
+        new_cost - old_cost
     }
-    pub fn insertion_cost(&self, context: &Context, visit: usize, position: usize) -> f64 {
-        return 0.0;
+    pub fn objective_cost(&self, _context: &Context) -> f64 {
+        self.arrival_time.unwrap_or(0.0) - self.start_time().unwrap_or(0.0)
     }
-
+    pub fn objective_cost_from_result(&self, result: &TSPResult, _context: &Context) -> f64 {
+        result.arrival_time - self.start_time().unwrap_or(0.0)
+    }
     pub fn get_visit_sequence(&self) -> Vec<usize> {
         self.visit_ids.clone()
+    }
+
+    pub fn add_visit(&mut self, visit_id: usize) {
+        self.visit_ids.push(visit_id);
+        self.route_dirty = true;
+        self.state_dirty = true;
+    }
+
+    /// Update timing and metadata (sailing_time, waiting_time, arrival_time, end_time) using the current visit_ids order.
+    /// This does not solve TSP or change the route. Sets route_dirty = false after update.
+    pub fn update_details(&mut self, tsp_solver: &crate::utils::tsp_solver::TSPSolver) {
+        let speed = self.speed().unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
+        let start_time = self.start_time().unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
+        // Use the visit_ids order directly, do not clone self or solve TSP
+        let route = tsp_solver.visit_sequence_to_route_public(&self.visit_ids);
+        let (sailing_time, waiting_time, arrival_time, end_time) = tsp_solver.calculate_voyage_details_public(&route, speed, start_time);
+        self.sailing_time = Some(sailing_time);
+        self.waiting_time = Some(waiting_time);
+        self.arrival_time = Some(arrival_time);
+        self.end_time_at_base = Some(end_time);
+        self.route_dirty = false;
     }
 }
 
@@ -187,6 +212,5 @@ mod tests {
         assert_eq!(voyage.waiting_time, None);
         assert_eq!(voyage.arrival_time, None);
         assert_eq!(voyage.end_time_at_base, None);
-        assert_eq!(voyage.is_feasible, false);
     }
 }

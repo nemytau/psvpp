@@ -1,18 +1,15 @@
 use crate::structs::{
-    vessel::Vessel,
     visit::Visit,
     voyage::Voyage,
     schedule::Schedule,
-    node::{Base, Installation, HasLocation},
-    distance_manager::DistanceManager,
-    problem_data::ProblemData,
     context::Context,
 };
+use std::cell::RefCell;
 
 #[derive(Clone)]
 pub struct Solution {
-    pub voyages: Vec<Voyage>, // All voyages, assigned to vesels
-    pub visits: Vec<Visit>, // All visits, including unserved ones
+    pub voyages: Vec<RefCell<Voyage>>, // All voyages, assigned to vesels
+    _visits: Vec<Visit>, // All visits, including unserved ones (private)
     pub schedule: Schedule, // Informational class on how voyages are assigned to vessels
     pub total_cost: f64,
     pub is_feasible: bool,
@@ -23,7 +20,7 @@ impl Solution {
     pub fn new(visits: Vec<Visit>) -> Self {
         Self {
             voyages: Vec::new(),
-            visits,
+            _visits: visits,
             schedule: Schedule::empty(),
             total_cost: 0.0,
             is_feasible: false,
@@ -31,16 +28,17 @@ impl Solution {
     }
     // Assumed that voyage is feasible and insertion is valid
     pub fn add_voyage(&mut self, voyage: Voyage) {
-        self.schedule.assign_voyage(&voyage, &self.visits);
+        self.schedule.assign_voyage(&voyage, &self._visits);
         for visit_id in &voyage.visit_ids {
-            let visit = &mut self.visits[*visit_id];
+            let visit = self._visits.get_mut(*visit_id).expect("Invalid visit_id");
             visit.assign_to_voyage(voyage.id());
         }
-        self.voyages.push(voyage);
+        self.voyages.push(RefCell::new(voyage));
+        self.schedule.set_need_update(true);
     }
     pub fn construct_initial_solution(
         &mut self,
-        context: &Context,
+        _context: &Context,
     ) {
         // Initialize the solution with a greedy or random approach
         // This is a placeholder for the actual implementation
@@ -50,30 +48,31 @@ impl Solution {
 
     pub fn unassign_visits(&mut self, visit_ids: &[usize]) {
         for visit_index in visit_ids {
-            if let Some(visit) = self.visits.get_mut(*visit_index) {
+            if let Some(visit) = self._visits.get_mut(*visit_index) {
                 visit.unassign();
             }
         }
-        // Removes visits from voyages without recalculating voyages and the schedule
-        for voyage in &mut self.voyages {
-            // NOTE: It passes ALL visit_ids to remove, even if they are not in the voyage
-            // This is a potential performance issue, but it is safe
-            voyage.remove_visits(visit_ids);
+        for voyage_cell in &self.voyages {
+            let mut voyage = voyage_cell.borrow_mut();
+            let removed = voyage.remove_visits(visit_ids);
+            if removed > 0 {
+                voyage.route_dirty = true;
+                voyage.state_dirty = true;
+            }
         }
-        // Update schedule to match updated voyages
-        self.schedule.set_need_update(true); // Use setter method
+        self.schedule.set_need_update(true);
     }
 
     pub fn optimize_voyage_route(&mut self, voyage: &mut Voyage, context: &Context) {
         let result = context.tsp_solver.solve_for_voyage(voyage);
-        voyage.update_from_tsp_result(result);
+        voyage.apply_tsp_result(result);
     }
 
     pub fn get_visits_for_voyage(&self, voyage: &Voyage) -> Vec<&Visit> {
         voyage
             .visit_ids
             .iter()
-            .filter_map(|id| self.visits.iter().find(|v| v.id() == *id))
+            .filter_map(|id| self._visits.iter().find(|v| v.id() == *id))
             .collect()
     }
 
@@ -83,57 +82,52 @@ impl Solution {
 
     /// Lightweight feasibility check: runtime-suitable
     pub fn is_feasible_light(&self) -> bool {
-        // 1. All visits are assigned
+        
+        // TODO: Spread of departures check
 
-        for visit in &self.visits {
-            if !visit.is_assigned {
-                println!("Visit {} is not assigned", visit.id());
-                // Output Installation
-                println!("Visit installation: {:?}", visit.installation_id());
-            }
-        }
-
-        println!("End of visit check");
-        if self.visits.iter().any(|v| !v.is_assigned) {
+        if self._visits.iter().any(|v| !v.is_assigned) {
             return false;
         }
         true
     }
 
     /// Heavy feasibility and consistency check: for testing and debugging
-    pub fn is_feasible_deep(&self) -> bool {
-        if !self.is_feasible_light() {
-            return false;
+    pub fn is_feasible_deep(&mut self, context: &Context) -> bool {
+        self.ensure_consistency_updated(context);
+        use itertools::Itertools;
+        use crate::structs::constants::HOURS_IN_PERIOD;
+        use crate::utils::utils::cyclic_intervals_overlap;
+        let mut vessel_voyages: std::collections::HashMap<usize, Vec<_>> = std::collections::HashMap::new();
+        for voyage_cell in &self.voyages {
+            let voyage = voyage_cell.borrow();
+            if let Some(vessel_id) = voyage.vessel_id {
+                vessel_voyages.entry(vessel_id).or_default().push(voyage.clone());
+            }
         }
-        // No overlapping voyages for the same vessel (based on the schedule)
-        for (vessel_day, voyages) in &self.schedule.vessel_day_voyages {
-            let times: Vec<_> = voyages.iter()
-                .filter_map(|id| {
-                    self.schedule.voyage_start_times.get(id).zip(
-                        self.schedule.voyage_end_times.get(id)
-                    )
-                })
-                .collect();
-            for (i, (start_i, end_i)) in times.iter().enumerate() {
-                for (j, (start_j, end_j)) in times.iter().enumerate() {
-                    if i != j &&
-                        crate::utils::utils::cyclic_intervals_overlap(**start_i, **end_i, **start_j, **end_j, crate::structs::constants::HOURS_IN_PERIOD as f64)
-                    {
+        for (_vessel_id, voyages) in vessel_voyages {
+            for (a, b) in voyages.iter().tuple_combinations() {
+                if let (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) = (a.start_time(), a.end_time(), b.start_time(), b.end_time()) {
+                    if cyclic_intervals_overlap(a_start, a_end, b_start, b_end, HOURS_IN_PERIOD as f64) {
                         return false;
                     }
                 }
             }
         }
+
         // All visits must be linked back correctly
-        for visit in &self.visits {
+        for visit in &self._visits {
             if let Some(voyage_id) = visit.assigned_voyage_id {
-                if !self.voyages.iter().any(|v| v.id == voyage_id && v.visit_ids.contains(&visit.id())) {
+                if !self.voyages.iter().any(|v| {
+                    let v = v.borrow();
+                    v.id == voyage_id && v.visit_ids.contains(&visit.id())
+                }) {
                     return false;
                 }
             }
         }
         // Check voyage and schedule consistency
-        for voyage in &self.voyages {
+        for voyage_cell in &self.voyages {
+            let voyage = voyage_cell.borrow();
             let voyage_id = voyage.id;
             if !self.schedule.voyage_start_times.contains_key(&voyage_id) {
                 return false;
@@ -142,15 +136,15 @@ impl Solution {
                 return false;
             }
             let vessel_day_key = (voyage.vessel_id.unwrap(), voyage.departure_day.unwrap());
-            if let Some(ids) = self.schedule.vessel_day_voyages.get(&vessel_day_key) {
-                if !ids.contains(&voyage_id) {
+            if let Some(&scheduled_voyage_id) = self.schedule.vessel_day_voyages.get(&vessel_day_key) {
+                if scheduled_voyage_id != voyage_id {
                     return false;
                 }
             } else {
                 return false;
             }
             for visit_id in &voyage.visit_ids {
-                let inst_id = self.visits[*visit_id].installation_id();
+                let inst_id = self._visits[*visit_id].installation_id();
                 if let Some(set) = self.schedule.departures_by_installation.get(&inst_id) {
                     if !set.contains(visit_id) {
                         return false;
@@ -163,8 +157,236 @@ impl Solution {
         true
     }
 
+    pub fn ensure_consistency_updated(&mut self, context: &Context) {
+        for voyage_cell in &self.voyages {
+            let mut voyage = voyage_cell.borrow_mut();
+            // Only update route/timing if route_dirty is set (do NOT re-optimize route if not needed)
+            if voyage.route_dirty {
+                // Update timing and metadata using the current visit_ids order, do not solve TSP
+                voyage.update_details(&context.tsp_solver);
+                // voyage.update_details is responsible for setting route_dirty = false
+            }
+            // Always update load and other state if state_dirty is set
+            if voyage.state_dirty {
+                self.update_voyage_load(&mut voyage);
+                // voyage.finalize_state is responsible for setting state_dirty = false
+            }
+        }
+        if self.schedule.needs_update() {
+            self.ensure_schedule_is_updated();
+        }
+    }
+
+    pub fn ensure_schedule_is_updated(&mut self) {
+        if self.schedule.needs_update() {
+            // Rebuild the schedule from current voyages and visits
+            self.schedule = Schedule::empty();
+            for voyage_cell in &self.voyages {
+                let voyage = voyage_cell.borrow();
+                self.schedule.assign_voyage(&voyage, &self._visits);
+            }
+            self.schedule.set_need_update(false);
+        }
+    }
+
     // Returns unassigned visits
     pub fn get_unassigned_visits(&self) -> Vec<&Visit> {
-        self.visits.iter().filter(|v| !v.is_assigned).collect()
+        self._visits.iter().filter(|v| !v.is_assigned).collect()
+    }
+    
+    /// Returns the top-k cheapest feasible insertion costs for a visit.
+    ///
+    /// # Schedule Consistency
+    /// The caller is responsible for ensuring the schedule is up-to-date before calling this function.
+    /// This method assumes `schedule.needs_update() == false`.
+    pub fn top_k_visit_insertion_costs(
+        &self,
+        context: &Context,
+        visit: usize,
+        k: usize,
+    ) -> Vec<(usize, f64)> {
+        debug_assert!(
+            !self.schedule.needs_update(),
+            "Schedule must be up-to-date before calling top_k_visit_insertion_costs."
+        );
+        let mut costs = Vec::new();
+        for voyage_cell in self.voyages.iter() {
+            let voyage = voyage_cell.borrow();
+            if !self.visit_insertion_is_possible(context, visit, voyage.id) {
+                continue;
+            }
+            let tsp_result = context.tsp_solver.evaluate_greedy_insertion(&*voyage, visit);
+            let new_start = voyage.start_time().unwrap_or(0.0);
+            let new_end = tsp_result.end_time;
+            let vessel_id = match voyage.vessel_id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            if self.schedule.overlaps_with_other_voyages(vessel_id, voyage.id, new_start, new_end) {
+                continue;
+            }
+
+            let cost = voyage.added_cost_from_result(&tsp_result, context);
+            costs.push((voyage.id(), cost));
+        }
+        costs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        costs.truncate(k);
+        costs
+    }
+
+    // Same installation not visited on the same day, spread of departures not violated.
+    pub fn visit_insertion_is_possible(
+        &self,
+        context: &Context,
+        visit_id: usize,
+        voyage_id: usize,
+    ) -> bool {
+        let visit = match self.visit(visit_id) {
+            Some(v) => v,
+            None => return false,
+        };
+        let voyage = match self.voyages.iter().find_map(|v| {
+            let v = v.borrow();
+            if v.id == voyage_id { Some(v) } else { None }
+        }) {
+            Some(v) => v,
+            None => return false,
+        };
+        let installation_id = visit.installation_id();
+        let departure_day = match visit.departure_day {
+            Some(day) => day,
+            None => return false, // Can't check spread if no departure day
+        };
+        if voyage.visit_ids.iter().any(|&vid| self._visits[vid].installation_id() == installation_id) {
+            return false;
+        }
+        // Get the installation to check spread
+        let installation = match context.problem.get_installation_by_id(installation_id) {
+            Some(inst) => inst,
+            None => return false,
+        };
+        let spread = installation.departure_spread as i32;
+        let period = crate::structs::constants::DAYS_IN_PERIOD as i32;
+        // Check all other visits to this installation
+        if let Some(departures) = self.schedule.departures_by_installation.get(&installation_id) {
+            for &other_visit_id in departures {
+                if other_visit_id == visit_id { continue; }
+                if let Some(other_visit) = self.visit(other_visit_id) {
+                    if let Some(other_day) = other_visit.departure_day {
+                        // Cyclic difference
+                        let diff = (departure_day as i32 - other_day as i32).abs().min(
+                            period - (departure_day as i32 - other_day as i32).abs()
+                        );
+                        if diff < spread {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        // Prevent inserting the same installation twice in the voyage
+        // Check vessel capacity
+        let vessel_id = match voyage.vessel_id {
+            Some(id) => id,
+            None => return false,
+        };
+        let vessel = match context.problem.vessels.get(vessel_id) {
+            Some(v) => v,
+            None => return false,
+        };
+        let current_load: u32 = voyage.visit_ids.iter().map(|vid| self._visits[*vid].demand()).sum();
+        let visit_demand = visit.demand();
+        if (current_load + visit_demand) as f64 > vessel.deck_capacity {
+            return false;
+        }
+        true
+    }
+
+    pub fn greedy_insert_visit(
+        &mut self,
+        visit_id: usize,
+        voyage_id: usize,
+        context: &Context,
+    ) -> Result<(), String> {
+        let voyage_cell = self
+            .voyages
+            .iter()
+            .find(|v| v.borrow().id == voyage_id)
+            .ok_or_else(|| format!("Voyage {} not found", voyage_id))?;
+
+        {
+            let mut voyage = voyage_cell.borrow_mut();
+            let result = context.tsp_solver.evaluate_greedy_insertion(&*voyage, visit_id);
+            voyage.apply_tsp_result(result);
+        }
+        let visit = self.visit_mut(visit_id)
+            .ok_or_else(|| format!("Visit {} not found", visit_id))?;
+        visit.assign_to_voyage(voyage_id);
+        self.schedule.set_need_update(true);
+        Ok(())
+    }
+
+    pub fn optimal_insert_visit(
+        &mut self,
+        _visit_id: usize,
+        _voyage_id: usize,
+        _context: &Context,
+    ) -> Result<(), String> {
+        // let voyage_cell = self
+        //     .voyages
+        //     .iter()
+        //     .find(|v| v.borrow().id == voyage_id)
+        //     .ok_or_else(|| format!("Voyage {} not found", voyage_id))?;
+        // let mut voyage = voyage_cell.borrow_mut();
+        // voyage.add_visit(visit_id);
+        // self.optimize_voyage_route(&mut *voyage, context);
+        // self.update_voyage_load(&mut *voyage);
+        // let visit = self.visit_mut(visit_id)
+        //     .ok_or_else(|| format!("Visit {} not found", visit_id))?;
+        // visit.assign_to_voyage(voyage_id);
+        Ok(())
+    }
+
+    pub fn update_voyage_load(&self, voyage: &mut Voyage) {
+        let mut total_load = 0;
+        for visit_id in &voyage.visit_ids { 
+            if let Some(visit) = self._visits.get(*visit_id) {
+                total_load += visit.demand();
+            }
+        }
+        voyage.finalize_state(total_load);
+    }
+    
+
+    /// Returns the number of visits in the solution.
+    pub fn visit_count(&self) -> usize {
+        self._visits.len()
+    }
+
+    /// Returns a reference to the visit at the given id (index).
+    pub fn visit(&self, id: usize) -> Option<&Visit> {
+        self._visits.get(id)
+    }
+
+    /// Returns a mutable reference to the visit at the given id (index).
+    pub fn visit_mut(&mut self, id: usize) -> Option<&mut Visit> {
+        self._visits.get_mut(id)
+    }
+
+    /// Returns a slice of all visits (read-only).
+    pub fn all_visits(&self) -> &[Visit] {
+        &self._visits
+    }
+
+    /// Returns a mutable slice of all visits.
+    pub fn all_visits_mut(&mut self) -> &mut [Visit] {
+        &mut self._visits
+    }
+
+    // Ensure schedule is up-to-date before output/visualization
+    pub fn get_schedule(&mut self, context: &Context) -> &Schedule {
+        self.ensure_consistency_updated(context);
+        &self.schedule
     }
 }

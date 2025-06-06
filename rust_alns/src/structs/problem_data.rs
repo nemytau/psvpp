@@ -25,6 +25,15 @@ impl ProblemData {
         }
     }
 
+    pub fn fcs(&self) -> f64 {
+        0.43
+    }
+    pub fn fcw(&self) -> f64 {
+        0.26
+    }
+    pub fn lng_cost(&self) -> f64 {
+        0.31
+    }
     pub fn generate_visits(&self) -> Vec<Visit> {
         let mut visits = Vec::new();
 
@@ -46,5 +55,9 @@ impl ProblemData {
             installation.service_time_window.earliest.unwrap_or(0.0),
             installation.service_time_window.latest.unwrap_or(24.0)
         )
+    }
+
+    pub fn get_installation_by_id(&self, id: usize) -> Option<&Installation> {
+        self.installations.get(id.wrapping_sub(1))
     }
 }

@@ -96,18 +96,15 @@ pub fn dump_explicit_schedule_to_json(
     let distance_manager = &context.problem.distance_manager;
     let tsp_solver = &context.tsp_solver;
 
-    for visit in &solution.visits{
-        println!("Visit map: {} - {}", visit.id(), visit.installation_id());
-    }
-    for voyage in &solution.voyages {
+    for voyage_cell in &solution.voyages {
+        let voyage = voyage_cell.borrow();
         let vessel = vessels
             .iter()
             .find(|v| v.id == voyage.vessel_id.unwrap())
             .unwrap();
-        println!("Visit_ids: {:?}", voyage.visit_ids);
         let visits = voyage.visit_ids
             .iter()
-            .map(|&idx| solution.visits[idx].clone())
+            .filter_map(|&idx| solution.visit(idx).cloned())
             .collect::<Vec<_>>();
         let mut current_time = voyage.start_time().unwrap_or(0.0);
         let speed = vessel.speed;
@@ -207,16 +204,15 @@ pub fn dump_explicit_schedule_to_json(
 pub fn dump_schedule_to_json(solution: &Solution, vessels: &[Vessel], output_path: &str) {
     let mut viz_voyages = Vec::new();
 
-    for voyage in &solution.voyages {
+    for voyage_cell in &solution.voyages {
+        let voyage = voyage_cell.borrow();
         let vessel_id = voyage.vessel_id.expect("Voyage missing vessel ID");
         let vessel = vessels.iter().find(|v| v.id == vessel_id).expect("Vessel not found");
 
         let route = voyage.visit_ids
             .iter()
-            .map(|&idx| solution.visits[idx].installation_id())
-            .collect::<Vec<_>>()
-            .iter()
-            .map(|&id| id.to_string())
+            .filter_map(|&idx| solution.visit(idx).map(|v| v.installation_id()))
+            .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join("→");
         let load = format!("{}/{}", voyage.load().unwrap_or(0), vessel.deck_capacity);

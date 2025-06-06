@@ -22,19 +22,18 @@ impl DestroyOperator for RandomVisitRemovalInVoyages {
         indices.shuffle(rng);
         // Select a subset of voyages to affect
         for &i in indices.iter().take(num_to_affect) {
-            let voyage = &solution.voyages[i];
+            let voyage = solution.voyages[i].borrow_mut();
             let n_visits = voyage.visit_ids.len();
             let frac = self.xi_min + rng.gen::<f64>() * (self.xi_max - self.xi_min);
             let to_remove = ((frac * n_visits as f64).round() as usize).min(n_visits);
-            println!("Voyage ID: {}", voyage.id);
-            println!("Number of visits to remove: {}", to_remove);
 
-            let removed_visit_ids = voyage.select_visits_to_remove(to_remove, rng);
-            // NOTE: The following function looks up for visits in all voyages,
-            // however, here we know that they are in the same voyage.
-            // This is a potential performance issue, but it is safe
-            // Maybe add method which removes visits from the particular voyage
+            // Ensure deterministic removal: sort visit IDs before unassigning
+            let mut removed_visit_ids = voyage.select_visits_to_remove(to_remove, rng);
+            removed_visit_ids.sort_unstable();
+            drop(voyage); // Explicitly drop borrow before mutating solution
             solution.unassign_visits(&removed_visit_ids);
         }
+        // Mark schedule as needing update after any removals
+        solution.schedule.set_need_update(true);
     }
 }

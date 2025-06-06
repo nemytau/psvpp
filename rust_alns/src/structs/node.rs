@@ -4,7 +4,6 @@ use std::error::Error;
 use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use rand::thread_rng;
 use crate::structs::time_window::TimeWindow;
 
 #[derive(Debug, Clone, Deserialize)]

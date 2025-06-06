@@ -88,9 +88,8 @@ impl TSPSolver {
         self.solve_internal(voyage.get_visit_sequence(), speed, start_time)
     }
 
-    // Tries inserting an extra visit in every possible position in the route, evaluates the cost/time,
-    // and returns the best route and costs/times.
-    pub fn solve_with_extra_visit(&self, voyage: &Voyage, extra_visit: &Visit) -> TSPResult {
+    /// Evaluates all possible greedy insertions of an extra visit into a voyage, returns the best result.
+    pub fn evaluate_greedy_insertion(&self, voyage: &Voyage, extra_visit: usize) -> TSPResult {
         let current_visit_sequence = voyage.get_visit_sequence();
         let speed = voyage.speed().unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
         let start_time = voyage.start_time().unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
@@ -102,10 +101,10 @@ impl TSPSolver {
         let mut best_arrival_time = 0.0;
         let mut best_end_time = 0.0;
 
-        for i in 0..current_visit_sequence.len() {
+        for i in 0..=current_visit_sequence.len() {
             let mut updated_visit_sequence = current_visit_sequence.to_vec();
-            updated_visit_sequence.insert(i, extra_visit.installation_id());
-            
+            updated_visit_sequence.insert(i, extra_visit);
+
             let result = self.visit_sequence_to_result(&updated_visit_sequence, speed, start_time);
             if result.end_time < best_cost {
                 best_route = result.visit_ids_seq.clone();
@@ -169,6 +168,19 @@ impl TSPSolver {
         }
     }
     
+    /// Public wrapper for visit_ids_to_installation_ids_sequence
+    pub fn visit_ids_to_installation_ids_sequence_public(&self, visit_ids: &[usize]) -> Vec<usize> {
+        self.visit_ids_to_installation_ids_sequence(visit_ids)
+    }
+    /// Public wrapper for calculate_voyage_details
+    pub fn calculate_voyage_details_public(&self, route: &Vec<usize>, vessel_speed: f64, start_time: f64) -> (f64, f64, f64, f64) {
+        self.calculate_voyage_details(route, vessel_speed, start_time)
+    }
+    /// Public wrapper for visit_sequence_to_route
+    pub fn visit_sequence_to_route_public(&self, visit_sequence: &Vec<usize>) -> Vec<usize> {
+        self.visit_sequence_to_route(visit_sequence)
+    }
+
     fn visit_ids_to_installation_ids_sequence(
         &self,
         visit_ids: &[usize],
@@ -254,6 +266,10 @@ impl TSPSolver {
         let mut total_sailing_time = 0.0;
         let mut total_waiting_time = 0.0;
         
+        // ERROR: PANICKED HERE DURING CONSISTENCY CHECK
+        if route.is_empty() || route[0] != 0 || route.last() != Some(&0) {
+            panic!("Route must start and end at the depot (node 0)");
+        }
         for i in 0..route.len() - 1 {
             let current_node = route[i];
             let next_node = route[i + 1];
@@ -325,7 +341,7 @@ impl TSPSolver {
         vessel_speed: f64, 
         start_time: f64
     ) -> f64 {
-        // Arrival time to the depot
+// Arrival time to the depot
         self.calculate_voyage_details(route, vessel_speed, start_time).2
     }
 
@@ -337,6 +353,12 @@ impl TSPSolver {
         vessel_speed: Option<f64>, 
         start_time: Option<f64>
     ) -> (Vec<usize>, f64) {
+        // Defensive check for duplicate installation IDs
+    use std::collections::HashSet;
+    if inst_indices.iter().collect::<HashSet<_>>().len() != inst_indices.len() {
+        eprintln!("[ERROR] Duplicate installation IDs detected in TSP input: {:?}", inst_indices);
+        return (vec![], f64::INFINITY);
+    }
         // Implement branch and bound TSP solver with time windows here
         let speed = vessel_speed.unwrap_or(12.0);
         let init_time = start_time.unwrap_or(16.0);
@@ -533,8 +555,9 @@ impl TSPSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::structs::node::Node;
-    use crate::structs::node::{Base, Installation};
+    // Remove unused imports
+    // use crate::structs::node::Node;
+    // use crate::structs::node::{Base, Installation};
     use crate::structs::time_window::TimeWindow;
     use crate::structs::constants::{HOURS_IN_DAY, DAYS_IN_PERIOD};
 
@@ -548,9 +571,7 @@ mod tests {
             TimeWindow::new(Some(8.0), Some(8.0)).unwrap(),
             TimeWindow::new(earliest, latest).unwrap(),
         ];
-        let mut visit_to_installation = HashMap::new();
-        visit_to_installation.insert(0, 0);
-        visit_to_installation.insert(1, 1);
+        let visit_to_installation = [(0, 0), (1, 1)].iter().cloned().collect();
         TSPSolver::new(distances, daily_time_windows, service_times, visit_to_installation)
     }
     
