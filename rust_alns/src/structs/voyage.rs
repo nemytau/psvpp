@@ -89,6 +89,25 @@ impl Voyage {
         }
     }
     
+    // Creates an empty voyage object
+    pub fn empty() -> Self {
+        let id = VOYAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self {
+            id,
+            vessel_id: None,
+            voyage_speed: None,
+            departure_day: None,
+            visit_ids: Vec::new(),
+            sailing_time: None,
+            waiting_time: None,
+            arrival_time: None,
+            end_time_at_base: None,
+            load: None,
+            route_dirty: false,
+            state_dirty: false,
+        }
+    }
+    
     pub fn id(&self) -> usize {
         self.id
     }
@@ -192,6 +211,10 @@ impl Voyage {
         self.arrival_time = Some(arrival_time);
         self.end_time_at_base = Some(end_time);
         self.route_dirty = false;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.visit_ids.is_empty()
     }
 }
 

@@ -9,10 +9,13 @@ pub struct DeepGreedyInsertion;
 impl RepairOperator for DeepGreedyInsertion {
     fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
         info!(target: "operator::repair", "[DeepGreedyInsertion] Invoked");
-        // Always ensure schedule is up-to-date before any cost-based insertion logic.
-        solution.ensure_schedule_is_updated();
+        if !solution.is_schedule_up_to_date() {
+            info!(target: "operator::repair", "Solution schedule is not up-to-date before operator application, updating now.");
+            solution.ensure_schedule_is_updated();
+        }
         let mut uninserted_visits: Vec<usize> = solution.get_unassigned_visits().iter().map(|v| v.id()).collect();
         let mut iteration = 0;
+        info!(target: "operator::repair", "[DeepGreedyInsertion] Starting with {} uninserted visits", uninserted_visits.len());
         while !uninserted_visits.is_empty() {
             let mut best_insertion: Option<(usize, usize, f64)> = None;
             for &visit_id in &uninserted_visits {
@@ -35,6 +38,7 @@ impl RepairOperator for DeepGreedyInsertion {
                 let possible = solution.visit_insertion_is_possible(context, visit_id, voyage_id);
                 debug!(target: "operator::repair", "  visit_insertion_is_possible for visit {} into voyage {}: {}", visit_id, voyage_id, possible);
                 if solution.greedy_insert_visit(visit_id, voyage_id, context).is_ok() {
+                    // TODO: Instead of fully rebuilding the schedule, we could just update the affected voyage
                     solution.ensure_schedule_is_updated(); // Ensure schedule is up-to-date before next iteration
                     uninserted_visits.retain(|&v_id| v_id != visit_id);
                 } else {
@@ -47,14 +51,15 @@ impl RepairOperator for DeepGreedyInsertion {
             }
             iteration += 1;
         }
+        if uninserted_visits.is_empty() {
+            info!(target: "operator::repair", "[DeepGreedyInsertion] All visits inserted successfully");
+        } else {
+            warn!(target: "operator::repair", "[DeepGreedyInsertion] Some visits could not be inserted: {:?}", uninserted_visits);
+        }
         // After all modifications, update the schedule for consistency
         if solution.schedule.needs_update() {
             solution.ensure_schedule_is_updated();
         }
         info!(target: "operator::repair", "[DeepGreedyInsertion] Completed");
-    }
-
-    fn requires_consistency(&self) -> bool {
-        true
     }
 }

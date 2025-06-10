@@ -5,6 +5,7 @@ use crate::structs::{
     context::Context,
 };
 use std::cell::RefCell;
+use log::{warn};
 
 #[derive(Clone)]
 pub struct Solution {
@@ -101,10 +102,11 @@ impl Solution {
                 vessel_voyages.entry(vessel_id).or_default().push(voyage.clone());
             }
         }
-        for (_vessel_id, voyages) in vessel_voyages {
+        for (vessel_id, voyages) in &vessel_voyages {
             for (a, b) in voyages.iter().tuple_combinations() {
                 if let (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) = (a.start_time(), a.end_time(), b.start_time(), b.end_time()) {
                     if cyclic_intervals_overlap(a_start, a_end, b_start, b_end, HOURS_IN_PERIOD as f64) {
+                        println!("Infeasible: Vessel {} has overlapping voyages {} and {}", vessel_id, a.id, b.id);
                         return false;
                     }
                 }
@@ -118,6 +120,7 @@ impl Solution {
                     let v = v.borrow();
                     v.id == voyage_id && v.visit_ids.contains(&visit.id())
                 }) {
+                    println!("Infeasible: Visit {} assigned to voyage {} but not found in voyage's visit_ids", visit.id(), voyage_id);
                     return false;
                 }
             }
@@ -127,26 +130,32 @@ impl Solution {
             let voyage = voyage_cell.borrow();
             let voyage_id = voyage.id;
             if !self.schedule.voyage_start_times.contains_key(&voyage_id) {
+                println!("Infeasible: Voyage {} missing from schedule.voyage_start_times", voyage_id);
                 return false;
             }
             if !self.schedule.voyage_end_times.contains_key(&voyage_id) {
+                println!("Infeasible: Voyage {} missing from schedule.voyage_end_times", voyage_id);
                 return false;
             }
             let vessel_day_key = (voyage.vessel_id.unwrap(), voyage.departure_day.unwrap());
             if let Some(&scheduled_voyage_id) = self.schedule.vessel_day_voyages.get(&vessel_day_key) {
                 if scheduled_voyage_id != voyage_id {
+                    println!("Infeasible: Schedule vessel_day_voyages for vessel {:?} day {:?} points to voyage {} but expected {}", voyage.vessel_id, voyage.departure_day, scheduled_voyage_id, voyage_id);
                     return false;
                 }
             } else {
+                println!("Infeasible: No entry in schedule.vessel_day_voyages for vessel {:?} day {:?}", voyage.vessel_id, voyage.departure_day);
                 return false;
             }
             for visit_id in &voyage.visit_ids {
                 let inst_id = self._visits[*visit_id].installation_id();
                 if let Some(set) = self.schedule.departures_by_installation.get(&inst_id) {
                     if !set.contains(visit_id) {
+                        println!("Infeasible: Visit {} (installation {}) not found in schedule.departures_by_installation", visit_id, inst_id);
                         return false;
                     }
                 } else {
+                    println!("Infeasible: No entry in schedule.departures_by_installation for installation {}", inst_id);
                     return false;
                 }
             }
@@ -155,35 +164,67 @@ impl Solution {
     }
 
     pub fn ensure_consistency_updated(&mut self, context: &Context) {
+        // Remove all empty voyages before any updates
+        let before = self.voyages.len();
+        self.voyages.retain(|voyage_cell| {
+            let voyage = voyage_cell.borrow();
+            !voyage.is_empty()
+        });
+        let after = self.voyages.len();
+        let removed = before - after;
+        if removed > 0 {
+            log::info!("Removed {} empty voyages from solution ({} -> {})", removed, before, after);
+        } else {
+            log::debug!("No empty voyages removed. Total voyages: {}", after);
+        }
+        let mut route_updates = 0;
+        let mut state_updates = 0;
         for voyage_cell in &self.voyages {
             let mut voyage = voyage_cell.borrow_mut();
             // Only update route/timing if route_dirty is set (do NOT re-optimize route if not needed)
             if voyage.route_dirty {
                 // Update timing and metadata using the current visit_ids order, do not solve TSP
                 voyage.update_details(&context.tsp_solver);
-                // voyage.update_details is responsible for setting route_dirty = false
+                route_updates += 1;
             }
             // Always update load and other state if state_dirty is set
             if voyage.state_dirty {
                 self.update_voyage_load(&mut voyage);
-                // voyage.finalize_state is responsible for setting state_dirty = false
+                state_updates += 1;
             }
         }
+        if route_updates > 0 || state_updates > 0 {
+            log::info!("Updated {} voyage routes and {} voyage states", route_updates, state_updates);
+        } else {
+            log::debug!("No voyage route/state updates needed");
+        }
         if self.schedule.needs_update() {
+            log::info!("Schedule marked as needing update, rebuilding schedule");
             self.ensure_schedule_is_updated();
+        } else {
+            log::debug!("Schedule is up-to-date, no rebuild needed");
         }
     }
 
+    // WARNING: This function deletes all empty voyages and idle vessels from the solution.
     pub fn ensure_schedule_is_updated(&mut self) {
-        if self.schedule.needs_update() {
+        if !self.is_schedule_up_to_date() {
             // Rebuild the schedule from current voyages and visits
             self.schedule = Schedule::empty();
             for voyage_cell in &self.voyages {
                 let voyage = voyage_cell.borrow();
+                // Skip empty voyages (idle voyages)
+                if voyage.is_empty() {
+                    continue;
+                }
                 self.schedule.assign_voyage(&voyage, &self._visits);
             }
             self.schedule.set_need_update(false);
         }
+    }
+
+    pub fn is_schedule_up_to_date(&self) -> bool {
+        !self.schedule.needs_update()
     }
 
     // Returns unassigned visits
@@ -220,7 +261,7 @@ impl Solution {
                 None => continue,
             };
 
-            if self.schedule.overlaps_with_other_voyages(vessel_id, voyage.id, new_start, new_end) {
+            if self.overlaps_with_real_voyages(vessel_id, voyage.id, new_start, new_end) {
                 continue;
             }
 
@@ -292,6 +333,8 @@ impl Solution {
             Some(v) => v,
             None => return false,
         };
+        // TODO: Voyage's load is calculated from scratch, not from the current state. It prevents problems, but it is not the place to do.
+        // I might change it to first check if it is updated, and if not, calculate it.
         let current_load: u32 = voyage.visit_ids.iter().map(|vid| self._visits[*vid].demand()).sum();
         let visit_demand = visit.demand();
         if (current_load + visit_demand) as f64 > vessel.deck_capacity {
@@ -316,6 +359,8 @@ impl Solution {
             let mut voyage = voyage_cell.borrow_mut();
             let result = context.tsp_solver.evaluate_greedy_insertion(&*voyage, visit_id);
             voyage.apply_tsp_result(result);
+            // Update the voyage load after insertion
+            self.update_voyage_load(&mut voyage);
         }
         let visit = self.visit_mut(visit_id)
             .ok_or_else(|| format!("Visit {} not found", visit_id))?;
@@ -385,5 +430,174 @@ impl Solution {
     pub fn get_schedule(&mut self, context: &Context) -> &Schedule {
         self.ensure_consistency_updated(context);
         &self.schedule
+    }
+
+    /// Adds one idle vessel (completely unused) and fills it with empty voyages for all days.
+    /// Also fills all other vessels' free days with empty voyages.
+    pub fn add_idle_vessel_and_add_empty_voyages(&mut self, context: &Context) {
+        use crate::structs::constants::DAYS_IN_PERIOD;
+        let mut vessel_has_voyage = vec![false; context.problem.vessels.len()];
+        for voyage_cell in &self.voyages {
+            let voyage = voyage_cell.borrow();
+            if let Some(vessel_id) = voyage.vessel_id {
+                if vessel_id < vessel_has_voyage.len() {
+                    vessel_has_voyage[vessel_id] = true;
+                }
+            }
+        }
+        // Find one completely unused vessel
+        let maybe_idle_vessel = vessel_has_voyage.iter().position(|&used| !used);
+        if let Some(idle_vessel_id) = maybe_idle_vessel {
+            for day in 0..DAYS_IN_PERIOD {
+                let mut voyage = Voyage::empty();
+                voyage.vessel_id = Some(idle_vessel_id);
+                voyage.departure_day = Some(day as usize);
+                if let Some(vessel) = context.problem.vessels.get(idle_vessel_id) {
+                    voyage.voyage_speed = Some(vessel.speed);
+                }
+                voyage.sailing_time = Some(0.0);
+                voyage.waiting_time = Some(0.0);
+                let start_time = voyage.start_time().unwrap_or(0.0);
+                voyage.arrival_time = Some(start_time);
+                voyage.end_time_at_base = Some(start_time);
+                voyage.load = Some(0);
+                self.schedule.assign_voyage(&voyage, &self._visits);
+                self.voyages.push(std::cell::RefCell::new(voyage));
+            }
+            vessel_has_voyage[idle_vessel_id] = true;
+        }
+        // For all other vessels, fill their free days with empty voyages
+        for (vessel_id, &used) in vessel_has_voyage.iter().enumerate() {
+            if !used { continue; } // skip the newly added idle vessel (already filled)
+            let mut assigned_days = std::collections::HashSet::new();
+            for day in 0..DAYS_IN_PERIOD {
+                let day_usize = day as usize;
+                if self.schedule.vessel_day_voyages.get(&(vessel_id, day_usize)).is_some() {
+                    assigned_days.insert(day_usize);
+                }
+            }
+            for day in 0..DAYS_IN_PERIOD {
+                let day_usize = day as usize;
+                if assigned_days.contains(&day_usize) {
+                    continue;
+                }
+                let mut voyage = Voyage::empty();
+                voyage.vessel_id = Some(vessel_id);
+                voyage.departure_day = Some(day_usize);
+                if let Some(vessel) = context.problem.vessels.get(vessel_id) {
+                    voyage.voyage_speed = Some(vessel.speed);
+                }
+                voyage.sailing_time = Some(0.0);
+                voyage.waiting_time = Some(0.0);
+                let start_time = voyage.start_time().unwrap_or(0.0);
+                voyage.arrival_time = Some(start_time);
+                voyage.end_time_at_base = Some(start_time);
+                voyage.load = Some(0);
+                self.schedule.assign_voyage(&voyage, &self._visits);
+                self.voyages.push(std::cell::RefCell::new(voyage));
+            }
+        }
+        // It is redundant since we just filled the schedule, but it indicates that the schedule has empty voyages now.
+        self.schedule.set_need_update(true);
+    }
+
+    /// Returns true if the voyage is an empty (idle) voyage (no visits).
+    pub fn is_empty_voyage(voyage: &Voyage) -> bool {
+        voyage.visit_ids.is_empty()
+    }
+
+    /// Returns true if the voyage with the given id is empty (no visits).
+    pub fn is_empty_voyage_by_id(&self, voyage_id: usize) -> bool {
+        // Try to find the voyage in the current solution
+        if let Some(voyage) = self.voyages.iter().find_map(|v| {
+            let v = v.borrow();
+            if v.id == voyage_id { Some(v) } else { None }
+        }) {
+            return Self::is_empty_voyage(&voyage);
+        }
+        false
+    }
+
+    /// Checks for overlaps with real (non-empty) voyages only.
+    pub fn overlaps_with_real_voyages(&self, vessel_id: usize, voyage_id: usize, start_time: f64, end_time: f64) -> bool {
+        self.schedule.overlaps_with_other_voyages(
+            vessel_id,
+            voyage_id,
+            start_time,
+            end_time,
+            Some(|id| self.is_empty_voyage_by_id(id)),
+        )
+    }
+
+    /// Adds empty (idle) voyages for all vessels on their free days, and if there is a vessel with no assigned days, adds it as a new idle vessel.
+    ///
+    /// !!! TODO: Consider adding empty voyages only to days when vessel is free. Now it is added to all days with no departures.
+    /// !!! TODO: Select vessels in a random order instead of iterating in order.
+    pub fn add_idle_voyages_for_all_vessels(&mut self, context: &Context) {
+        use crate::structs::constants::DAYS_IN_PERIOD;
+        let mut vessel_has_voyage = vec![false; context.problem.vessels.len()];
+        // Mark vessels that have at least one voyage assigned
+        for voyage_cell in &self.voyages {
+            let voyage = voyage_cell.borrow();
+            if let Some(vessel_id) = voyage.vessel_id {
+                if vessel_id < vessel_has_voyage.len() {
+                    vessel_has_voyage[vessel_id] = true;
+                }
+            }
+        }
+        // Try to find one completely unused vessel
+        let maybe_idle_vessel = vessel_has_voyage.iter().position(|&used| !used);
+        if let Some(idle_vessel_id) = maybe_idle_vessel {
+            // Add empty voyages for all days for this idle vessel
+            for day in 0..DAYS_IN_PERIOD {
+                let mut voyage = Voyage::empty();
+                voyage.vessel_id = Some(idle_vessel_id);
+                voyage.departure_day = Some(day as usize);
+                if let Some(vessel) = context.problem.vessels.get(idle_vessel_id) {
+                    voyage.voyage_speed = Some(vessel.speed);
+                }
+                voyage.sailing_time = Some(0.0);
+                voyage.waiting_time = Some(0.0);
+                let start_time = voyage.start_time().unwrap_or(0.0);
+                voyage.arrival_time = Some(start_time);
+                voyage.end_time_at_base = Some(start_time);
+                voyage.load = Some(0);
+                self.schedule.assign_voyage(&voyage, &self._visits);
+                self.voyages.push(std::cell::RefCell::new(voyage));
+            }
+            vessel_has_voyage[idle_vessel_id] = true;
+        }
+        // For all other vessels, fill their free days with empty voyages
+        for (vessel_id, &used) in vessel_has_voyage.iter().enumerate() {
+            if !used { continue; } // skip the newly added idle vessel (already filled)
+            let mut assigned_days = std::collections::HashSet::new();
+            for day in 0..DAYS_IN_PERIOD {
+                let day_usize = day as usize;
+                if self.schedule.vessel_day_voyages.get(&(vessel_id, day_usize)).is_some() {
+                    assigned_days.insert(day_usize);
+                }
+            }
+            for day in 0..DAYS_IN_PERIOD {
+                let day_usize = day as usize;
+                if assigned_days.contains(&day_usize) {
+                    continue;
+                }
+                let mut voyage = Voyage::empty();
+                voyage.vessel_id = Some(vessel_id);
+                voyage.departure_day = Some(day_usize);
+                if let Some(vessel) = context.problem.vessels.get(vessel_id) {
+                    voyage.voyage_speed = Some(vessel.speed);
+                }
+                voyage.sailing_time = Some(0.0);
+                voyage.waiting_time = Some(0.0);
+                let start_time = voyage.start_time().unwrap_or(0.0);
+                voyage.arrival_time = Some(start_time);
+                voyage.end_time_at_base = Some(start_time);
+                voyage.load = Some(0);
+                self.schedule.assign_voyage(&voyage, &self._visits);
+                self.voyages.push(std::cell::RefCell::new(voyage));
+            }
+        }
+        self.schedule.set_need_update(true);
     }
 }

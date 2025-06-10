@@ -75,7 +75,7 @@ pub fn construct_initial_solution(
                 if assign_smallest_available_vessel(&mut voyage, context, &mut solution) {
                     solution.optimize_voyage_route(&mut voyage, context);
                     let cost = voyage.objective_cost(context);
-                    info!(target: "operator::initial", "[InitialSolution] Day {}, Voyage {} assigned vessel {:?}, cost={}", day, voyage.id, voyage.vessel_id, cost);
+                    debug!(target: "operator::initial", "[InitialSolution] Day {}, Voyage {} assigned vessel {:?}, cost={}", day, voyage.id, voyage.vessel_id, cost);
                     solution.add_voyage(voyage);
                 } else {
                     warn!(target: "operator::initial", "[InitialSolution] Failed to assign vessel for voyage on day {}", day);
@@ -88,6 +88,19 @@ pub fn construct_initial_solution(
             }
         }
         if solution.is_fully_feasible(context) {
+            let num_voyages = solution.voyages.len();
+            let mut vessels_used = std::collections::HashSet::new();
+            for voyage in &solution.voyages {
+                let voyage = voyage.borrow();
+                if let Some(vessel_id) = voyage.vessel_id {
+                    vessels_used.insert(vessel_id);
+                }
+            }
+            let num_vessels_used = vessels_used.len();
+            let is_complete = solution.is_complete_solution();
+            let is_feasible = solution.is_fully_feasible(context);
+            debug!(target: "operator::initial", "[InitialSolution] Created {} voyages, used {} vessels", num_voyages, num_vessels_used);
+            debug!(target: "operator::initial", "[InitialSolution] Feasibility: complete={}, fully_feasible={}", is_complete, is_feasible);
             info!(target: "operator::initial", "[InitialSolution] Feasible solution found on attempt {}", attempt);
             return solution;
         } else {

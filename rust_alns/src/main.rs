@@ -13,10 +13,11 @@ use crate::operators::traits::DestroyOperator;
 use structs::context::Context;
 use structs::data_loader;
 use structs::distance_manager::DistanceManager;
-use structs::node::{HasLocation, HasTimeWindows};
+use structs::node::HasLocation;
 use structs::problem_data::ProblemData;
 use utils::serialization::{dump_explicit_schedule_to_json, dump_schedule_to_json};
 use utils::tsp_solver::TSPSolver;
+use crate::structs::solution::Solution;
 
 fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
     // Define the file paths
@@ -54,14 +55,14 @@ fn debug_main() ->  Result<(), Box<dyn std::error::Error>> {
     // - Node 1: Time window (8, 16), 2 hrs service time
     // - Node 2: Time window (10, 18), 3 hrs service time  
     // - Node 3: Time window (8, 14), 1 hr service time
-    let time_windows = vec![
+    let _time_windows = vec![
         (0.0, 24.0),   // Depot - always open
         (8.0, 16.0),   // Node 1
         (10.0, 18.0),  // Node 2
         (8.0, 14.0),   // Node 3
     ];
     
-    let service_times = vec![
+    let _service_times = vec![
         0.0,  // Depot
         2.0,  // Node 1
         3.0,  // Node 2
@@ -86,20 +87,6 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut solution = construct_initial_solution(&context, &mut rng);
 
-
-    println!("Constructed solution:");
-    for voyage in &solution.voyages {
-        let voyage = voyage.borrow();
-        println!("Voyage ID: {}, Vessel ID: {:?}, Visits: {:?}", voyage.id, voyage.vessel_id, voyage.visit_ids);
-    }
-    println!("Total voyages: {}", solution.voyages.len());
-    println!("Total visits: {}", solution.all_visits().len());
-    println!("Feasibility (light): {}", solution.is_complete_solution());
-    println!("Feasibility (deep): {}", solution.is_fully_feasible(&context));
-
-    // Print the schedule
-    println!("Schedule: {:?}", solution.get_schedule(&context));
-
     dump_solution(&solution, &context.problem.vessels, "../output/solution_vis.json")?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule.json")?;
 
@@ -108,21 +95,19 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     destroy_operator.apply(&mut solution, &context, &mut rng);
 
     // Ensure consistency after destroy, before any further operations
+    println!("Ensuring consistency after destroy...");
     solution.ensure_consistency_updated(&context);
-
+    println!("Consistency ensured.");
+    
     // Feasibility check after destroy
     println!("Feasibility after destroy (light): {}", solution.is_complete_solution());
     println!("Feasibility after destroy (deep): {}", solution.is_fully_feasible(&context));
-
-    // Output unassigned visits
-    println!("Unassigned visits after destroy:");
-    for (i, visit) in solution.all_visits().iter().enumerate() {
-        if !visit.is_assigned {
-            println!("Visit index: {}, Visit ID: {}", i, visit.id());
-        }
-    }
+    
     dump_solution(&solution, &context.problem.vessels, "../output/solution_vis_after_destroy.json")?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule_after_destroy.json")?;
+
+    // Add idle voyages for only one vessel (after destroy)
+    solution.add_idle_vessel_and_add_empty_voyages(&context);
 
     // Apply DeepGreedyInsertion repair operator
     use crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion;
@@ -130,19 +115,13 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     let repair_operator = DeepGreedyInsertion;
     repair_operator.apply(&mut solution, &context, &mut rng);
 
+    solution.ensure_consistency_updated(&context);
     // Feasibility check after repair
     println!("Feasibility after repair (light): {}", solution.is_complete_solution());
     println!("Feasibility after repair (deep): {}", solution.is_fully_feasible(&context));
 
     println!("Applied DeepGreedyInsertion repair operator.");
     // Optionally, print unassigned visits after repair
-    println!("Unassigned visits after repair:");
-    for (i, visit) in solution.all_visits().iter().enumerate() {
-        if !visit.is_assigned {
-            println!("Visit index: {}, Visit ID: {}", i, visit.id());
-        }
-    }
-    solution.ensure_consistency_updated(&context);
     dump_solution(&solution, &context.problem.vessels, "../output/solution_vis_after_repair.json")?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule_after_repair.json")?;
     Ok(())
@@ -219,9 +198,12 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
         }
         // After repair
         solution.ensure_consistency_updated(&context);
+        // Add idle voyages for only one vessel (after destroy and after feasibility checks)
+        solution.add_idle_vessel_and_add_empty_voyages(&context);
         repair_operator.apply(&mut solution, &context, &mut rng);
         let repair_cost = solution.total_cost;
         info!(target: "alns::iteration", "Seed {}: After repair cost = {}", seed, repair_cost);
+        solution.ensure_consistency_updated(&context);
         let is_complete_repair = solution.is_complete_solution();
         let is_feasible_repair = solution.is_fully_feasible(&context);
         if !is_complete_repair || !is_feasible_repair {
@@ -245,8 +227,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!(target: "alns::main", "ALNS process started");
-    test_feasibility_over_seeds()?;
-    // test_main(0)?;
+    // test_feasibility_over_seeds()?;
+    test_main(11)?;
     info!(target: "alns::main", "ALNS process finished");
     Ok(())
 }

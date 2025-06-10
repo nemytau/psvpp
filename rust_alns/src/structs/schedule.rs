@@ -103,16 +103,26 @@ impl Schedule {
         }
         voyages
     }
-    pub fn overlaps_with_other_voyages(
+    /// Checks for overlaps, skipping empty voyages if a closure is provided.
+    pub fn overlaps_with_other_voyages<F>(
         &self,
         vessel_id: usize,
         voyage_id: usize,
         start_time: f64,
         end_time: f64,
-    ) -> bool {
+        is_empty: Option<F>,
+    ) -> bool
+    where
+        F: Fn(usize) -> bool,
+    {
         let voyage_ids = self.get_all_voyages_for_vessel(vessel_id);
         for id in voyage_ids {
             if id != voyage_id {
+                if let Some(ref is_empty_fn) = is_empty {
+                    if is_empty_fn(id) {
+                        continue;
+                    }
+                }
                 if let (Some(start), Some(end)) = (
                     self.voyage_start_times.get(&id),
                     self.voyage_end_times.get(&id),
