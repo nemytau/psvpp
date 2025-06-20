@@ -4,6 +4,7 @@ use std::time::Duration;
 use permutohedron::Heap;
 use crate::structs::{constants::{DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD}, problem_data::ProblemData, time_window::TimeWindow, visit::Visit, voyage::Voyage};
 
+#[derive(Clone)]
 pub struct TSPResult {
     pub visit_ids_seq: Vec<usize>,
     pub sailing_time: f64,
