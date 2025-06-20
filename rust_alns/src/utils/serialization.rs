@@ -15,63 +15,75 @@ use super::tsp_solver;
 // Structs for explicit schedule visualization
 #[derive(Serialize)]
 struct ExplicitStage {
-    Vessel: String,
-    Start: f64,
-    End: f64,
-    Action: String,
-    Description: String,
+    #[serde(rename = "Vessel")]
+    vessel: String,
+    #[serde(rename = "Start")]
+    start: f64,
+    #[serde(rename = "End")]
+    end: f64,
+    #[serde(rename = "Action")]
+    action: String,
+    #[serde(rename = "Description")]
+    description: String,
 }
 
 #[derive(Serialize)]
 struct ExplicitSchedule {
     stages: Vec<ExplicitStage>,
+    cost: f64,
 }
 
 // Structs for simplified schedule visualization
 #[derive(Serialize)]
 struct VizVoyage {
-    Vessel: String,
-    Route: String,
-    Start: f64,
-    End: f64,
-    Load: String,
+    #[serde(rename = "Vessel")]
+    vessel: String,
+    #[serde(rename = "Route")]
+    route: String,
+    #[serde(rename = "Start")]
+    start: f64,
+    #[serde(rename = "End")]
+    end: f64,
+    #[serde(rename = "Load")]
+    load: String,
 }
 
 #[derive(Serialize)]
 struct VizSchedule {
     voyages: Vec<VizVoyage>,
+    cost: f64,
 }
 
 fn push_stage_cyclic(
     stages: &mut Vec<ExplicitStage>,
     vessel: &str,
-    mut start: f64,
-    mut end: f64,
+    start: f64,
+    end: f64,
     action: &str,
     description: &str,
 ) {
     if end <= HOURS_IN_PERIOD as f64 {
         stages.push(ExplicitStage {
-            Vessel: vessel.to_string(),
-            Start: start,
-            End: end,
-            Action: action.to_string(),
-            Description: description.to_string(),
+            vessel: vessel.to_string(),
+            start,
+            end,
+            action: action.to_string(),
+            description: description.to_string(),
         });
     } else {
         stages.push(ExplicitStage {
-            Vessel: vessel.to_string(),
-            Start: start,
-            End: HOURS_IN_PERIOD as f64,
-            Action: action.to_string(),
-            Description: description.to_string(),
+            vessel: vessel.to_string(),
+            start,
+            end: HOURS_IN_PERIOD as f64,
+            action: action.to_string(),
+            description: description.to_string(),
         });
         stages.push(ExplicitStage {
-            Vessel: vessel.to_string(),
-            Start: 0.0,
-            End: end - HOURS_IN_PERIOD as f64,
-            Action: action.to_string(),
-            Description: description.to_string(),
+            vessel: vessel.to_string(),
+            start: 0.0,
+            end: end - HOURS_IN_PERIOD as f64,
+            action: action.to_string(),
+            description: description.to_string(),
         });
     }
 }
@@ -196,12 +208,14 @@ pub fn dump_explicit_schedule_to_json(
         }
     }
 
-    let json = serde_json::to_string_pretty(&ExplicitSchedule { stages }).unwrap();
+    // Calculate cost with context, not just solution.total_cost
+    let cost = solution.cost_with_context(context);
+    let json = serde_json::to_string_pretty(&ExplicitSchedule { stages, cost }).unwrap();
     let mut file = File::create(output_path).unwrap();
     file.write_all(json.as_bytes()).unwrap();
 }
 
-pub fn dump_schedule_to_json(solution: &Solution, vessels: &[Vessel], output_path: &str) {
+pub fn dump_schedule_to_json(solution: &Solution, vessels: &[Vessel], output_path: &str, context: &Context) {
     let mut viz_voyages = Vec::new();
 
     for voyage_cell in &solution.voyages {
@@ -219,31 +233,33 @@ pub fn dump_schedule_to_json(solution: &Solution, vessels: &[Vessel], output_pat
 
         if voyage.end_time_at_base > Some(HOURS_IN_PERIOD as f64) {
             viz_voyages.push(VizVoyage {
-                Vessel: vessel.name.clone(),
-                Route: route.clone(),
-                Start: voyage.start_time().unwrap_or(0.0),
-                End: HOURS_IN_PERIOD as f64,
-                Load: load.clone(),
+                vessel: vessel.name.clone(),
+                route: route.clone(),
+                start: voyage.start_time().unwrap_or(0.0),
+                end: HOURS_IN_PERIOD as f64,
+                load: load.clone(),
             });
             viz_voyages.push(VizVoyage {
-                Vessel: vessel.name.clone(),
-                Route: route,
-                Start: 0.0,
-                End: voyage.end_time_at_base.unwrap() - HOURS_IN_PERIOD as f64,
-                Load: load,
+                vessel: vessel.name.clone(),
+                route: route,
+                start: 0.0,
+                end: voyage.end_time_at_base.unwrap() - HOURS_IN_PERIOD as f64,
+                load: load,
             });
         } else {
             viz_voyages.push(VizVoyage {
-                Vessel: vessel.name.clone(),
-                Route: route,
-                Start: voyage.start_time().unwrap_or(0.0),
-                End: voyage.end_time_at_base.unwrap(),
-                Load: load,
+                vessel: vessel.name.clone(),
+                route: route,
+                start: voyage.start_time().unwrap_or(0.0),
+                end: voyage.end_time_at_base.unwrap(),
+                load: load,
             });
         }
     }
     
-    let json_schedule = VizSchedule { voyages: viz_voyages };
+    // Calculate cost with context, not just solution.total_cost
+    let cost = solution.cost_with_context(context);
+    let json_schedule = VizSchedule { voyages: viz_voyages, cost };
     let json = serde_json::to_string_pretty(&json_schedule).expect("Failed to serialize");
     let mut file = File::create(output_path).expect("Failed to create file");
     file.write_all(json.as_bytes()).expect("Failed to write to file");

@@ -8,7 +8,7 @@ use rand::rngs::StdRng;
 
 
 use operators::initial_solution::construct_initial_solution;
-use crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages;
+use crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages;
 use crate::operators::traits::DestroyOperator;
 use structs::context::Context;
 use structs::data_loader;
@@ -87,23 +87,31 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut solution = construct_initial_solution(&context, &mut rng);
 
-    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis.json")?;
+    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis.json", &context)?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule.json")?;
 
+    // Check initial solution feasibility
+    let is_complete_initial = solution.is_complete_solution();
+    let is_feasible_initial = solution.is_fully_feasible(&context);
+    if !(is_complete_initial && is_feasible_initial) {
+        println!("Initial solution: complete={}, feasible={}", is_complete_initial, is_feasible_initial);
+    }
+
     // Apply destroy operator
-    let destroy_operator = RandomVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8 };
+    let destroy_operator = WorstVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8, p: 5.0 };
     destroy_operator.apply(&mut solution, &context, &mut rng);
 
     // Ensure consistency after destroy, before any further operations
-    println!("Ensuring consistency after destroy...");
     solution.ensure_consistency_updated(&context);
-    println!("Consistency ensured.");
-    
+
     // Feasibility check after destroy
-    println!("Feasibility after destroy (light): {}", solution.is_complete_solution());
-    println!("Feasibility after destroy (deep): {}", solution.is_fully_feasible(&context));
-    
-    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis_after_destroy.json")?;
+    let is_complete_destroy = solution.is_complete_solution();
+    let is_feasible_destroy = solution.is_fully_feasible(&context);
+    if !(is_complete_destroy == false && is_feasible_destroy == true) {
+        println!("After destroy: complete={}, feasible={}", is_complete_destroy, is_feasible_destroy);
+    }
+
+    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis_after_destroy.json", &context)?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule_after_destroy.json")?;
 
     // Add idle voyages for only one vessel (after destroy)
@@ -117,18 +125,19 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
 
     solution.ensure_consistency_updated(&context);
     // Feasibility check after repair
-    println!("Feasibility after repair (light): {}", solution.is_complete_solution());
-    println!("Feasibility after repair (deep): {}", solution.is_fully_feasible(&context));
+    let is_complete_repair = solution.is_complete_solution();
+    let is_feasible_repair = solution.is_fully_feasible(&context);
+    if !(is_complete_repair && is_feasible_repair) {
+        println!("After repair: complete={}, feasible={}", is_complete_repair, is_feasible_repair);
+    }
 
-    println!("Applied DeepGreedyInsertion repair operator.");
-    // Optionally, print unassigned visits after repair
-    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis_after_repair.json")?;
+    dump_solution(&solution, &context.problem.vessels, "../output/solution_vis_after_repair.json", &context)?;
     dump_explicit_solution(&solution, &context, "../output/explicit_schedule_after_repair.json")?;
     Ok(())
 }
 
-pub fn dump_solution(solution: &structs::solution::Solution, vessels: &Vec<structs::vessel::Vessel>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    dump_schedule_to_json(solution, vessels, path);
+pub fn dump_solution(solution: &structs::solution::Solution, vessels: &Vec<structs::vessel::Vessel>, path: &str, context: &Context) -> Result<(), Box<dyn std::error::Error>> {
+    dump_schedule_to_json(solution, vessels, path, context);
     Ok(())
 }
 
@@ -166,8 +175,11 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
     let mut incomplete_repair_complete = 0;
     let mut incomplete_repair_feasible = 0;
     let mut repair_incomplete_seeds = Vec::new();
+    let mut repair_better_count = 0;
+    let mut repair_better_and_feasible_count = 0;
+    let mut total_seeds = 100;
 
-    let destroy_operator = RandomVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8 };
+    let destroy_operator = WorstVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8, p: 5.0 };
     let repair_operator = DeepGreedyInsertion;
 
     for seed in 0..100u64 {
@@ -214,12 +226,20 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
             repair_incomplete_seeds.push(seed);
         }
         debug!(target: "alns::iteration", "Seed {}: Cost change: initial={} -> destroy={} -> repair={}", seed, initial_cost, destroy_cost, repair_cost);
+        if repair_cost < initial_cost {
+            repair_better_count += 1;
+            if is_complete_repair && is_feasible_repair {
+                repair_better_and_feasible_count += 1;
+            }
+        }
     }
-    println!("Feasibility stats over 100 seeds:");
+    println!("Feasibility stats over {} seeds:", total_seeds);
     println!("Initial solution: {} not fully feasible ({} incomplete, {} not feasible)", incomplete_initial, incomplete_initial_complete, incomplete_initial_feasible);
     println!("After destroy:    {} not fully feasible ({} incomplete, {} not feasible)", incomplete_destroy, incomplete_destroy_complete, incomplete_destroy_feasible);
     println!("After repair:     {} not fully feasible ({} incomplete, {} not feasible)", incomplete_repair, incomplete_repair_complete, incomplete_repair_feasible);
     println!("Seeds where repair operator led to infeasibility: {:?}", repair_incomplete_seeds);
+    println!("\nRepair operator produced BETTER cost than initial in {} out of {} seeds", repair_better_count, total_seeds);
+    println!("Repair operator produced BETTER cost AND feasible solution in {} out of {} seeds", repair_better_and_feasible_count, total_seeds);
     Ok(())
 }
 
@@ -228,7 +248,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!(target: "alns::main", "ALNS process started");
     // test_feasibility_over_seeds()?;
-    test_main(11)?;
+    test_feasibility_over_seeds()?;
+    // test_main(11)?;
     info!(target: "alns::main", "ALNS process finished");
     Ok(())
 }

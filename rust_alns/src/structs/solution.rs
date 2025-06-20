@@ -5,7 +5,6 @@ use crate::structs::{
     context::Context,
 };
 use std::cell::RefCell;
-use log::{warn};
 
 #[derive(Clone)]
 pub struct Solution {
@@ -194,12 +193,12 @@ impl Solution {
             }
         }
         if route_updates > 0 || state_updates > 0 {
-            log::info!("Updated {} voyage routes and {} voyage states", route_updates, state_updates);
+            log::debug!("Updated {} voyage routes and {} voyage states", route_updates, state_updates);
         } else {
             log::debug!("No voyage route/state updates needed");
         }
         if self.schedule.needs_update() {
-            log::info!("Schedule marked as needing update, rebuilding schedule");
+            log::debug!("Schedule marked as needing update, rebuilding schedule");
             self.ensure_schedule_is_updated();
         } else {
             log::debug!("Schedule is up-to-date, no rebuild needed");
@@ -599,5 +598,103 @@ impl Solution {
             }
         }
         self.schedule.set_need_update(true);
+    }
+
+    /// Returns the total cost of the solution.
+    ///
+    /// fixed cost = number of vessels used * vessel cost
+    /// variable cost = sailing_time * fcs * fuel_cost + (wait_time + service_time) * fcw * fuel_cost
+    pub fn cost_with_context(&self, context: &Context) -> f64 {
+        use std::collections::HashSet;
+        let mut vessels_used = HashSet::new();
+        let mut fixed_cost = 0.0;
+        let mut variable_cost = 0.0;
+        let fuel_cost = context.problem.lng_cost();
+        for voyage_cell in &self.voyages {
+            let voyage = voyage_cell.borrow();
+            // Only count non-empty voyages
+            if voyage.visit_ids.is_empty() { continue; }
+            let vessel_id = match voyage.vessel_id { Some(id) => id, None => continue };
+            vessels_used.insert(vessel_id);
+            let vessel = match context.problem.vessels.get(vessel_id) { Some(v) => v, None => continue };
+            let sailing_time = voyage.sailing_time.unwrap_or(0.0);
+            let waiting_time = voyage.waiting_time.unwrap_or(0.0);
+            // Service time: sum of service times for all visits in this voyage
+            let service_time: f64 = voyage.visit_ids.iter()
+                .filter_map(|&vid| self._visits.get(vid))
+                .map(|v| context.problem.installations.get(v.installation_id()).map(|inst| inst.get_service_time()).unwrap_or(0.0))
+                .sum();
+            variable_cost += sailing_time * vessel.fcs * fuel_cost;
+            variable_cost += (waiting_time + service_time) * vessel.fcw * fuel_cost;
+        }
+        for &vessel_id in &vessels_used {
+            if let Some(vessel) = context.problem.vessels.get(vessel_id) {
+                fixed_cost += vessel.cost;
+            }
+        }
+        log::debug!("Cost calculation: fixed_cost = {:.2}, variable_cost = {:.2}, total = {:.2}", fixed_cost, variable_cost, fixed_cost + variable_cost);
+        fixed_cost + variable_cost
+    }
+
+    /// Returns the cost of the solution if the given visit were unassigned (removal cost).
+    /// This version uses the same cost logic as cost_with_context.
+    /// Fast removal cost: calculates cost difference by removing the visit from the voyage, but does not update the full solution or re-solve TSP.
+    /// Not checked for correctness! Only a quick estimate, does not update all state.
+    pub fn cost_without_visit_fast(&self, visit_id: usize, context: &Context) -> f64 {
+        use std::collections::HashMap;
+        let mut fixed_cost = 0.0;
+        let mut variable_cost = 0.0;
+        let fuel_cost = context.problem.lng_cost();
+        let mut vessel_usage: HashMap<usize, usize> = HashMap::new();
+        for voyage_cell in &self.voyages {
+            let voyage = voyage_cell.borrow();
+            if voyage.visit_ids.contains(&visit_id) {
+                let mut new_voyage = voyage.clone();
+                new_voyage.visit_ids.retain(|&id| id != visit_id);
+                if new_voyage.visit_ids.is_empty() { continue; }
+                let vessel_id = match new_voyage.vessel_id { Some(id) => id, None => continue };
+                *vessel_usage.entry(vessel_id).or_insert(0) += 1;
+                let vessel = match context.problem.vessels.get(vessel_id) { Some(v) => v, None => continue };
+                let sailing_time = new_voyage.sailing_time.unwrap_or(0.0);
+                let waiting_time = new_voyage.waiting_time.unwrap_or(0.0);
+                let service_time: f64 = new_voyage.visit_ids.iter()
+                    .filter_map(|&vid| self._visits.get(vid))
+                    .map(|v| context.problem.installations.get(v.installation_id()).map(|inst| inst.get_service_time()).unwrap_or(0.0))
+                    .sum();
+                variable_cost += sailing_time * vessel.fcs * fuel_cost;
+                variable_cost += (waiting_time + service_time) * vessel.fcw * fuel_cost;
+            } else if !voyage.visit_ids.is_empty() {
+                let vessel_id = match voyage.vessel_id { Some(id) => id, None => continue };
+                *vessel_usage.entry(vessel_id).or_insert(0) += 1;
+                let vessel = match context.problem.vessels.get(vessel_id) { Some(v) => v, None => continue };
+                let sailing_time = voyage.sailing_time.unwrap_or(0.0);
+                let waiting_time = voyage.waiting_time.unwrap_or(0.0);
+                let service_time: f64 = voyage.visit_ids.iter()
+                    .filter_map(|&vid| self._visits.get(vid))
+                    .map(|v| context.problem.installations.get(v.installation_id()).map(|inst| inst.get_service_time()).unwrap_or(0.0))
+                    .sum();
+                variable_cost += sailing_time * vessel.fcs * fuel_cost;
+                variable_cost += (waiting_time + service_time) * vessel.fcw * fuel_cost;
+            }
+        }
+        for (&vessel_id, &count) in &vessel_usage {
+            if count > 0 {
+                if let Some(vessel) = context.problem.vessels.get(vessel_id) {
+                    fixed_cost += vessel.cost;
+                }
+            }
+        }
+        fixed_cost + variable_cost
+    }
+
+    /// Accurate removal cost: clones the solution, unassigns the visit, updates the affected voyage, and computes the cost.
+    /// For best accuracy, the route should be re-optimized (TSP), but here we just remove the visit and update details.
+    pub fn cost_without_visit_full(&self, visit_id: usize, context: &Context) -> f64 {
+        let mut cloned = self.clone();
+        // Unassign the visit
+        cloned.unassign_visits(&[visit_id]);
+        // Ensure consistency is updated after unassignment (recalculates voyage details and schedule)
+        cloned.ensure_consistency_updated(context);
+        cloned.cost_with_context(context)
     }
 }
