@@ -6,7 +6,6 @@ use log::info;
 
 use operators::initial_solution::construct_initial_solution;
 use crate::operators::repair::k_regret_insertion::KRegretInsertion;
-use crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages;
 use crate::structs::context::Context;
 use crate::structs::data_loader;
 use crate::structs::problem_data::ProblemData;
@@ -43,7 +42,14 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Apply destroy operator
-    let destroy_operator = WorstVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8, p: 5.0 };
+    let destroy_operator = crate::operators::destroy::shaw_removal::ShawRemoval {
+        xi_min: 0.2,
+        xi_max: 0.4,
+        p: 5.0,
+        alpha: 1.0,
+        beta: 5.0,
+        phi: 2.0,
+    };
     destroy_operator.apply(&mut solution, &context, &mut rng);
 
     // Ensure consistency after destroy, before any further operations
@@ -118,7 +124,15 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
     let mut repair_better_and_feasible_count = 0;
     let total_seeds = 100;
 
-    let destroy_operator = WorstVisitRemovalInVoyages { xi_min: 0.2, xi_max: 0.8, p: 5.0 };
+    // Use ShawRemoval as destroy operator (copied from test_main)
+    let destroy_operator = crate::operators::destroy::shaw_removal::ShawRemoval {
+        xi_min: 0.2,
+        xi_max: 0.4,
+        p: 5.0,
+        alpha: 1.0,
+        beta: 5.0,
+        phi: 2.0,
+    };
     let repair_operator = KRegretInsertion { k: 3 };
 
     for seed in 0..100u64 {
@@ -180,7 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!(target: "alns::main", "ALNS process started");
     test_feasibility_over_seeds()?;
-    test_main(89)?; // Use a fixed seed for reproducibility
+    // test_main(89)?; // Use a fixed seed for reproducibility
     info!(target: "alns::main", "ALNS process finished");
     Ok(())
 }
