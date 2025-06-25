@@ -1,4 +1,5 @@
-use log::{info, debug, warn};
+use log::info;
+use log::{debug};
 use rand::RngCore;
 use rand::Rng;
 use crate::structs::{solution::Solution, context::Context};
@@ -16,12 +17,10 @@ impl DestroyOperator for WorstVisitRemovalInVoyages {
         // Determine number of visits to remove
         let n_visits = solution.voyages.iter().map(|v| v.borrow().visit_ids.len()).sum::<usize>();
         if n_visits == 0 {
-            warn!(target: "operator::destroy", "No visits to remove");
             return;
         }
         let frac = self.xi_min + rng.gen_range(0.0..1.0) * (self.xi_max - self.xi_min);
         let to_remove = ((frac * n_visits as f64).round() as usize).min(n_visits);
-        debug!(target: "operator::destroy", "Removing {} of {} visits (frac={:.2})", to_remove, n_visits, frac);
         let mut removed_visit_ids = Vec::new();
         for _ in 0..to_remove {
             // 1. Collect all current visits and their removal costs
@@ -43,7 +42,6 @@ impl DestroyOperator for WorstVisitRemovalInVoyages {
             let idx = ((r.powf(self.p)) * (all_visits.len() as f64)).floor() as usize;
             let idx = idx.min(all_visits.len() - 1);
             let (visit_id, removal_cost) = all_visits.remove(idx);
-            debug!(target: "operator::destroy", "Removing visit {} (removal_cost={:.2})", visit_id, removal_cost);
             removed_visit_ids.push(visit_id);
             // Remove the visit immediately
             solution.unassign_visits(&[visit_id]);

@@ -1,4 +1,5 @@
-use log::{info, debug, warn};
+use log::info;
+use log::{debug, warn};
 use rand::RngCore;
 use rand::Rng;
 use crate::structs::{solution::Solution, context::Context};
@@ -32,13 +33,13 @@ impl DestroyOperator for ShawRemoval {
         let frac = self.xi_min + rng.gen_range(0.0..1.0) * (self.xi_max - self.xi_min);
         let to_remove = ((frac * n_visits as f64).round() as usize).min(n_visits);
         debug!(target: "operator::destroy", "Removing {} of {} visits (frac={:.2})", to_remove, n_visits, frac);
-        info!(target: "operator::destroy", "[ShawRemoval] Candidates: {:?}", all_visit_ids);
+        debug!(target: "operator::destroy", "[ShawRemoval] Candidates: {:?}", all_visit_ids);
         // Randomly select a seed visit
         let mut removed_visit_ids = Vec::new();
         let mut candidates: Vec<usize> = all_visit_ids.clone();
         let seed_idx = rng.gen_range(0..candidates.len());
         let seed = candidates.remove(seed_idx);
-        info!(target: "operator::destroy", "[ShawRemoval] Seed visit: {}", seed);
+        debug!(target: "operator::destroy", "[ShawRemoval] Seed visit: {}", seed);
         removed_visit_ids.push(seed);
         // Iteratively select most related visits
         let mut iteration = 0;
@@ -65,7 +66,7 @@ impl DestroyOperator for ShawRemoval {
             removed_visit_ids.push(selected);
             iteration += 1;
         }
-        info!(target: "operator::destroy", "[ShawRemoval] Removed visits: {:?}", removed_visit_ids);
+        debug!(target: "operator::destroy", "[ShawRemoval] Removed visits: {:?}", removed_visit_ids);
         removed_visit_ids.sort_unstable();
         solution.unassign_visits(&removed_visit_ids);
         solution.schedule.set_need_update(true);

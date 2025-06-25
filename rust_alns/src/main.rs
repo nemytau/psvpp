@@ -1,8 +1,11 @@
 mod operators;
 mod structs;
 mod utils;
+mod alns;
 
 use log::info;
+use std::time::Instant;
+use std::fs;
 
 use operators::initial_solution::construct_initial_solution;
 use crate::operators::repair::k_regret_insertion::KRegretInsertion;
@@ -14,6 +17,99 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use crate::operators::traits::{DestroyOperator, RepairOperator};
 use crate::utils::serialization::{dump_schedule_to_json, dump_explicit_schedule_to_json};
+use crate::alns::engine::ALNSEngine;
+use crate::alns::context::ALNSContext;
+use crate::alns::acceptance;
+
+/// Run the ALNS engine with detailed logging and export iteration stats to CSV
+fn run_alns_with_logging(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
+    // Prepare data and context (reuse from test_main)
+    let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
+    let vessels_path = "../sample/vessels/SMALL_1/v_test1.csv";
+    let base_path = "../sample/base/SMALL_1/b_test1.csv";
+
+    let data = structs::data_loader::read_data(installations_path, vessels_path, base_path)?;
+    let problem_data = structs::problem_data::ProblemData::new(data.vessels.clone(), data.installations.clone(), data.base.clone());
+    let tsp_solver = utils::tsp_solver::TSPSolver::new_from_problem_data(&problem_data);
+    let context = structs::context::Context {
+        problem: problem_data,
+        tsp_solver,
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let initial_solution = operators::initial_solution::construct_initial_solution(&context, &mut rng);
+
+    // Set up ALNS operator registry (add your operators here)
+    let mut operator_registry = crate::operators::registry::OperatorRegistry::new();
+    // Destroy operators
+    operator_registry.add_destroy_operator(Box::new(crate::operators::destroy::shaw_removal::ShawRemoval {
+        xi_min: 0.2,
+        xi_max: 0.4,
+        p: 5.0,
+        alpha: 1.0,
+        beta: 5.0,
+        phi: 2.0,
+    }));
+    operator_registry.add_destroy_operator(Box::new(crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
+        xi_min: 0.2,
+        xi_max: 0.4,
+    }));
+    operator_registry.add_destroy_operator(Box::new(crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
+        xi_min: 0.2,
+        xi_max: 0.4,
+        p: 5.0,
+    }));
+    // Repair operators
+    operator_registry.add_repair_operator(Box::new(crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {}));
+    operator_registry.add_repair_operator(Box::new(crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2 }));
+    operator_registry.add_repair_operator(Box::new(crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3 }));
+    // Add more operators as needed
+
+    // ALNS parameters
+    let temperature = 1000.0;
+    let theta = 0.9;
+    let max_iterations = 100;
+    let reaction_factor = 0.2;
+    let reward_values = vec![33.0, 9.0, 3.0]; // Example: [σ1, σ2, σ3]
+    let n_destroy = operator_registry.destroy_operators.len();
+    let n_repair = operator_registry.repair_operators.len();
+
+    // Initialize ALNSContext
+    let mut alns_context = ALNSContext {
+        iteration: 0,
+        temperature,
+        best_cost: initial_solution.total_cost,
+        rng: StdRng::seed_from_u64(seed),
+        destroy_operator_weights: vec![1.0; n_destroy],
+        repair_operator_weights: vec![1.0; n_repair],
+        destroy_operator_scores: vec![0.0; n_destroy],
+        repair_operator_scores: vec![0.0; n_repair],
+        destroy_operator_counts: vec![0; n_destroy],
+        repair_operator_counts: vec![0; n_repair],
+        cost_history: Vec::new(),
+        reaction_factor,
+        reward_values,
+    };
+
+    let mut logger = crate::alns::logger::AlnsLogger::new();
+    println!("Starting ALNS run with logging...");
+
+    let mut engine = ALNSEngine::new(
+        &context,
+        &mut alns_context,
+        operator_registry,
+        initial_solution,
+        temperature,
+        theta,
+        max_iterations,
+        seed,
+    );
+    engine.run_with_logger(&mut logger);
+
+    std::fs::create_dir_all("../logs").ok();
+    logger.export_csv("../logs/alns_run.csv")?;
+    println!("ALNS run complete. Logs exported to ../logs/alns_run.csv");
+    Ok(())
+}
 
 fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
@@ -193,7 +289,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!(target: "alns::main", "ALNS process started");
-    test_feasibility_over_seeds()?;
+    // test_feasibility_over_seeds()?;
+    // Uncomment to run ALNS with detailed logging:
+    run_alns_with_logging(42)?;
     // test_main(89)?; // Use a fixed seed for reproducibility
     info!(target: "alns::main", "ALNS process finished");
     Ok(())

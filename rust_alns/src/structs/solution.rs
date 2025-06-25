@@ -172,7 +172,7 @@ impl Solution {
         let after = self.voyages.len();
         let removed = before - after;
         if removed > 0 {
-            log::info!("Removed {} empty voyages from solution ({} -> {})", removed, before, after);
+            log::debug!("Removed {} empty voyages from solution ({} -> {})", removed, before, after);
         } else {
             log::debug!("No empty voyages removed. Total voyages: {}", after);
         }
@@ -696,5 +696,10 @@ impl Solution {
         // Ensure consistency is updated after unassignment (recalculates voyage details and schedule)
         cloned.ensure_consistency_updated(context);
         cloned.cost_with_context(context)
+    }
+
+    /// Updates the total_cost field using the current state and context.
+    pub fn update_total_cost(&mut self, context: &Context) {
+        self.total_cost = self.cost_with_context(context);
     }
 }

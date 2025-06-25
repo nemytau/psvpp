@@ -7,7 +7,7 @@ use crate::structs::{
     context::Context,  
 };
 use crate::utils::assignment::assign_smallest_available_vessel;
-use log::{info, debug, warn, error};
+use log::{debug, warn, error};
 use rand::Rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ pub fn construct_initial_solution(
     context: &Context,
     rng: &mut impl Rng,
 ) -> Solution {
-    info!(target: "operator::initial", "[InitialSolution] Construction started");
+    debug!(target: "operator::initial", "[InitialSolution] Construction started");
     let base_visits = context.problem.generate_visits();
     'outer: for attempt in 0..MAX_ATTEMPTS {
         let mut solution = Solution::new(base_visits.clone());
@@ -101,7 +101,6 @@ pub fn construct_initial_solution(
             let is_feasible = solution.is_fully_feasible(context);
             debug!(target: "operator::initial", "[InitialSolution] Created {} voyages, used {} vessels", num_voyages, num_vessels_used);
             debug!(target: "operator::initial", "[InitialSolution] Feasibility: complete={}, fully_feasible={}", is_complete, is_feasible);
-            info!(target: "operator::initial", "[InitialSolution] Feasible solution found on attempt {}", attempt);
             return solution;
         } else {
             warn!(target: "operator::initial", "[InitialSolution] Infeasible solution on attempt {}", attempt);

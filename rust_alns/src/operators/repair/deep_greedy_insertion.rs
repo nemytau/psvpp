@@ -15,7 +15,7 @@ impl RepairOperator for DeepGreedyInsertion {
         }
         let mut uninserted_visits: Vec<usize> = solution.get_unassigned_visits().iter().map(|v| v.id()).collect();
         let mut iteration = 0;
-        info!(target: "operator::repair", "[DeepGreedyInsertion] Starting with {} uninserted visits", uninserted_visits.len());
+        debug!(target: "operator::repair", "[DeepGreedyInsertion] Starting with {} uninserted visits", uninserted_visits.len());
         while !uninserted_visits.is_empty() {
             let mut best_insertion: Option<(usize, usize, f64)> = None;
             for &visit_id in &uninserted_visits {

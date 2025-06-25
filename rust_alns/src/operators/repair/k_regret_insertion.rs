@@ -9,13 +9,13 @@ pub struct KRegretInsertion {
 
 impl RepairOperator for KRegretInsertion {
     fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
+        info!(target: "operator::repair", "[KRegretInsertion] Invoked with k={}", self.k);
         if !solution.is_schedule_up_to_date() {
-            info!(target: "operator::repair", "Solution schedule is not up-to-date before operator application, updating now.");
             solution.ensure_schedule_is_updated();
         }
         let mut uninserted_visits: Vec<usize> = solution.get_unassigned_visits().iter().map(|v| v.id()).collect();
         let mut iteration = 0;
-        info!(target: "operator::repair", "[KRegretInsertion] Starting with {} uninserted visits", uninserted_visits.len());
+        debug!(target: "operator::repair", "[KRegretInsertion] Starting with {} uninserted visits", uninserted_visits.len());
         while !uninserted_visits.is_empty() {
             let mut best_visit: Option<usize> = None;
             let mut best_voyage: Option<usize> = None;
@@ -63,7 +63,7 @@ impl RepairOperator for KRegretInsertion {
         if solution.schedule.needs_update() {
             solution.ensure_schedule_is_updated();
         }
-        info!(target: "operator::repair", "[KRegretInsertion] Completed");
+        debug!(target: "operator::repair", "[KRegretInsertion] Completed");
     }
 
     fn requires_consistency(&self) -> bool {

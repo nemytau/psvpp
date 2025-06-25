@@ -1,4 +1,4 @@
-use log::{info, debug, warn, error};
+use log::{debug, info};
 use rand::seq::SliceRandom;
 use rand::RngCore;
 use rand::Rng;
@@ -15,7 +15,6 @@ impl DestroyOperator for RandomVisitRemovalInVoyages {
         info!(target: "operator::destroy", "[RandomVisitRemovalInVoyages] Invoked");
         let voyage_count = solution.voyages.len();
         if voyage_count == 0 {
-            warn!(target: "operator::destroy", "No voyages to affect");
             return;
         }
         // Calculate the number of voyages to affect based on xi_max
@@ -29,7 +28,6 @@ impl DestroyOperator for RandomVisitRemovalInVoyages {
             let n_visits = voyage.visit_ids.len();
             let frac = self.xi_min + rng.gen::<f64>() * (self.xi_max - self.xi_min);
             let to_remove = ((frac * n_visits as f64).round() as usize).min(n_visits);
-            debug!(target: "operator::destroy", "Voyage {}: removing {} of {} visits (frac={:.2})", voyage.id, to_remove, n_visits, frac);
             // Ensure deterministic removal: sort visit IDs before unassigning
             let mut removed_visit_ids = voyage.select_visits_to_remove(to_remove, rng);
             removed_visit_ids.sort_unstable();
