@@ -285,13 +285,84 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn test_voyage_number_reduction_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::operators::improvement::voyage_number_reduction::VoyageNumberReduction;
+    use crate::operators::traits::ImprovementOperator;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
+    let vessels_path = "../sample/vessels/SMALL_1/v_test1.csv";
+    let base_path = "../sample/base/SMALL_1/b_test1.csv";
+
+    let data = structs::data_loader::read_data(installations_path, vessels_path, base_path)?;
+    let problem_data = structs::problem_data::ProblemData::new(data.vessels.clone(), data.installations.clone(), data.base.clone());
+    let tsp_solver = utils::tsp_solver::TSPSolver::new_from_problem_data(&problem_data);
+    let context = structs::context::Context {
+        problem: problem_data,
+        tsp_solver,
+    };
+    let mut reduced_seeds = Vec::new();
+    let total_seeds = 100;
+    for seed in 0..total_seeds {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut solution = operators::initial_solution::construct_initial_solution(&context, &mut rng);
+        let before = solution.voyages.iter().filter(|v| !v.borrow().visit_ids.is_empty()).count();
+        let op = VoyageNumberReduction;
+        op.apply(&mut solution, &context, &mut rng);
+        let after = solution.voyages.iter().filter(|v| !v.borrow().visit_ids.is_empty()).count();
+        if after < before {
+            reduced_seeds.push(seed);
+        }
+    }
+    let ratio = reduced_seeds.len() as f64 / total_seeds as f64;
+    println!("Ratio of seeds where number of voyages reduced: {:.2}", ratio);
+    println!("Seeds where reduction occurred: {reduced_seeds:?}");
+    Ok(())
+}
+
+fn test_voyage_number_reduction_dump(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::operators::improvement::voyage_number_reduction::VoyageNumberReduction;
+    use crate::operators::traits::ImprovementOperator;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    let installations_path = "../sample/installations/SMALL_1/i_test1.csv";
+    let vessels_path = "../sample/vessels/SMALL_1/v_test1.csv";
+    let base_path = "../sample/base/SMALL_1/b_test1.csv";
+
+    let data = structs::data_loader::read_data(installations_path, vessels_path, base_path)?;
+    let problem_data = structs::problem_data::ProblemData::new(data.vessels.clone(), data.installations.clone(), data.base.clone());
+    let tsp_solver = utils::tsp_solver::TSPSolver::new_from_problem_data(&problem_data);
+    let context = structs::context::Context {
+        problem: problem_data,
+        tsp_solver,
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut solution = operators::initial_solution::construct_initial_solution(&context, &mut rng);
+    dump_solution(&solution, &context.problem.vessels, &format!("../output/voyage_reduction_init_seed{}.json", seed), &context)?;
+    let op = VoyageNumberReduction;
+    op.apply(&mut solution, &context, &mut rng);
+    dump_solution(&solution, &context.problem.vessels, &format!("../output/voyage_reduction_improved_seed{}.json", seed), &context)?;
+    // Check if solution is feasible after reduction
+    let is_complete = solution.is_complete_solution();
+    let is_feasible = solution.is_fully_feasible(&context);
+    if !is_complete || !is_feasible {
+        println!("After voyage reduction: complete={}, feasible={}", is_complete, is_feasible);
+    } else {
+        println!("After voyage reduction: solution is complete and feasible");
+    }
+    // Output departure spread for each installation
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!(target: "alns::main", "ALNS process started");
-    // test_feasibility_over_seeds()?;
+    test_feasibility_over_seeds()?;
     // Uncomment to run ALNS with detailed logging:
-    run_alns_with_logging(42)?;
+    // run_alns_with_logging(42)?;
+    // test_voyage_number_reduction_over_seeds()?;
+    // test_voyage_number_reduction_dump(43)?;
     // test_main(89)?; // Use a fixed seed for reproducibility
     info!(target: "alns::main", "ALNS process finished");
     Ok(())

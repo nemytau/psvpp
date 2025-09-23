@@ -10,27 +10,41 @@
     {
       "Vessel": "0",
       "Start": 16.0,
-      "End": 22.7346418179224,
+      "End": 19.855984466971858,
       "Action": "Sailing",
-      "Description": "0→2"
+      "Description": "0→3"
     },
     {
       "Vessel": "0",
-      "Start": 22.7346418179224,
-      "End": 26.334641817922403,
+      "Start": 19.855984466971858,
+      "End": 21.855984466971858,
       "Action": "Service",
-      "Description": "2"
+      "Description": "3"
     },
     {
       "Vessel": "0",
-      "Start": 26.334641817922403,
-      "End": 27.975311769117596,
+      "Start": 21.855984466971858,
+      "End": 24.999490692992186,
       "Action": "Sailing",
-      "Description": "2→5"
+      "Description": "3→7"
     },
     {
       "Vessel": "0",
-      "Start": 27.975311769117596,
+      "Start": 24.999490692992186,
+      "End": 26.399490692992185,
+      "Action": "Service",
+      "Description": "7"
+    },
+    {
+      "Vessel": "0",
+      "Start": 26.399490692992185,
+      "End": 27.779043942929988,
+      "Action": "Sailing",
+      "Description": "7→5"
+    },
+    {
+      "Vessel": "0",
+      "Start": 27.779043942929988,
       "End": 31.0,
       "Action": "Waiting",
       "Description": "5"
@@ -45,13 +59,27 @@
     {
       "Vessel": "0",
       "Start": 33.2,
-      "End": 41.252215535131995,
+      "End": 34.840669951195196,
       "Action": "Sailing",
-      "Description": "5→base"
+      "Description": "5→2"
     },
     {
       "Vessel": "0",
-      "Start": 41.252215535131995,
+      "Start": 34.840669951195196,
+      "End": 38.4406699511952,
+      "Action": "Service",
+      "Description": "2"
+    },
+    {
+      "Vessel": "0",
+      "Start": 38.4406699511952,
+      "End": 45.1753117691176,
+      "Action": "Sailing",
+      "Description": "2→base"
+    },
+    {
+      "Vessel": "0",
+      "Start": 45.1753117691176,
       "End": 56.0,
       "Action": "Waiting",
       "Description": "0"
@@ -66,41 +94,13 @@
     {
       "Vessel": "1",
       "Start": 40.0,
-      "End": 43.85598446697186,
+      "End": 45.722968995579485,
       "Action": "Sailing",
-      "Description": "0→3"
+      "Description": "0→10"
     },
     {
       "Vessel": "1",
-      "Start": 43.85598446697186,
-      "End": 45.85598446697186,
-      "Action": "Service",
-      "Description": "3"
-    },
-    {
-      "Vessel": "1",
-      "Start": 45.85598446697186,
-      "End": 48.99949069299219,
-      "Action": "Sailing",
-      "Description": "3→7"
-    },
-    {
-      "Vessel": "1",
-      "Start": 48.99949069299219,
-      "End": 50.39949069299219,
-      "Action": "Service",
-      "Description": "7"
-    },
-    {
-      "Vessel": "1",
-      "Start": 50.39949069299219,
-      "End": 54.9423508801917,
-      "Action": "Sailing",
-      "Description": "7→10"
-    },
-    {
-      "Vessel": "1",
-      "Start": 54.9423508801917,
+      "Start": 45.722968995579485,
       "End": 55.0,
       "Action": "Waiting",
       "Description": "10"
@@ -150,27 +150,13 @@
     {
       "Vessel": "0",
       "Start": 88.0,
-      "End": 94.94598245521524,
+      "End": 91.59810835201478,
       "Action": "Sailing",
-      "Description": "0→7"
+      "Description": "0→1"
     },
     {
       "Vessel": "0",
-      "Start": 94.94598245521524,
-      "End": 96.34598245521525,
-      "Action": "Service",
-      "Description": "7"
-    },
-    {
-      "Vessel": "0",
-      "Start": 96.34598245521525,
-      "End": 100.01810251679758,
-      "Action": "Sailing",
-      "Description": "7→1"
-    },
-    {
-      "Vessel": "0",
-      "Start": 100.01810251679758,
+      "Start": 91.59810835201478,
       "End": 103.0,
       "Action": "Waiting",
       "Description": "1"
@@ -234,27 +220,13 @@
     {
       "Vessel": "1",
       "Start": 126.2629594143798,
-      "End": 129.2184658845755,
+      "End": 132.9976012323022,
       "Action": "Sailing",
-      "Description": "2→3"
+      "Description": "2→base"
     },
     {
       "Vessel": "1",
-      "Start": 129.2184658845755,
-      "End": 131.2184658845755,
-      "Action": "Service",
-      "Description": "3"
-    },
-    {
-      "Vessel": "1",
-      "Start": 131.2184658845755,
-      "End": 135.07445035154734,
-      "Action": "Sailing",
-      "Description": "3→base"
-    },
-    {
-      "Vessel": "1",
-      "Start": 135.07445035154734,
+      "Start": 132.9976012323022,
       "End": 152.0,
       "Action": "Waiting",
       "Description": "0"
@@ -388,45 +360,94 @@
     {
       "Vessel": "1",
       "Start": 163.9084573000117,
-      "End": 168.0,
+      "End": 165.51691460002337,
       "Action": "Sailing",
-      "Description": "9→5"
+      "Description": "9→base"
+    },
+    {
+      "Vessel": "1",
+      "Start": 165.51691460002337,
+      "End": 168.0,
+      "Action": "Waiting",
+      "Description": "0"
     },
     {
       "Vessel": "1",
       "Start": 0.0,
-      "End": 3.9964738473967145,
-      "Action": "Sailing",
-      "Description": "9→5"
+      "End": 8.0,
+      "Action": "Waiting",
+      "Description": "0"
     },
     {
-      "Vessel": "1",
-      "Start": 3.9964738473967145,
-      "End": 7.0,
+      "Vessel": "3",
+      "Start": 8.0,
+      "End": 16.0,
+      "Action": "Service at base",
+      "Description": "base"
+    },
+    {
+      "Vessel": "3",
+      "Start": 16.0,
+      "End": 19.855984466971858,
+      "Action": "Sailing",
+      "Description": "0→3"
+    },
+    {
+      "Vessel": "3",
+      "Start": 19.855984466971858,
+      "End": 21.855984466971858,
+      "Action": "Service",
+      "Description": "3"
+    },
+    {
+      "Vessel": "3",
+      "Start": 21.855984466971858,
+      "End": 24.999490692992186,
+      "Action": "Sailing",
+      "Description": "3→7"
+    },
+    {
+      "Vessel": "3",
+      "Start": 24.999490692992186,
+      "End": 26.399490692992185,
+      "Action": "Service",
+      "Description": "7"
+    },
+    {
+      "Vessel": "3",
+      "Start": 26.399490692992185,
+      "End": 27.779043942929988,
+      "Action": "Sailing",
+      "Description": "7→5"
+    },
+    {
+      "Vessel": "3",
+      "Start": 27.779043942929988,
+      "End": 31.0,
       "Action": "Waiting",
       "Description": "5"
     },
     {
-      "Vessel": "1",
-      "Start": 7.0,
-      "End": 9.2,
+      "Vessel": "3",
+      "Start": 31.0,
+      "End": 33.2,
       "Action": "Service",
       "Description": "5"
     },
     {
-      "Vessel": "1",
-      "Start": 9.2,
-      "End": 17.252215535131995,
+      "Vessel": "3",
+      "Start": 33.2,
+      "End": 41.252215535131995,
       "Action": "Sailing",
       "Description": "5→base"
     },
     {
-      "Vessel": "1",
-      "Start": 17.252215535131995,
-      "End": 32.0,
+      "Vessel": "3",
+      "Start": 41.252215535131995,
+      "End": 56.0,
       "Action": "Waiting",
       "Description": "0"
     }
   ],
-  "cost": 33.887174924999556
+  "cost": 38.917287393368966
 }

@@ -13,7 +13,7 @@ use rand::seq::SliceRandom;
 use std::collections::HashMap;
 
 const MAX_VISITS_PER_VOYAGE: usize = 5;
-const MAX_ATTEMPTS: usize = 1;
+const MAX_ATTEMPTS: usize = 10;
 const MAX_VESSEL_CAPACITY: f64 = 100.0; // Define appropriate capacity value
 
 pub fn construct_initial_solution(
