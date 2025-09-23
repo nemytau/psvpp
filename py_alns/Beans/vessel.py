@@ -3,7 +3,6 @@ class Vessel:
     def __init__(self,
                  idx: int,
                  name: str,
-                 idx: int,
                  deck_capacity: int,
                  bulk_capacity: int,
                  speed: float,
@@ -33,6 +32,7 @@ class Vessel:
             speed=12,
             vessel_type='default',
             fcs=0.43,
+            fcw=0.43,  # Added missing fcw parameter
             cost=0
         )
 

@@ -3,5 +3,5 @@ import yaml
 
 
 ROOT_PATH = os.path.dirname(os.path.dirname(__file__))
-with open(os.path.join(ROOT_PATH, 'alns', 'resource', 'generation_config.yaml'), 'r') as f:
+with open(os.path.join(ROOT_PATH, 'py_alns', 'resource', 'generation_config.yaml'), 'r') as f:
     generation_yaml_config = yaml.load(f, Loader=yaml.SafeLoader)

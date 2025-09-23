@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from alns.Beans.voyage import Voyage
-from alns.Beans.node import Installation
+from py_alns.Beans.voyage import Voyage
+from py_alns.Beans.node import Installation
 
 
 @dataclass

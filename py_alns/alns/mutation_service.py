@@ -2,7 +2,7 @@ from itertools import combinations
 
 import numpy as np
 
-from alns.Beans.schedule import Schedule
+from py_alns.Beans.schedule import Schedule
 
 
 def removal_added_cost(inst, voyage):

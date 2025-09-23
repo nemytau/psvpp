@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 
-from alns.Beans.vessel import Vessel
-from alns.Beans.node import Installation, Base, Node
-from typing import Type
+from py_alns.Beans.vessel import Vessel
+from py_alns.Beans.node import Installation, Base, Node
+from typing import Type, Optional
 from itertools import permutations
 
 DAYS = 7
@@ -16,8 +16,8 @@ class Voyage:
 
     def __init__(self,
                  base: Base, distance_manager, start_day: int):
-        self.vessel = None
-        self.route = []
+        self.vessel: Optional[Vessel] = None
+        self.route: list[Installation] = []  # Initialize as empty list
         self.edges = []
         self.deck_load = 0
         self.start_time = start_day * HOURS + DEPARTURE_TIME
@@ -28,27 +28,39 @@ class Voyage:
         # self.variable_cost = 0
 
     def __hash__(self):
-        return hash((self.start_time, self.vessel.idx))
+        vessel_idx = self.vessel.idx if self.vessel is not None else None
+        return hash((self.start_time, vessel_idx))
 
     def __repr__(self):
-        route = '-'.join([str(i.idx) for i in self.route])
+        if not self.route:  # Check if route is empty
+            route = ""
+        else:
+            route = '-'.join([str(i.idx) for i in self.route])
         route = f'{self.base.name}-{route}-{self.base.name}'
-        return f'FL:{self.vessel.deck_capacity - self.deck_load} {route:>20}: [{self.start_time} - {self.end_time:.2f}]'
+        free_load = self.vessel.deck_capacity - self.deck_load if self.vessel is not None else 0
+        return f'FL:{free_load} {route:>20}: [{self.start_time} - {self.end_time:.2f}]'
 
     def __str__(self):
-        return f'{self.vessel.idx}:{self.start_day}'
+        vessel_idx = self.vessel.idx if self.vessel is not None else None
+        return f'{vessel_idx}:{self.start_day}'
 
     def __deepcopy__(self):
         copy = type(self)(self.base, self.distance_manager, self.start_day)
         copy.vessel = self.vessel
-        copy.route = [r for r in self.route]
+        copy.route = [r for r in self.route] if self.route is not None else []
         copy.end_time = self.end_time
         copy.deck_load = self.deck_load
         return copy
 
     def __eq__(self, other):
         if isinstance(other, Voyage):
-            return self.vessel.idx == other.vessel.idx \
+            # Check if both vessels exist before comparing their idx
+            if self.vessel is None or other.vessel is None:
+                vessel_equal = (self.vessel is None and other.vessel is None)
+            else:
+                vessel_equal = (self.vessel.idx == other.vessel.idx)
+            
+            return vessel_equal \
                    and self.start_day == other.start_day \
                    and self.route == other.route
         return False
@@ -64,7 +76,7 @@ class Voyage:
         """
         if self.start_day == other.start_day:
             return True
-        if len(self.route) == 0 or len(other.route) == 0:
+        if not self.route or not other.route:
             return False
         return self.check_overlap(self, other)
 
@@ -101,9 +113,11 @@ class Voyage:
         return (s2 <= e1) & (s1 <= e2)
 
     def is_on_the_route(self, inst: Installation):
-        return inst in self.route
+        return inst in (self.route or [])
 
     def earliest_end_time(self, speed):
+        if not self.route:
+            return self.start_time
         perm_routes = permutations(self.route)
         min_end_time = np.inf
         for route in perm_routes:
@@ -121,6 +135,9 @@ class Voyage:
             self.vessel = vessel
 
     def improve_full_enum(self):
+        if not self.route:
+            self.edges = self.make_edges([])
+            return
         perm_routes = permutations(self.route)
         min_end_time = np.inf
         best_route = None
@@ -129,8 +146,9 @@ class Voyage:
             if end_time < min_end_time:
                 min_end_time = end_time
                 best_route = list(route)
-        self.route = best_route
-        self.edges = self.make_edges(best_route)
+        if best_route is not None:
+            self.route = best_route
+        self.edges = self.make_edges(best_route or [])
         # maybe make update method to avoid 'forgetting' to update essential parameters
         self.end_time = min_end_time
 
@@ -171,17 +189,21 @@ class Voyage:
         return voyage_duration - total_sailing_time - total_service_time
 
     def total_sailing_time(self):
-        edges = self.make_edges(self.route)
+        if self.vessel is None:
+            raise ValueError("Vessel not assigned")
+        edges = self.make_edges(self.route or [])
         return sum([e[2]/self.vessel.speed for e in edges])
 
     def total_service_time(self):
-        return sum([i.service_time for i in self.route])
+        return sum([i.service_time for i in (self.route or [])])
 
     def calc_variable_cost(self):
         voyage_duration = self.end_time - self.start_time
         total_service_time = self.total_service_time()
         total_sailing_time = self.total_sailing_time()
         total_waiting_time = voyage_duration - total_sailing_time - total_service_time
+        if self.vessel is None:
+            raise ValueError("Vessel not assigned")
         variable_cost = (total_service_time + total_waiting_time) * self.vessel.fcw + total_sailing_time * self.vessel.fcs
         return np.around(variable_cost, 2)
 
@@ -192,6 +214,8 @@ class Voyage:
         :type new_inst: Installation
         :return:
         """
+        if self.route is None:
+            self.route = []
         self.route.append(new_inst)
         self.deck_load += new_inst.deck_demand
 
@@ -202,6 +226,8 @@ class Voyage:
         :param installation:
         :return:
         """
+        if self.route is None:
+            raise ValueError("Route is empty")
         self.route.remove(installation)
         self.deck_load -= installation.deck_demand
 
@@ -235,11 +261,13 @@ class Voyage:
                 for (from_node, to_node) in edges]
 
     def is_empty(self):
-        return len(self.route) < 1
+        return not self.route or len(self.route) < 1
 
     def check_load_feasibility(self, vessel=None):
         if vessel is None:
             vessel = self.vessel
+        if vessel is None:
+            raise ValueError("No vessel assigned")
         return self.deck_load <= vessel.deck_capacity
 
     def calculate_overlap(self, other):
@@ -310,7 +338,7 @@ class Voyage:
             current_time = service_i['end_time']
             sailing_ij = {'start_time': current_time,
                         'end_time': current_time + self.distance_manager.distance(edge[0].name,
-                                                                                    edge[1].name) / self.vessel.speed,
+                                                                                    edge[1].name) / (self.vessel.speed if self.vessel else 1.0),
                         'action': 'Sailing',
                         'description': f'{edge[0].idx}-{edge[1].idx}'}
             current_time = sailing_ij['end_time']
@@ -339,5 +367,5 @@ class Voyage:
         stages = [offset_stage_out_of_horizon(stage) if stage['start_time'] > PERIOD_LENGTH else stage for stage in
                 stages]
         stages_df = pd.DataFrame(stages)
-        stages_df['Vessel'] = str(self.vessel.name)
+        stages_df['Vessel'] = str(self.vessel.name) if self.vessel else 'Unassigned'
         return stages_df

@@ -1,6 +1,6 @@
-from alns.Beans.node import Installation
-from alns.utils import io
-from alns.data_generator import *
+from py_alns.Beans.node import Installation
+from py_alns.utils import io
+from py_alns.data_generator import *
 from datetime import timedelta
 
 

@@ -1,6 +1,6 @@
 from itertools import combinations
 import random
-from alns.utils.coord import Coord
+from py_alns.utils.coord import Coord
 from abc import ABC
 
 
@@ -89,17 +89,19 @@ class Installation(Node):
         #        f' TW:{self.time_window}'
         return f'{self.idx}'
 
-    def _generate_departure_scenarios(self, avail_dep_days=range(7)):
+    def _generate_departure_scenarios(self, avail_dep_days=None):
         """
         Generate departure scenarios.
 
         Generate departure scenarios for the installation taking into account its visit frequency and departure spread.
 
         :param avail_dep_days: list of numbers representing days with available departures, defaults to range(7)
-        :type avail_dep_days: list[int]
+        :type avail_dep_days: list[int] or range
         :return: list of departure scenarios
         :rtype: list[list[int]]
         """
+        if avail_dep_days is None:
+            avail_dep_days = range(7)
         if self.visit_frequency * self.departure_spread > avail_dep_days[-1]:
             raise ValueError('Visit frequency and departure spread combination is infeasible for set planning horizon.')
         departure_combinations = list(combinations(avail_dep_days, self.visit_frequency))

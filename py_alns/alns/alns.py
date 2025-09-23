@@ -1,12 +1,12 @@
-from alns.Beans.schedule import Schedule
-from alns.utils.utils import *
-from alns.alns.destroy_operator import *
-from alns.alns.repair_operator import *
-from alns.alns.improve_operator import *
+from py_alns.Beans.schedule import Schedule
+from py_alns.utils.utils import *
+from py_alns.alns.destroy_operator import *
+from py_alns.alns.repair_operator import *
+from py_alns.alns.improve_operator import *
 from config.config_utils import get_config
 import logging
 from datetime import datetime
-from alns.utils.utils import format_td
+from py_alns.utils.utils import format_td
 
 
 def calculate_operator_probabilities(weights):

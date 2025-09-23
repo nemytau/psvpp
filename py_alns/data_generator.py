@@ -1,8 +1,8 @@
 from .__init__ import generation_yaml_config
 import pandas as pd
 import numpy as np
-from alns.Beans.node import Installation, Base
-from alns.Beans.vessel import Vessel
+from py_alns.Beans.node import Installation, Base
+from py_alns.Beans.vessel import Vessel
 
 
 NO_TIME_WINDOW = '0, 24'
@@ -52,7 +52,7 @@ def generate_installation_dataset(inst_gen_params_name):
     :rtype: list[Installation]
     """
     inst_df = generate_installation_dataframe(inst_gen_params_name)
-    insts = inst_df.apply(lambda x: Installation(**(x.to_dict())), axis=1).to_list()
+    insts = [Installation(**row.to_dict()) for _, row in inst_df.iterrows()]
     return insts
 
 
@@ -61,7 +61,7 @@ def generate_base(base_gen_params_name='FMO'):
     base = Base(
         base_gen_params_name,
         base_config[base_gen_params_name]['service_time'],
-        tuple(map(int, base_config[base_gen_params_name]['time_window'].split(','))),
+        list(map(int, base_config[base_gen_params_name]['time_window'].split(','))),
         generation_yaml_config['base_coords'][base_gen_params_name][0],
         generation_yaml_config['base_coords'][base_gen_params_name][1]
     )
@@ -98,7 +98,7 @@ def generate_vessels_dataframe(vessel_sample_name):
 
 def generate_vessels_dataset(vessel_gen_params_name):
     vessel_df = generate_vessels_dataframe(vessel_gen_params_name)
-    vessels = vessel_df.apply(lambda x: Vessel(**(x.to_dict())), axis=1).to_list()
+    vessels = [Vessel(**row.to_dict()) for _, row in vessel_df.iterrows()]
     return vessels
 
 

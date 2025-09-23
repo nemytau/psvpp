@@ -3,12 +3,12 @@ import sys
 from typing import List
 import numpy as np
 import logging
-from alns.Beans.node import Installation, Base
-from alns.Beans.vessel import Vessel
-from alns.Beans.voyage import Voyage
-from alns.Beans.visit import Visit
-from alns.utils.utils import daily_visits_from_departure_scenarios
-from alns.utils.distance_manager import DistanceManager
+from py_alns.Beans.node import Installation, Base
+from py_alns.Beans.vessel import Vessel
+from py_alns.Beans.voyage import Voyage
+from py_alns.Beans.visit import Visit
+from py_alns.utils.utils import daily_visits_from_departure_scenarios
+from py_alns.utils.distance_manager import DistanceManager
 import time
 import pandas as pd
 from copy import deepcopy, copy
@@ -477,7 +477,12 @@ class Schedule:
         # Maybe voyages should be taken from the schedule
         origin_voyage = self.find_voyage_on_day(from_voyage.vessel, from_voyage.start_day)
         target_voyage = self.find_voyage_on_day(to_voyage.vessel, to_voyage.start_day)
-        origin_voyage.remove_visit(inst)
+        
+        if origin_voyage is None or target_voyage is None:
+            logger.error('Origin or target voyage not found in relocate_visit')
+            raise Exception('Voyage not found')
+            
+        origin_voyage.remove_inst(inst)  # Using remove_inst as this method exists in Voyage class
         target_voyage.insert_visit(inst)
         if origin_voyage.is_empty():
             self.remove_voyage(origin_voyage)
@@ -492,6 +497,9 @@ class Schedule:
         :return:
         """
         actual_voyage = self.find_voyage(voyage)
+        if actual_voyage is None:
+            logger.error('Voyage not found, location: schedule.remove_inst_from_voyage_route')
+            raise Exception('Voyage not found')
         voyage_len = len(actual_voyage.route)
         actual_voyage.remove_inst(inst)
         if voyage_len - len(actual_voyage.route) != 1:

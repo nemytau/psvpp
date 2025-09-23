@@ -1,4 +1,4 @@
-from alns.alns.mutation_service import *
+from py_alns.alns.mutation_service import *
 import numpy as np
 
 

@@ -1,8 +1,8 @@
-from alns.alns.repair_operator import *
+from py_alns.alns.repair_operator import *
 import numpy as np
 from itertools import permutations, combinations
-from alns.alns.destroy_operator import *
-from alns.Beans.schedule import Schedule
+from py_alns.alns.destroy_operator import *
+from py_alns.Beans.schedule import Schedule
 import random
 
 DAYS = 7

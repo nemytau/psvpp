@@ -1,9 +1,9 @@
 from config.config_utils import get_config
-from alns.Beans.schedule import Schedule
+from py_alns.Beans.schedule import Schedule
 import numpy as np
 import math
 import random
-from alns.alns.mutation_service import added_costs_for_visits_removal, update_removal_added_costs
+from py_alns.alns.mutation_service import added_costs_for_visits_removal, update_removal_added_costs
 
 eps_min = float(get_config()['alns.random_removal']['eps_min'])
 eps_max = float(get_config()['alns.random_removal']['eps_max'])
@@ -11,7 +11,7 @@ num_to_remove = int(get_config()['alns.worst_removal']['num_to_remove'])
 p = float(get_config()['alns.worst_removal']['determinism_parameter'])
 
 def random_removal_vlad(schedule: Schedule, visit_pool: set):
-    voyage_list = list(np.concatenate(schedule.schedule.values()).flat)
+    voyage_list = [voyage for voyages in schedule.schedule.values() for voyage in voyages]
     number_of_voyages_to_destroy = math.ceil(eps_max*len(voyage_list))
     voyages_to_destroy = random.sample(voyage_list, number_of_voyages_to_destroy)
     for voyage in voyages_to_destroy:
@@ -27,14 +27,14 @@ def random_removal_vlad(schedule: Schedule, visit_pool: set):
         else:
             for inst in insts_to_free:
                 # voyage.route.remove(inst)
-                schedule.remove_visit(voyage, inst)
+                voyage.remove_visit(inst)
                 visit_pool.add([inst, voyage.start_time])
             voyage.calc_voyage_end_time(voyage.route)
 
 
 def random_removal(schedule: Schedule):
     removed_insts_pool = []
-    voyage_list = list(np.concatenate(list(schedule.schedule.values())).flat)
+    voyage_list = [voyage for voyages in schedule.schedule.values() for voyage in voyages]
     number_of_voyages_to_destroy = math.ceil(eps_max*len(voyage_list))
     voyages_to_destroy = random.sample(voyage_list, number_of_voyages_to_destroy)
     random.seed(42)
