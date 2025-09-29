@@ -29,7 +29,7 @@ class Schedule:
     MAX_INST_PER_VOYAGE = 5
     MAX_ATTEMPTS_TO_INIT = 10
 
-    def __init__(self, installations: List[Installation], vessels: List[Vessel], base: Base, schedule=None):
+    def __init__(self, vessels: List[Vessel], installations: List[Installation], base: Base, schedule=None):
         self.vessels = vessels
         self.schedule = {}
         self.installations = installations
