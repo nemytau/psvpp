@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "psvpp"
+version = "0.1.0"
+description = "Platform Supply Vessel Pickup and Delivery Problem with RL-ALNS"
+authors = [{name = "Timothy", email = "timothy@example.com"}]
+dependencies = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0", 
+    "plotly>=5.0.0",
+    "dash>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+rl = ["gymnasium>=0.28.0", "stable-baselines3>=2.0.0", "matplotlib>=3.5.0"]
+dev = ["pytest>=7.0.0", "black", "isort"]
+
+[tool.maturin]
+python-source = "src"
+module-name = "rust_alns_py"
