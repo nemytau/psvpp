@@ -17,7 +17,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use crate::operators::traits::{DestroyOperator, RepairOperator};
 use crate::utils::serialization::{dump_schedule_to_json, dump_explicit_schedule_to_json};
-use crate::alns::engine::ALNSEngine;
+use crate::alns::legacy::ALNSEngineLegacy;
 use crate::alns::context::ALNSContext;
 use crate::alns::acceptance;
 
@@ -93,7 +93,7 @@ fn run_alns_with_logging(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     let mut logger = crate::alns::logger::AlnsLogger::new();
     println!("Starting ALNS run with logging...");
 
-    let mut engine = ALNSEngine::new(
+    let mut engine = ALNSEngineLegacy::new(
         &context,
         &mut alns_context,
         operator_registry,
@@ -354,16 +354,66 @@ fn test_voyage_number_reduction_dump(seed: u64) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
+/// Test the new unified ALNS engine
+fn test_alns_engine_iterations() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing unified ALNS engine...");
+    
+    // Create engine using the new unified interface
+    let mut engine = crate::alns::engine::ALNSEngine::new_from_instance(
+        "SMALL_1",
+        42,        // seed
+        500.0,     // temperature
+        0.9,       // theta
+        10,        // weight_update_interval
+        20         // max_iterations
+    )?;
+    
+    println!("Initial cost: {:.4}", engine.initial_cost);
+    
+    // Run 20 iterations manually to see progress
+    for iteration in 0..20 {
+        let destroy_idx = iteration % 3;
+        let repair_idx = (iteration + 1) % 3;
+        
+        match engine.run_iteration_explicit(destroy_idx, repair_idx, iteration) {
+            Ok(metrics) => {
+                let weight_marker = if (iteration + 1) % engine.weight_update_interval == 0 { " [WEIGHTS]" } else { "" };
+                println!("Iter {:2}: cost={:7.4}, best={:7.4}, temp={:6.1}, accepted={:5}{}",
+                    iteration + 1,
+                    metrics.total_cost,
+                    metrics.best_cost,
+                    metrics.temperature,
+                    metrics.accepted,
+                    weight_marker
+                );
+            },
+            Err(e) => {
+                println!("Error in iteration {}: {}", iteration, e);
+                break;
+            }
+        }
+    }
+    
+    println!("Final best cost: {:.4}", engine.best_solution.total_cost);
+    
+    // Export solution
+    engine.export_solution("output/unified_engine_solution.json");
+    println!("Solution exported to output/unified_engine_solution.json");
+    
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!(target: "alns::main", "ALNS process started");
-    test_feasibility_over_seeds()?;
+    // test_feasibility_over_seeds()?;
     // Uncomment to run ALNS with detailed logging:
     // run_alns_with_logging(42)?;
     // test_voyage_number_reduction_over_seeds()?;
     // test_voyage_number_reduction_dump(43)?;
-    // test_main(89)?; // Use a fixed seed for reproducibility
+    // test_main(47)?; // Use a fixed seed for reproducibility
+    test_alns_engine_iterations()?; // Test the new unified engine
     info!(target: "alns::main", "ALNS process finished");
     Ok(())
 }

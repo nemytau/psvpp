@@ -150,34 +150,48 @@
     {
       "Vessel": "0",
       "Start": 88.0,
-      "End": 91.59810835201478,
+      "End": 93.72296899557949,
       "Action": "Sailing",
-      "Description": "0→1"
+      "Description": "0→10"
     },
     {
       "Vessel": "0",
-      "Start": 91.59810835201478,
+      "Start": 93.72296899557949,
       "End": 103.0,
       "Action": "Waiting",
-      "Description": "1"
+      "Description": "10"
     },
     {
       "Vessel": "0",
       "Start": 103.0,
-      "End": 105.6,
+      "End": 104.7,
+      "Action": "Service",
+      "Description": "10"
+    },
+    {
+      "Vessel": "0",
+      "Start": 104.7,
+      "End": 107.50333843244276,
+      "Action": "Sailing",
+      "Description": "10→1"
+    },
+    {
+      "Vessel": "0",
+      "Start": 107.50333843244276,
+      "End": 110.10333843244275,
       "Action": "Service",
       "Description": "1"
     },
     {
       "Vessel": "0",
-      "Start": 105.6,
-      "End": 109.19810835201477,
+      "Start": 110.10333843244275,
+      "End": 113.70144678445753,
       "Action": "Sailing",
       "Description": "1→base"
     },
     {
       "Vessel": "0",
-      "Start": 109.19810835201477,
+      "Start": 113.70144678445753,
       "End": 128.0,
       "Action": "Waiting",
       "Description": "0"
@@ -227,48 +241,6 @@
     {
       "Vessel": "1",
       "Start": 132.9976012323022,
-      "End": 152.0,
-      "Action": "Waiting",
-      "Description": "0"
-    },
-    {
-      "Vessel": "2",
-      "Start": 104.0,
-      "End": 112.0,
-      "Action": "Service at base",
-      "Description": "base"
-    },
-    {
-      "Vessel": "2",
-      "Start": 112.0,
-      "End": 117.72296899557949,
-      "Action": "Sailing",
-      "Description": "0→10"
-    },
-    {
-      "Vessel": "2",
-      "Start": 117.72296899557949,
-      "End": 127.0,
-      "Action": "Waiting",
-      "Description": "10"
-    },
-    {
-      "Vessel": "2",
-      "Start": 127.0,
-      "End": 128.7,
-      "Action": "Service",
-      "Description": "10"
-    },
-    {
-      "Vessel": "2",
-      "Start": 128.7,
-      "End": 134.42296899557948,
-      "Action": "Sailing",
-      "Description": "10→base"
-    },
-    {
-      "Vessel": "2",
-      "Start": 134.42296899557948,
       "End": 152.0,
       "Action": "Waiting",
       "Description": "0"
@@ -379,75 +351,75 @@
       "Description": "0"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 8.0,
       "End": 16.0,
       "Action": "Service at base",
       "Description": "base"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 16.0,
       "End": 19.855984466971858,
       "Action": "Sailing",
       "Description": "0→3"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 19.855984466971858,
       "End": 21.855984466971858,
       "Action": "Service",
       "Description": "3"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 21.855984466971858,
       "End": 24.999490692992186,
       "Action": "Sailing",
       "Description": "3→7"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 24.999490692992186,
       "End": 26.399490692992185,
       "Action": "Service",
       "Description": "7"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 26.399490692992185,
       "End": 27.779043942929988,
       "Action": "Sailing",
       "Description": "7→5"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 27.779043942929988,
       "End": 31.0,
       "Action": "Waiting",
       "Description": "5"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 31.0,
       "End": 33.2,
       "Action": "Service",
       "Description": "5"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 33.2,
       "End": 41.252215535131995,
       "Action": "Sailing",
       "Description": "5→base"
     },
     {
-      "Vessel": "3",
+      "Vessel": "2",
       "Start": 41.252215535131995,
       "End": 56.0,
       "Action": "Waiting",
       "Description": "0"
     }
   ],
-  "cost": 38.917287393368966
+  "cost": 32.12948032915166
 }

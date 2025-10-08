@@ -1,5 +1,9 @@
 ---
+# Extended Generation Configuration for Multi-Instance Training
+# This file defines 20+ diverse instance configurations for comprehensive RL training
+
 inst_generation_params:
+  # Original base configurations
   SMALL_1:
     - type: drill
       num: 4
@@ -78,7 +82,7 @@ inst_generation_params:
       departure_spread: 1
       deck_service_speed: 10
 
-  # Easy configurations (reduced complexity)
+  # Additional varied configurations for comprehensive training
   EASY_1:
     - type: drill
       num: 3
@@ -105,33 +109,6 @@ inst_generation_params:
       departure_spread: 1
       deck_service_speed: 12
 
-  EASY_2:
-    - type: drill
-      num: 2
-      time_windows: 1
-      demand_mu: 18
-      demand_sigma: 4
-      frequencies:
-        values: [1]
-        probs: [1.0]
-      name_prefix: 'd'
-      default_time_window: 5, 21
-      departure_spread: 1
-      deck_service_speed: 14
-    - type: prod
-      num: 3
-      time_windows: 1
-      demand_mu: 14
-      demand_sigma: 3
-      frequencies:
-        values: [1, 2]
-        probs: [0.8, 0.2]
-      name_prefix: 'p'
-      default_time_window: 5, 21
-      departure_spread: 1
-      deck_service_speed: 13
-
-  # Medium configurations (moderate challenges)
   MEDIUM_1:
     - type: drill
       num: 5
@@ -158,33 +135,6 @@ inst_generation_params:
       departure_spread: 1
       deck_service_speed: 9
 
-  MEDIUM_2:
-    - type: drill
-      num: 7
-      time_windows: 4
-      demand_mu: 28
-      demand_sigma: 7
-      frequencies:
-        values: [1, 2]
-        probs: [0.3, 0.7]
-      name_prefix: 'd'
-      default_time_window: 8, 18
-      departure_spread: 2
-      deck_service_speed: 9
-    - type: prod
-      num: 9
-      time_windows: 5
-      demand_mu: 22
-      demand_sigma: 5
-      frequencies:
-        values: [1, 2, 3]
-        probs: [0.3, 0.4, 0.3]
-      name_prefix: 'p'
-      default_time_window: 8, 18
-      departure_spread: 1
-      deck_service_speed: 8
-
-  # Hard configurations (increased complexity)
   HARD_1:
     - type: drill
       num: 10
@@ -211,33 +161,6 @@ inst_generation_params:
       departure_spread: 2
       deck_service_speed: 7
 
-  HARD_2:
-    - type: drill
-      num: 10
-      time_windows: 6
-      demand_mu: 40
-      demand_sigma: 12
-      frequencies:
-        values: [2, 3]
-        probs: [0.3, 0.7]
-      name_prefix: 'd'
-      default_time_window: 9, 17
-      departure_spread: 3
-      deck_service_speed: 5
-    - type: prod
-      num: 16
-      time_windows: 10
-      demand_mu: 35
-      demand_sigma: 10
-      frequencies:
-        values: [2, 3]
-        probs: [0.2, 0.8]
-      name_prefix: 'p'
-      default_time_window: 9, 17
-      departure_spread: 2
-      deck_service_speed: 6
-
-  # Specialized variants
   HIGH_FREQUENCY:
     - type: drill
       num: 6
@@ -316,6 +239,58 @@ inst_generation_params:
       departure_spread: 1
       deck_service_speed: 10
 
+  SPREAD_DEPARTURES:
+    - type: drill
+      num: 6
+      time_windows: 2
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2]
+        probs: [0.3, 0.7]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 3
+      deck_service_speed: 10
+    - type: prod
+      num: 9
+      time_windows: 3
+      demand_mu: 24
+      demand_sigma: 6
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 2
+      deck_service_speed: 10
+
+  MIXED_SPEEDS:
+    - type: drill
+      num: 5
+      time_windows: 3
+      demand_mu: 30
+      demand_sigma: 8
+      frequencies:
+        values: [1, 2]
+        probs: [0.4, 0.6]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 15
+    - type: prod
+      num: 8
+      time_windows: 4
+      demand_mu: 18
+      demand_sigma: 4
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 6
+
 fleet_generation_params:
   SMALL_1:
     - type: vtype1
@@ -327,6 +302,7 @@ fleet_generation_params:
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 0
+
   SMALL_2:
     - type: vtype1
       name_prefix: 'v'
@@ -337,6 +313,7 @@ fleet_generation_params:
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 0
+
   SMALL_3:
     - type: vtype1
       name_prefix: 'v'
@@ -348,29 +325,18 @@ fleet_generation_params:
       bulk_capacity: 1000
       cost: 1000
 
-  # Easy fleet configurations (more vessels, higher capacity)
+  # Fleet variations for different training scenarios
   EASY_1:
     - type: vtype1
       name_prefix: 'v'
       num: 10
-      speed: 14
+      speed: 15
       fcs: 0.35
       fcw: 0.20
       deck_capacity: 120
       bulk_capacity: 1200
       cost: 0
-  EASY_2:
-    - type: vtype1
-      name_prefix: 'v'
-      num: 9
-      speed: 15
-      fcs: 0.33
-      fcw: 0.18
-      deck_capacity: 130
-      bulk_capacity: 1300
-      cost: 0
 
-  # Medium fleet configurations (balanced capacity and speed)
   MEDIUM_1:
     - type: vtype1
       name_prefix: 'v'
@@ -381,85 +347,126 @@ fleet_generation_params:
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 500
-  MEDIUM_2:
-    - type: vtype1
-      name_prefix: 'v'
-      num: 7
-      speed: 11
-      fcs: 0.45
-      fcw: 0.28
-      deck_capacity: 95
-      bulk_capacity: 950
-      cost: 800
 
-  # Hard fleet configurations (fewer vessels, limited capacity)
   HARD_1:
     - type: vtype1
       name_prefix: 'v'
       num: 6
       speed: 10
       fcs: 0.50
-      fcw: 0.32
-      deck_capacity: 85
-      bulk_capacity: 850
-      cost: 1200
-  HARD_2:
-    - type: vtype1
-      name_prefix: 'v'
-      num: 5
-      speed: 9
-      fcs: 0.55
-      fcw: 0.35
-      deck_capacity: 75
-      bulk_capacity: 750
+      fcw: 0.30
+      deck_capacity: 80
+      bulk_capacity: 800
       cost: 1500
 
-  # Specialized fleet configurations
   HIGH_FREQUENCY:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 12
+      speed: 14
+      fcs: 0.40
+      fcw: 0.24
+      deck_capacity: 90
+      bulk_capacity: 900
+      cost: 200
+
+  HIGH_DEMAND:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 8
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 150
+      bulk_capacity: 1500
+      cost: 800
+
+  TIGHT_WINDOWS:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 10
+      speed: 16
+      fcs: 0.38
+      fcw: 0.22
+      deck_capacity: 110
+      bulk_capacity: 1100
+      cost: 300
+
+  SPREAD_DEPARTURES:
     - type: vtype1
       name_prefix: 'v'
       num: 9
       speed: 13
-      fcs: 0.40
-      fcw: 0.24
-      deck_capacity: 110
-      bulk_capacity: 1100
-      cost: 300
-  HIGH_DEMAND:
-    - type: vtype1
-      name_prefix: 'v'
-      num: 7
-      speed: 11
-      fcs: 0.48
-      fcw: 0.30
-      deck_capacity: 90
-      bulk_capacity: 900
-      cost: 1000
-  TIGHT_WINDOWS:
-    - type: vtype1
-      name_prefix: 'v'
-      num: 8
-      speed: 14
-      fcs: 0.42
+      fcs: 0.41
       fcw: 0.25
       deck_capacity: 105
       bulk_capacity: 1050
+      cost: 400
+
+  MIXED_SPEEDS:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 8
+      speed: 11
+      fcs: 0.45
+      fcw: 0.28
+      deck_capacity: 95
+      bulk_capacity: 950
       cost: 600
 
 base_generation_params:
   FMO:
     service_time: 8
     time_window: 8, 16
+  
+  # Alternative base configurations
+  FMO_EXTENDED:
+    service_time: 6
+    time_window: 6, 18
+    
+  FMO_TIGHT:
+    service_time: 10
+    time_window: 9, 15
 
+# Coordinate pools for different geographical distributions
 inst_coords:
+  # Main coordinate set (North Sea-like)
   [[60.78, 3.55], [61.04, 3.56], [61.17, 2.18], [61.2, 2.2],
    [61.2,  2.27], [60.8558,  2.6503], [61.07, 2.5], [60.48, 2.82], [60.6, 2.77],
    [60.48, 2.82], [60.7, 2.93], [60.38, 2.79], [61.055, 2.03], [60.53, 2.68],
    [60.7, 3.51], [60.93, 3.66], [60.7, 2.93], [61.25, 1.85],
    [61.2, 1.82], [61.29, 1.9], [60.77, 3.5], [60.89, 3.6], [60.64, 3.72],
    [61.04, 2.34], [60.78, 2.89], [61.04, 2.34], [60.77, 2.89], [61.37, 2.45],
-   [60.5, 4.8]]
+   [60.5, 4.8], [60.85, 3.2], [61.1, 2.6], [60.95, 3.8], [61.3, 2.1],
+   [60.4, 3.0], [61.0, 4.0], [60.6, 2.5], [61.15, 3.3], [60.75, 2.8],
+   [61.05, 1.9], [60.55, 3.4], [61.25, 2.7], [60.45, 2.9], [61.35, 2.3]]
 
 base_coords:
   FMO: [60.7945, 5.063]
   OP_FMO : [60.7942, 4.695]
+
+# Configuration metadata for training system
+training_configs:
+  curriculum_order:
+    - "EASY_1"
+    - "SMALL_1" 
+    - "MEDIUM_1"
+    - "SMALL_2"
+    - "HIGH_FREQUENCY"
+    - "TIGHT_WINDOWS"
+    - "SMALL_3"
+    - "HIGH_DEMAND"
+    - "SPREAD_DEPARTURES"
+    - "MIXED_SPEEDS"
+    - "HARD_1"
+  
+  difficulty_categories:
+    easy: ["EASY_1", "SMALL_1"]
+    medium: ["MEDIUM_1", "SMALL_2", "HIGH_FREQUENCY", "TIGHT_WINDOWS"]
+    hard: ["SMALL_3", "HIGH_DEMAND", "SPREAD_DEPARTURES", "MIXED_SPEEDS", "HARD_1"]
+  
+  specialized_scenarios:
+    frequency_focused: ["HIGH_FREQUENCY", "SMALL_1"]
+    demand_focused: ["HIGH_DEMAND", "MIXED_SPEEDS"]
+    scheduling_focused: ["TIGHT_WINDOWS", "SPREAD_DEPARTURES"]
+    capacity_focused: ["HARD_1", "SMALL_3"]

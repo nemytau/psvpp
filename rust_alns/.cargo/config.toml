@@ -1,0 +1,4 @@
+[build]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+[env]
+PYO3_PYTHON = "/Users/timothy/opt/miniconda3/envs/py312/bin/python"
