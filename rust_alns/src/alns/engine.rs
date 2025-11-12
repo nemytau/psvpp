@@ -6,6 +6,7 @@ use crate::alns::context::ALNSContext;
 use rand::rngs::StdRng;
 use rand::{SeedableRng, Rng};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 /// ALNS operator selection modes
 #[derive(Clone)]
@@ -74,13 +75,89 @@ impl ALNSEngine {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         // The sample directory is in the parent project directory, not in rust_alns
         let project_dir = std::path::Path::new(manifest_dir).parent().unwrap();
-        let (installations_path, vessels_path, base_path) = match problem_instance {
-            "SMALL_1" => (
-                format!("{}/sample/installations/SMALL_1/i_test1.csv", project_dir.display()),
-                format!("{}/sample/vessels/SMALL_1/v_test1.csv", project_dir.display()),
-                format!("{}/sample/base/SMALL_1/b_test1.csv", project_dir.display())
-            ),
-            _ => return Err(format!("Unknown problem instance: {}", problem_instance)),
+        let (installations_path, vessels_path, base_path) = {
+            let candidate_path = Path::new(problem_instance);
+            if candidate_path.exists() {
+                let directory: PathBuf = if candidate_path.is_dir() {
+                    candidate_path.to_path_buf()
+                } else {
+                    candidate_path
+                        .parent()
+                        .ok_or_else(|| {
+                            format!("Provided dataset path has no parent directory: {}", problem_instance)
+                        })?
+                        .to_path_buf()
+                };
+
+                let installations = directory.join("installations.csv");
+                let vessels = directory.join("vessels.csv");
+                let base = directory.join("base.csv");
+
+                if !installations.exists() {
+                    return Err(format!(
+                        "installations.csv not found for dataset: {}",
+                        directory.display()
+                    ));
+                }
+                if !vessels.exists() {
+                    return Err(format!(
+                        "vessels.csv not found for dataset: {}",
+                        directory.display()
+                    ));
+                }
+                if !base.exists() {
+                    return Err(format!(
+                        "base.csv not found for dataset: {}",
+                        directory.display()
+                    ));
+                }
+
+                (
+                    installations.to_string_lossy().into_owned(),
+                    vessels.to_string_lossy().into_owned(),
+                    base.to_string_lossy().into_owned(),
+                )
+            } else {
+                match problem_instance {
+                    "SMALL_1" => (
+                        format!("{}/sample/installations/SMALL_1/i_test1.csv", project_dir.display()),
+                        format!("{}/sample/vessels/SMALL_1/v_test1.csv", project_dir.display()),
+                        format!("{}/sample/base/SMALL_1/b_test1.csv", project_dir.display())
+                    ),
+                    _ => {
+                        let candidate_relative = project_dir.join(problem_instance);
+                        if candidate_relative.exists() {
+                            let directory = if candidate_relative.is_dir() {
+                                candidate_relative
+                            } else {
+                                candidate_relative
+                                    .parent()
+                                    .ok_or_else(|| format!(
+                                        "Provided dataset path has no parent directory: {}",
+                                        problem_instance
+                                    ))?
+                                    .to_path_buf()
+                            };
+                            let installations = directory.join("installations.csv");
+                            let vessels = directory.join("vessels.csv");
+                            let base = directory.join("base.csv");
+                            if !installations.exists() || !vessels.exists() || !base.exists() {
+                                return Err(format!(
+                                    "Dataset folder is missing required CSV files: {}",
+                                    directory.display()
+                                ));
+                            }
+                            (
+                                installations.to_string_lossy().into_owned(),
+                                vessels.to_string_lossy().into_owned(),
+                                base.to_string_lossy().into_owned(),
+                            )
+                        } else {
+                            return Err(format!("Unknown problem instance or dataset path: {}", problem_instance));
+                        }
+                    }
+                }
+            }
         };
 
         let data = crate::structs::data_loader::read_data(&installations_path, &vessels_path, &base_path)

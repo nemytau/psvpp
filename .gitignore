@@ -148,3 +148,8 @@ output.json
 
 # VSCode shit
 .VSCode
+
+# RL run artefacts
+logs/ppo_alns/
+runs/
+models/
