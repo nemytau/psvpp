@@ -30,6 +30,13 @@ with Reinforcement Learning for maritime logistics optimization.
    pip install -r requirements.txt
    ```
 
+3. **Generate train/test datasets (optional):**
+   ```bash
+   python scripts/generate_datasets.py --samples 5
+   ```
+   This produces stratified SMALL/MEDIUM/LARGE samples under `data/generated/` for both
+   training and held-out testing splits.
+
 3. **Run tests:**
    ```bash
    python -m pytest tests/
