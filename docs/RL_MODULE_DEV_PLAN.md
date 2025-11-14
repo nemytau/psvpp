@@ -44,33 +44,33 @@ python -m rl.solve --model runs/ppo_v1/model.zip --instance data/processed/alns/
 ## 3. Functional Requirements
 
 ### 3.1 Train
-- Load the training split via `GeneratedDatasetManager`.
-- Construct `ALNSEnvironment` with the chosen action, state, and reward modules.
-- Train PPO (or another algorithm) while logging:
-  - Policy and value losses, entropy, approximate KL, explained variance.
-  - ALNS specifics: operator usage histograms, acceptance rate, best-cost trace, feasibility ratio, temperature trends.
-- Save artefacts:
-  - `model.zip`, `manifest.json`, `config.yaml`, per-episode CSVs, TensorBoard logs.
-  - Comparison outputs under dedicated subdirectories (Section 6).
-- Tag outputs with the generated experiment ID (Section 6) and copy the resolved config.
+- [x] Load the training split via `GeneratedDatasetManager`.
+- [x] Construct `ALNSEnvironment` with the chosen action, state, and reward modules.
+- [~] Train PPO (or another algorithm) while logging:
+	- [x] Policy and value losses, entropy, approximate KL, explained variance (via Stable-Baselines3 logger).
+	- [~] ALNS specifics: operator usage histograms and best-cost traces exported; acceptance-rate, feasibility-ratio, and temperature trend exports still pending.
+- [x] Save artefacts:
+	- [x] `model.zip`, `manifest.json`, `config.yaml`, per-episode CSVs, TensorBoard logs.
+	- [x] Comparison outputs under dedicated subdirectories (Section 6).
+- [x] Tag outputs with the generated experiment ID (Section 6) and copy the resolved config.
 
 ### 3.2 Test
-- Load the test split (manifest-specified if available, otherwise via the dataset manager).
-- Run one evaluation episode per instance with the trained policy (no learning).
-- Emit `evaluation_summary.json`, per-instance details, convergence plots, and optional baseline statistics.
-- Compare against training metrics to detect overfitting (delta in final cost, convergence rate, action entropy).
+- [x] Load the test split (manifest-specified if available, otherwise via the dataset manager).
+- [x] Run one evaluation episode per instance with the trained policy (no learning).
+- [~] Emit `evaluation_summary.json`, per-instance details, convergence plots, and optional baseline statistics (CSV + plots produced; summary JSON still on the backlog).
+- [~] Compare against training metrics to detect overfitting (delta in final cost tracked, convergence/action entropy deltas not yet analysed automatically).
 
 ### 3.3 Evaluate (baselines and comparisons)
-- Run the trained policy and a random baseline on each test instance across configured seeds.
-- Produce artefacts:
-  - Percent-gap convergence curves for best and current cost.
-  - Combined comparisons (mean +/- one standard deviation shading).
-  - Per-instance CSV summaries with best-cost deltas and iteration counts.
-- Persist outputs under `runs/<exp_id>/model_vs_baseline/` (or a custom `--output-dir`).
+- [x] Run the trained policy and a random baseline on each test instance across configured seeds.
+- [~] Produce artefacts:
+	- [x] Percent-gap convergence curves for best and current cost.
+	- [x] Combined comparisons (mean +/- one standard deviation shading).
+	- [x] Per-instance CSV summaries with best-cost deltas and iteration counts.
+- [x] Persist outputs under `runs/<exp_id>/model_vs_baseline/` (or a custom `--output-dir`).
 
 ### 3.4 Solve (single instance)
-- Load a single processed instance and execute the chosen policy.
-- Return final schedule statistics and write a JSON summary compatible with visualisation scripts.
+- [ ] Load a single processed instance and execute the chosen policy.
+- [ ] Return final schedule statistics and write a JSON summary compatible with visualisation scripts.
 
 ---
 
@@ -173,9 +173,9 @@ tb/                         # TensorBoard logs
 ---
 
 ## 7. Dataset Management
-- Source datasets live under `data/generated/<size>/<split>/` and are converted into `data/processed/alns/...` on demand.
-- `GeneratedDatasetManager` prepares processed directories (installations, vessels, base CSVs) and caches conversions.
-- Maintain a split manifest with hashes to guarantee integrity and enable manifest verification.
+- [x] Source datasets live under `data/generated/<size>/<split>/` and are converted into `data/processed/alns/...` on demand.
+- [x] `GeneratedDatasetManager` prepares processed directories (installations, vessels, base CSVs) and caches conversions.
+- [x] Maintain a split manifest with hashes to guarantee integrity and enable manifest verification (captured in run `manifest.json` via `ExperimentManager`).
 
 ---
 

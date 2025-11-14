@@ -4,7 +4,7 @@ inst_generation_params:
     - type: drill
       num: 4
       time_windows: 2
-      demand_mu: 24
+      demand_mu: 28
       demand_sigma: 6
       frequencies:
         values: [1, 2]
@@ -16,7 +16,7 @@ inst_generation_params:
     - type: prod
       num: 6
       time_windows: 2
-      demand_mu: 18
+      demand_mu: 22
       demand_sigma: 5
       frequencies:
         values: [1, 2, 3]
@@ -30,7 +30,7 @@ inst_generation_params:
     - type: drill
       num: 5
       time_windows: 3
-      demand_mu: 22
+      demand_mu: 28
       demand_sigma: 5
       frequencies:
         values: [1, 2]
@@ -42,7 +42,7 @@ inst_generation_params:
     - type: prod
       num: 5
       time_windows: 2
-      demand_mu: 16
+      demand_mu: 22
       demand_sigma: 4
       frequencies:
         values: [1, 2, 3]
@@ -56,7 +56,7 @@ inst_generation_params:
     - type: drill
       num: 4
       time_windows: 2
-      demand_mu: 26
+      demand_mu: 28
       demand_sigma: 7
       frequencies:
         values: [1, 2]
@@ -68,7 +68,7 @@ inst_generation_params:
     - type: prod
       num: 7
       time_windows: 3
-      demand_mu: 19
+      demand_mu: 22
       demand_sigma: 6
       frequencies:
         values: [1, 2, 3]
@@ -82,7 +82,7 @@ inst_generation_params:
     - type: drill
       num: 3
       time_windows: 2
-      demand_mu: 25
+      demand_mu: 28
       demand_sigma: 5
       frequencies:
         values: [1, 2]
@@ -94,7 +94,7 @@ inst_generation_params:
     - type: prod
       num: 7
       time_windows: 2
-      demand_mu: 21
+      demand_mu: 22
       demand_sigma: 5
       frequencies:
         values: [1, 2, 3]
@@ -115,7 +115,7 @@ inst_generation_params:
         probs: [0.3, 0.5, 0.2]
       name_prefix: 'd'
       default_time_window: 7, 19
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 9
     - type: prod
       num: 13
@@ -134,19 +134,19 @@ inst_generation_params:
     - type: drill
       num: 8
       time_windows: 4
-      demand_mu: 30
+      demand_mu: 28
       demand_sigma: 7
       frequencies:
         values: [1, 2, 3]
         probs: [0.25, 0.5, 0.25]
       name_prefix: 'd'
       default_time_window: 6, 20
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 8
     - type: prod
       num: 12
       time_windows: 4
-      demand_mu: 24
+      demand_mu: 22
       demand_sigma: 6
       frequencies:
         values: [1, 2, 3]
@@ -160,7 +160,7 @@ inst_generation_params:
     - type: drill
       num: 9
       time_windows: 4
-      demand_mu: 26
+      demand_mu: 28
       demand_sigma: 7
       frequencies:
         values: [1, 2]
@@ -172,7 +172,7 @@ inst_generation_params:
     - type: prod
       num: 11
       time_windows: 5
-      demand_mu: 23
+      demand_mu: 22
       demand_sigma: 5
       frequencies:
         values: [1, 2, 3]
@@ -186,19 +186,19 @@ inst_generation_params:
     - type: drill
       num: 8
       time_windows: 3
-      demand_mu: 29
+      demand_mu: 28
       demand_sigma: 8
       frequencies:
         values: [1, 2, 3]
         probs: [0.3, 0.4, 0.3]
       name_prefix: 'd'
       default_time_window: 7, 19
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 9
     - type: prod
       num: 12
       time_windows: 5
-      demand_mu: 25
+      demand_mu: 22
       demand_sigma: 7
       frequencies:
         values: [1, 2, 3]
@@ -212,111 +212,111 @@ inst_generation_params:
     - type: drill
       num: 14
       time_windows: 5
-      demand_mu: 32
+      demand_mu: 28
       demand_sigma: 9
       frequencies:
         values: [1, 2, 3]
         probs: [0.25, 0.5, 0.25]
       name_prefix: 'd'
       default_time_window: 7, 19
-      departure_spread: 3
+      departure_spread: 1
       deck_service_speed: 7
     - type: prod
       num: 26
       time_windows: 6
-      demand_mu: 24
+      demand_mu: 22
       demand_sigma: 7
       frequencies:
         values: [1, 2, 3]
         probs: [0.2, 0.45, 0.35]
       name_prefix: 'p'
       default_time_window: 7, 19
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 8
 
   LARGE_TRAIN_2:
     - type: drill
       num: 15
       time_windows: 6
-      demand_mu: 34
+      demand_mu: 28
       demand_sigma: 8
       frequencies:
         values: [1, 2, 3]
         probs: [0.2, 0.5, 0.3]
       name_prefix: 'd'
       default_time_window: 6, 20
-      departure_spread: 3
+      departure_spread: 1
       deck_service_speed: 7
     - type: prod
       num: 25
       time_windows: 7
-      demand_mu: 26
+      demand_mu: 22
       demand_sigma: 8
       frequencies:
         values: [1, 2, 3]
         probs: [0.2, 0.45, 0.35]
       name_prefix: 'p'
       default_time_window: 6, 20
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 8
 
   LARGE_TRAIN_3:
     - type: drill
       num: 16
       time_windows: 6
-      demand_mu: 30
+      demand_mu: 28
       demand_sigma: 9
       frequencies:
         values: [1, 2, 3]
         probs: [0.25, 0.4, 0.35]
       name_prefix: 'd'
       default_time_window: 8, 18
-      departure_spread: 3
+      departure_spread: 1
       deck_service_speed: 7
     - type: prod
       num: 24
       time_windows: 8
-      demand_mu: 27
+      demand_mu: 22
       demand_sigma: 8
       frequencies:
         values: [1, 2, 3]
         probs: [0.2, 0.4, 0.4]
       name_prefix: 'p'
       default_time_window: 8, 18
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 7
 
   LARGE_TEST_1:
     - type: drill
       num: 15
       time_windows: 5
-      demand_mu: 33
+      demand_mu: 28
       demand_sigma: 9
       frequencies:
         values: [1, 2, 3]
         probs: [0.3, 0.4, 0.3]
       name_prefix: 'd'
       default_time_window: 7, 19
-      departure_spread: 3
+      departure_spread: 1
       deck_service_speed: 7
     - type: prod
       num: 25
       time_windows: 7
-      demand_mu: 28
+      demand_mu: 22
       demand_sigma: 8
       frequencies:
         values: [1, 2, 3]
         probs: [0.25, 0.4, 0.35]
       name_prefix: 'p'
       default_time_window: 7, 19
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 7
 
   SMALL_1:
     - type: drill
       num: 4
       time_windows: 2
-      demand_mu: 25
+      demand_mu: 28
       demand_sigma: 7
       frequencies:
         values: [1, 2]
@@ -328,7 +328,7 @@ inst_generation_params:
     - type: prod
       num: 6
       time_windows: 3
-      demand_mu: 20
+      demand_mu: 22
       demand_sigma: 5
       frequencies:
         values: [1, 2, 3]
@@ -342,7 +342,7 @@ inst_generation_params:
     - type: drill
       num: 6
       time_windows: 3
-      demand_mu: 25
+      demand_mu: 28
       demand_sigma: 7
       frequencies:
         values: [ 1, 2 ]
@@ -354,7 +354,7 @@ inst_generation_params:
     - type: prod
       num: 8
       time_windows: 5
-      demand_mu: 20
+      demand_mu: 22
       demand_sigma: 5
       frequencies:
         values: [ 1, 2, 3 ]
@@ -368,7 +368,7 @@ inst_generation_params:
     - type: drill
       num: 8
       time_windows: 4
-      demand_mu: 25
+      demand_mu: 28
       demand_sigma: 7
       frequencies:
         values: [ 1, 2 ]
@@ -380,7 +380,7 @@ inst_generation_params:
     - type: prod
       num: 14
       time_windows: 6
-      demand_mu: 20
+      demand_mu: 22
       demand_sigma: 5
       frequencies:
         values: [ 1, 2, 3 ]
@@ -448,19 +448,19 @@ inst_generation_params:
     - type: drill
       num: 5
       time_windows: 3
-      demand_mu: 30
+      demand_mu: 28
       demand_sigma: 8
       frequencies:
         values: [1, 2, 3]
         probs: [0.3, 0.5, 0.2]
       name_prefix: 'd'
       default_time_window: 7, 19
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 8
     - type: prod
       num: 10
       time_windows: 4
-      demand_mu: 25
+      demand_mu: 22
       demand_sigma: 6
       frequencies:
         values: [1, 2, 3]
@@ -508,7 +508,7 @@ inst_generation_params:
         probs: [0.4, 0.6]
       name_prefix: 'd'
       default_time_window: 8, 18
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 6
     - type: prod
       num: 16
@@ -520,7 +520,7 @@ inst_generation_params:
         probs: [0.3, 0.7]
       name_prefix: 'p'
       default_time_window: 8, 18
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 7
 
   HARD_2:
@@ -534,7 +534,7 @@ inst_generation_params:
         probs: [0.3, 0.7]
       name_prefix: 'd'
       default_time_window: 9, 17
-      departure_spread: 3
+      departure_spread: 1
       deck_service_speed: 5
     - type: prod
       num: 16
@@ -546,7 +546,7 @@ inst_generation_params:
         probs: [0.2, 0.8]
       name_prefix: 'p'
       default_time_window: 9, 17
-      departure_spread: 2
+      departure_spread: 1
       deck_service_speed: 6
 
   # Specialized variants
@@ -632,7 +632,7 @@ fleet_generation_params:
   SMALL_TRAIN_1:
     - type: vtype1
       name_prefix: 'v'
-      num: 8
+      num: 9
       speed: 12
       fcs: 0.42
       fcw: 0.25
@@ -642,7 +642,7 @@ fleet_generation_params:
   SMALL_TRAIN_2:
     - type: vtype1
       name_prefix: 'v'
-      num: 9
+      num: 10
       speed: 11
       fcs: 0.44
       fcw: 0.27
@@ -652,7 +652,7 @@ fleet_generation_params:
   SMALL_TRAIN_3:
     - type: vtype1
       name_prefix: 'v'
-      num: 8
+      num: 9
       speed: 13
       fcs: 0.40
       fcw: 0.24
@@ -662,7 +662,7 @@ fleet_generation_params:
   SMALL_TEST_1:
     - type: vtype1
       name_prefix: 'v'
-      num: 8
+      num: 9
       speed: 12
       fcs: 0.43
       fcw: 0.26
@@ -673,7 +673,7 @@ fleet_generation_params:
   MEDIUM_TRAIN_1:
     - type: vtype1
       name_prefix: 'v'
-      num: 9
+      num: 10
       speed: 11
       fcs: 0.46
       fcw: 0.28
@@ -683,7 +683,7 @@ fleet_generation_params:
   MEDIUM_TRAIN_2:
     - type: vtype1
       name_prefix: 'v'
-      num: 8
+      num: 9
       speed: 12
       fcs: 0.45
       fcw: 0.27
@@ -693,7 +693,7 @@ fleet_generation_params:
   MEDIUM_TRAIN_3:
     - type: vtype1
       name_prefix: 'v'
-      num: 8
+      num: 9
       speed: 11
       fcs: 0.47
       fcw: 0.29
@@ -703,7 +703,7 @@ fleet_generation_params:
   MEDIUM_TEST_1:
     - type: vtype1
       name_prefix: 'v'
-      num: 8
+      num: 9
       speed: 11
       fcs: 0.46
       fcw: 0.28
@@ -714,7 +714,7 @@ fleet_generation_params:
   LARGE_TRAIN_1:
     - type: vtype1
       name_prefix: 'v'
-      num: 10
+      num: 14
       speed: 11
       fcs: 0.48
       fcw: 0.30
@@ -724,7 +724,7 @@ fleet_generation_params:
   LARGE_TRAIN_2:
     - type: vtype1
       name_prefix: 'v'
-      num: 9
+      num: 14
       speed: 10
       fcs: 0.50
       fcw: 0.32
@@ -734,7 +734,7 @@ fleet_generation_params:
   LARGE_TRAIN_3:
     - type: vtype1
       name_prefix: 'v'
-      num: 9
+      num: 14
       speed: 10
       fcs: 0.51
       fcw: 0.33
@@ -744,7 +744,7 @@ fleet_generation_params:
   LARGE_TEST_1:
     - type: vtype1
       name_prefix: 'v'
-      num: 9
+      num: 14
       speed: 10
       fcs: 0.5
       fcw: 0.32

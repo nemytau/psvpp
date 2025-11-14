@@ -8,6 +8,7 @@
 numpy>=1.21.0                    # Numerical computing
 pandas>=1.3.0                    # Data manipulation and analysis
 pyyaml>=6.0                      # YAML configuration parsing
+haversine>=2.5.0                 # Geodesic distance utilities
 
 # -----------------------------------------------------------------------------
 # Visualization & UI - Plotting and dashboard components

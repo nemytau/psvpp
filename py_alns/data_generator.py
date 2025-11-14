@@ -17,6 +17,15 @@ def generate_installation_dataframe(inst_sample_name):
                                     )
     coords = np.array(generation_yaml_config['inst_coords'])
     for inst_type_config in sample_config:
+        freq_values = np.asarray(inst_type_config['frequencies']['values'])
+        max_allowed_spread = max(0, min(4 - freq for freq in freq_values))
+        configured_spread = inst_type_config['departure_spread']
+        if configured_spread > max_allowed_spread:
+            raise ValueError(
+                f"departure_spread {configured_spread} exceeds allowed {max_allowed_spread} "
+                f"for visit frequencies {tuple(freq_values)} in config '{inst_sample_name}' "
+                f"(installation type '{inst_type_config['type']}')"
+            )
         df = pd.DataFrame(index=range(inst_type_config['num']))
         df['name'] = inst_type_config['name_prefix'] + df.index.astype(str)
         df['inst_type'] = inst_type_config['type']
@@ -31,7 +40,7 @@ def generate_installation_dataframe(inst_sample_name):
         inst_indices = inst_indices[inst_type_config['num']:]
         df['longitude'] = coords[inst_type_indices, 0]
         df['latitude'] = coords[inst_type_indices, 1]
-        df['departure_spread'] = inst_type_config['departure_spread']
+        df['departure_spread'] = configured_spread
         df['deck_service_speed'] = inst_type_config['deck_service_speed']
         df['time_window'] = NO_TIME_WINDOW
         df.loc[df.sample(inst_type_config['time_windows']).index,

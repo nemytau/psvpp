@@ -106,8 +106,11 @@ impl Installation {
 
         if scenario.len() < visit_count {
             panic!(
-                "Could not generate a departure scenario for installation {} with frequency {}",
-                self.id, visit_count
+                "Could not generate a departure scenario for installation {} ({}) with frequency {} and departure spread {}",
+                self.id,
+                self.node.name,
+                visit_count,
+                departure_spread
             );
         }
 
@@ -178,7 +181,7 @@ impl InstallationBuilder {
         self
     }
     
-    pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
+    pub fn service_tw(mut self, time_window: TimeWindow) -> Self {
         self.service_time_window = Some(time_window);
         self
     }
@@ -290,7 +293,7 @@ impl BaseBuilder {
         self
     }
     
-    pub fn service_TW(mut self, time_window: TimeWindow) -> Self {
+    pub fn service_tw(mut self, time_window: TimeWindow) -> Self {
         self.service_time_window = Some(time_window);
         self
     }

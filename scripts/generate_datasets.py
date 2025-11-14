@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional, Sequence
 
 import numpy as np
 import yaml
@@ -38,6 +38,15 @@ DATASET_CONFIGS: Dict[str, Dict[str, Iterable[str]]] = {
     },
 }
 
+CONFIG_LOOKUP = {
+    config_name: (size, split)
+    for size, splits in DATASET_CONFIGS.items()
+    for split, config_names in splits.items()
+    for config_name in config_names
+}
+
+CONFIG_SEQUENCE = list(CONFIG_LOOKUP)
+
 DEFAULT_SAMPLES_PER_CONFIG = 5
 OUTPUT_ROOT = Path("data/generated")
 
@@ -58,7 +67,7 @@ def to_native(value):
     return value
 
 
-def generate_samples(samples_per_config: int) -> None:
+def generate_samples(samples_per_config: int, sizes: Optional[Sequence[str]] = None) -> None:
     base_template = generate_base()
     longitude = float(getattr(base_template, "longitude", 0.0))
     latitude = float(getattr(base_template, "latitude", 0.0))
@@ -72,19 +81,22 @@ def generate_samples(samples_per_config: int) -> None:
     }
     summary: Dict[str, Dict[str, int]] = {}
 
-    config_names = [
-        name for groups in DATASET_CONFIGS.values() for configs in groups.values() for name in configs
+    size_filter = set(sizes) if sizes else set(DATASET_CONFIGS.keys())
+    known_sizes = set(DATASET_CONFIGS.keys())
+    unknown_sizes = size_filter - known_sizes
+    if unknown_sizes:
+        raise ValueError(f"Unknown dataset sizes requested: {sorted(unknown_sizes)}")
+
+    selected_configs = [
+        name for name in CONFIG_SEQUENCE if CONFIG_LOOKUP[name][0] in size_filter
     ]
 
-    for cfg_index, config_name in enumerate(config_names):
+    for cfg_index, config_name in enumerate(selected_configs):
         summary[config_name] = {"samples": samples_per_config}
         base_seed = 1000 + cfg_index * 100
 
         # Determine size/split for folder structure
-        size_name = next(size for size, groups in DATASET_CONFIGS.items() if any(
-            config_name in cfgs for cfgs in groups.values()
-        ))
-        split_name = next(split for split, cfgs in DATASET_CONFIGS[size_name].items() if config_name in cfgs)
+        size_name, split_name = CONFIG_LOOKUP[config_name]
 
         for sample_id in range(1, samples_per_config + 1):
             seed = base_seed + sample_id
@@ -131,12 +143,18 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_SAMPLES_PER_CONFIG,
         help="Number of samples to generate per configuration (default: %(default)s)",
     )
+    parser.add_argument(
+        "--sizes",
+        nargs="+",
+        choices=sorted(DATASET_CONFIGS.keys()),
+        help="Restrict generation to the provided dataset sizes",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    generate_samples(samples_per_config=max(1, args.samples))
+    generate_samples(samples_per_config=max(1, args.samples), sizes=args.sizes)
 
 
 if __name__ == "__main__":
