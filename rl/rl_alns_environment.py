@@ -1,10 +1,11 @@
 """
 Reinforcement Learning Environment for ALNS using Gymnasium API.
 
-This module provides a Gymnasium-compatible environment that wraps the Rust ALNS 
+This module provides a Gymnasium-compatible environment that wraps the Rust ALNS
 library, allowing RL agents to learn optimal operator selection strategies.
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import gymnasium as gym
@@ -20,6 +21,7 @@ from rl.registries import (
     create_reward_function,
     create_state_encoder,
 )
+from rl.operator_usage_logger import OperatorUsageLogger
 
 
 class ALNSEnvironment(gym.Env):
@@ -55,6 +57,10 @@ class ALNSEnvironment(gym.Env):
         action_module: str = DEFAULT_ACTION_KEY,
         state_module: str = DEFAULT_STATE_KEY,
         reward_module: str = DEFAULT_REWARD_KEY,
+        enable_operator_logging: bool = True,
+        operator_logging_mode: str = "train",
+        operator_logging_format: str = "csv",
+        operator_logging_dir: Optional[str] = None,
     ):
         """
         Initialize the ALNS environment.
@@ -66,6 +72,10 @@ class ALNSEnvironment(gym.Env):
             temperature: Initial simulated annealing temperature
             theta: Temperature cooling factor
             weight_update_interval: Iterations between operator weight updates
+            enable_operator_logging: Whether to persist per-iteration operator usage details
+            operator_logging_mode: Mode label embedded in output filenames (e.g. "train")
+            operator_logging_format: Log file format, either "csv" or "jsonl"
+            operator_logging_dir: Target directory for operator usage logs (defaults to logs/)
         """
         super().__init__()
         
@@ -91,6 +101,7 @@ class ALNSEnvironment(gym.Env):
         self.action_module_name = action_module or DEFAULT_ACTION_KEY
         self.state_module_name = state_module or DEFAULT_STATE_KEY
         self.reward_module_name = reward_module or DEFAULT_REWARD_KEY
+        self.operator_logging_enabled = bool(enable_operator_logging)
         
         # Initialize ALNS interface
         self.alns = rust_alns_py.RustALNSInterface() # type: ignore
@@ -118,6 +129,17 @@ class ALNSEnvironment(gym.Env):
             "state": getattr(self.state_encoder, "version", "unknown"),
             "reward": getattr(self.reward_function, "version", "unknown"),
         }
+
+        logging_dir = Path(operator_logging_dir) if operator_logging_dir else Path("logs")
+        self.operator_logger = OperatorUsageLogger(
+            mode=operator_logging_mode,
+            fmt=operator_logging_format,
+            output_dir=logging_dir,
+            enabled=self.operator_logging_enabled,
+        )
+        self._episode_counter = 0
+        self._current_episode_id: Optional[int] = None
+        self._latest_policy_entropy: Optional[float] = None
         
         # Initialize state variables
         self.iteration = 0
@@ -128,6 +150,13 @@ class ALNSEnvironment(gym.Env):
         self.total_improvement_pct = 0.0
         self.best_improvement_abs = 0.0
         self.total_improvement_abs = 0.0
+        self.stagnation_count = 0
+        self.last_current_cost: Optional[float] = None
+        self.last_best_cost: Optional[float] = None
+        self.last_reward: float = 0.0
+        self.last_operator_id: float = -1.0
+        self.last_operator_type_id: float = -1.0
+        self.last_fraction_removed: float = 0.0
         
         print(f"ALNSEnvironment initialized:")
         print(f"  Problem: {self.problem_instance}")
@@ -209,6 +238,15 @@ class ALNSEnvironment(gym.Env):
         selected_problem = self._choose_problem_instance(episode_seed, options)
         self.current_problem_instance = selected_problem
         self.problem_instance = selected_problem
+        self._latest_policy_entropy = None
+
+        if self.operator_logging_enabled:
+            # Flush any buffered logs from previous episode before starting anew
+            self.operator_logger.flush()
+            self.operator_logger.start_episode()
+
+        self._episode_counter += 1
+        self._current_episode_id = self._episode_counter
         
         # Reset episode state
         self.iteration = 0
@@ -217,6 +255,13 @@ class ALNSEnvironment(gym.Env):
         self.total_improvement_pct = 0.0
         self.best_improvement_abs = 0.0
         self.total_improvement_abs = 0.0
+        self.stagnation_count = 0
+        self.last_current_cost = None
+        self.last_best_cost = None
+        self.last_reward = 0.0
+        self.last_operator_id = -1.0
+        self.last_operator_type_id = -1.0
+        self.last_fraction_removed = 0.0
         
         # Initialize ALNS with Rust engine
         try:
@@ -231,6 +276,8 @@ class ALNSEnvironment(gym.Env):
             # Store initial cost for reward computation
             self.initial_cost = init_result["total_cost"]
             self.current_episode_best = self.initial_cost
+            self.last_current_cost = float(self.initial_cost)
+            self.last_best_cost = float(self.initial_cost)
             
             # Get initial observation
             obs = self._get_observation(init_result)
@@ -270,10 +317,55 @@ class ALNSEnvironment(gym.Env):
                 repair_operator_idx=repair_idx,
                 mode="explicit"
             )
-            
-            # Extract metrics and compute reward
-            obs = self._get_observation(result)
+
+            # Capture previous cost references (before this iteration's updates)
+            prev_current_cost = (
+                float(self.last_current_cost)
+                if self.last_current_cost is not None
+                else float(self.initial_cost or result.get("current_cost", 0.0))
+            )
+            prev_best_cost = (
+                float(self.last_best_cost)
+                if self.last_best_cost is not None
+                else float(self.initial_cost or result.get("best_cost", prev_current_cost))
+            )
+
+            # Ensure reward function can access the previous values via env attributes
+            if self.last_current_cost is None:
+                self.last_current_cost = prev_current_cost
+            if self.last_best_cost is None:
+                self.last_best_cost = prev_best_cost
+
+            # Compute reward using the pre-update references
             reward = self._compute_reward(result)
+            self.last_reward = float(reward)
+
+            current_cost = float(result.get("current_cost", prev_current_cost))
+            best_cost = float(result.get("best_cost", prev_best_cost))
+            self.last_current_cost = current_cost
+            self.last_best_cost = best_cost
+            self.stagnation_count = int(result.get("stagnation_count", self.stagnation_count))
+
+            # TODO: emit real `fraction_removed` from Rust ALNS and remove 0.0 fallback
+            fraction_removed = result.get("fraction_removed")
+            if fraction_removed is None:
+                fraction_removed = result.get("destroy_removed_requests")
+            try:
+                self.last_fraction_removed = float(fraction_removed) if fraction_removed is not None else 0.0
+            except (TypeError, ValueError):
+                self.last_fraction_removed = 0.0
+
+            repair_operator_idx = int(result.get("repair_operator_idx", repair_idx))
+            repair_operator_type_id = int(result.get("repair_operator_type_id", 1))
+            self.last_operator_id = float(repair_operator_idx)
+            self.last_operator_type_id = float(repair_operator_type_id)
+
+            # Attach optional fields for downstream consumers
+            if isinstance(result, dict):
+                result.setdefault("fraction_removed", self.last_fraction_removed)
+
+            # Extract metrics and compute next observation
+            obs = self._get_observation(result)
             
             # Track episode progress
             self.iteration += 1
@@ -312,6 +404,14 @@ class ALNSEnvironment(gym.Env):
                 "elapsed_ms": result.get("elapsed_ms", 0)
             }
             self.episode_history.append(step_info)
+
+            # Log per-operator usage for downstream analysis
+            self._log_operator_usage(
+                result=result,
+                reward=reward,
+                destroy_idx=destroy_idx,
+                repair_idx=repair_idx,
+            )
             
             # Check if episode is done
             done = self.iteration >= self.max_iterations
@@ -325,7 +425,9 @@ class ALNSEnvironment(gym.Env):
                 "best_improvement_pct": self.best_improvement_pct,
                 "total_improvement_pct": self.total_improvement_pct,
                 "total_improvement": self.total_improvement_abs,
-                "operators_used": (destroy_idx, repair_idx)
+                "operators_used": (destroy_idx, repair_idx),
+                "current_cost": current_cost,
+                "best_cost": best_cost,
             }
             
             if done:
@@ -339,12 +441,17 @@ class ALNSEnvironment(gym.Env):
                     "iterations_completed": self.iteration,
                     "final_temperature": result["temperature"]
                 }
+                if self.operator_logging_enabled:
+                    log_path = self.operator_logger.flush()
+                    if log_path:
+                        info["operator_usage_log"] = str(log_path)
             
             return obs, reward, done, truncated, info
             
         except Exception as e:
             # Return a penalty and mark episode as done on error
-            obs = np.zeros(30, dtype=np.float32)
+            obs_shape = getattr(self.observation_space, "shape", (30,)) or (30,)
+            obs = np.zeros(obs_shape, dtype=np.float32)
             reward = -10.0  # Large penalty for errors
             done = True
             truncated = False
@@ -354,6 +461,8 @@ class ALNSEnvironment(gym.Env):
                 "iteration": self.iteration,
                 "operators_used": (destroy_idx, repair_idx)
             }
+
+            self._latest_policy_entropy = None
             
             return obs, reward, done, truncated, info
     
@@ -397,8 +506,8 @@ class ALNSEnvironment(gym.Env):
     
     def close(self) -> None:
         """Clean up environment resources."""
-        # No specific cleanup needed for our environment
-        pass
+        if self.operator_logging_enabled:
+            self.operator_logger.flush()
     
     def get_episode_statistics(self) -> Dict[str, Any]:
         """
@@ -428,6 +537,61 @@ class ALNSEnvironment(gym.Env):
             "best_cost_history": best_costs,
             "problem_instance": self.current_problem_instance
         }
+
+    def set_policy_statistics(self, *, entropy: Optional[float] = None) -> None:
+        """Optionally record policy diagnostics for the next logged step."""
+        self._latest_policy_entropy = entropy
+
+    def _log_operator_usage(
+        self,
+        *,
+        result: Dict[str, Any],
+        reward: float,
+        destroy_idx: int,
+        repair_idx: int,
+    ) -> None:
+        if not self.operator_logging_enabled or self._current_episode_id is None:
+            self._latest_policy_entropy = None
+            return
+
+        base_record = {
+            "episode_id": self._current_episode_id,
+            "iteration": self.iteration,
+            "instance_id": str(self.current_problem_instance),
+            "reward": float(reward),
+            "cost_current": float(result.get("current_cost", 0.0)),
+            "cost_best": float(result.get("best_cost", 0.0)),
+            "iterations_since_last_best": int(result.get("stagnation_count", 0)),
+            "policy_entropy": self._latest_policy_entropy,
+            "accepted": bool(result.get("accepted", False)),
+            "is_new_best": bool(result.get("is_new_best", False)),
+            "elapsed_ms": int(result.get("elapsed_ms", 0)),
+            "temperature": float(result.get("temperature", 0.0)),
+            "destroy_idx": destroy_idx,
+            "repair_idx": repair_idx,
+        }
+
+        destroy_record = {
+            **base_record,
+            "operator_name": result.get("destroy_operator_name", self.destroy_operators[destroy_idx]),
+            "operator_type": result.get("destroy_operator_type", "destroy"),
+            "operator_index": destroy_idx,
+            "num_removed_requests": result.get("destroy_removed_requests"),
+            "num_inserted_requests": None,
+        }
+        repair_record = {
+            **base_record,
+            "operator_name": result.get("repair_operator_name", self.repair_operators[repair_idx]),
+            "operator_type": result.get("repair_operator_type", "repair"),
+            "operator_index": repair_idx,
+            "num_removed_requests": None,
+            "num_inserted_requests": result.get("repair_inserted_requests"),
+        }
+
+        self.operator_logger.append(destroy_record)
+        self.operator_logger.append(repair_record)
+
+        self._latest_policy_entropy = None
 
 
 def test_environment():

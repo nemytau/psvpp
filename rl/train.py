@@ -53,6 +53,17 @@ def _resolve_parameters(args: argparse.Namespace, config: Dict[str, Any]) -> Dic
     learning_rate = float(get_config_value(config, ("train", "learning_rate"), 3e-4))
     algo = get_config_value(config, ("train", "algo"), "ppo")
 
+    dataset_size_key = str(dataset_size).lower() if dataset_size else ""
+    big_run_sizes = {"medium", "mixed", "large", "xl", "xxl"}
+    logging_override = get_config_value(config, ("logging", "enable_operator_logging"), None)
+    if logging_override is None:
+        enable_operator_logging = dataset_size_key not in big_run_sizes
+    else:
+        if isinstance(logging_override, str):
+            enable_operator_logging = logging_override.strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            enable_operator_logging = bool(logging_override)
+
     action_module = args.action_module or get_config_value(config, ("modules", "action"), DEFAULT_ACTION_KEY) or DEFAULT_ACTION_KEY
     state_module = args.state_module or get_config_value(config, ("modules", "state"), DEFAULT_STATE_KEY) or DEFAULT_STATE_KEY
     reward_module = args.reward_module or get_config_value(config, ("modules", "reward"), DEFAULT_REWARD_KEY) or DEFAULT_REWARD_KEY
@@ -74,6 +85,7 @@ def _resolve_parameters(args: argparse.Namespace, config: Dict[str, Any]) -> Dic
         "reward_module": reward_module,
         "algo": algo,
         "learning_rate": learning_rate,
+        "enable_operator_logging": enable_operator_logging,
     }
 
     return params
@@ -159,6 +171,7 @@ def main() -> None:
         action_module=params["action_module"],
         state_module=params["state_module"],
         reward_module=params["reward_module"],
+        enable_operator_logging=params["enable_operator_logging"],
     )
 
     model_zip = manager.paths.model_zip
@@ -179,6 +192,7 @@ def main() -> None:
         deterministic=params["deterministic_eval"],
         output_dir=str(params["evaluation_dir"]),
         max_iterations=params["max_iterations"],
+        enable_operator_logging=params["enable_operator_logging"],
     )
 
     baseline_stats: Optional[Dict[str, Any]] = None
@@ -187,6 +201,7 @@ def main() -> None:
             problem_paths=test_paths,
             max_iterations=params["max_iterations"],
             output_dir=str(params["baseline_dir"]),
+            enable_operator_logging=params["enable_operator_logging"],
         )
         baseline_stats = {
             "mean_reward": baseline_mean,
@@ -202,6 +217,7 @@ def main() -> None:
             max_iterations=params["max_iterations"],
             output_dir=str(params["comparison_dir"]),
             deterministic=params["deterministic_eval"],
+            enable_operator_logging=params["enable_operator_logging"],
         )
     else:
         comparison_results = []

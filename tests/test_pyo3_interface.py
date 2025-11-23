@@ -9,7 +9,7 @@ try:
     from rust_alns_py import RustALNSInterface  # type: ignore
 except ImportError:
     print("❌ rust_alns_py module not found. Please build the PyO3 extension first:")
-    print("   cd rust_alns && maturin develop")
+    print("   cd rust_alns && maturin develop --release")
     
     # Create dummy class for type checking
     class RustALNSInterface:  # type: ignore

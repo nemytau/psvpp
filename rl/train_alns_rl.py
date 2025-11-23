@@ -221,6 +221,7 @@ def train_ppo_agent(
     action_module: Optional[str] = None,
     state_module: Optional[str] = None,
     reward_module: Optional[str] = None,
+    enable_operator_logging: bool = True,
 ) -> Tuple[PPO, DummyVecEnv]:
     """Train a PPO agent on the ALNS environment using provided datasets."""
 
@@ -240,6 +241,9 @@ def train_ppo_agent(
     model_dir = Path(model_save_path).parent
     model_dir.mkdir(parents=True, exist_ok=True)
 
+    operator_logs_dir = log_dir_path.parent / "operator_usage"
+    operator_logging_dir_str = str(operator_logs_dir) if enable_operator_logging else None
+
     def make_env() -> ALNSEnvironment:
         env_kwargs: Dict[str, Any] = {
             "problem_instance": train_instances[0],
@@ -254,6 +258,10 @@ def train_ppo_agent(
             env_kwargs["state_module"] = state_module
         if reward_module:
             env_kwargs["reward_module"] = reward_module
+        env_kwargs["enable_operator_logging"] = enable_operator_logging
+        env_kwargs["operator_logging_mode"] = "train"
+        if operator_logging_dir_str:
+            env_kwargs["operator_logging_dir"] = operator_logging_dir_str
 
         return ALNSEnvironment(**env_kwargs)
 
@@ -286,6 +294,7 @@ def evaluate_trained_model(
     deterministic: bool = True,
     output_dir: Optional[str] = None,
     max_iterations: int = 100,
+    enable_operator_logging: bool = True,
 ) -> Tuple[float, float, List[Dict[str, Any]]]:
     """Evaluate a trained PPO model across a set of problem instances."""
 
@@ -296,12 +305,21 @@ def evaluate_trained_model(
     model = PPO.load(model_path)
     print(f"[OK] Model loaded from: {model_path}")
 
+    operator_logs_dir_eval = (
+        Path(output_dir) / "operator_usage_eval"
+        if output_dir and enable_operator_logging
+        else None
+    )
+
     eval_env = ALNSEnvironment(
         problem_instance=eval_paths[0],
         max_iterations=max_iterations,
         seed=123,
         problem_instance_paths=eval_paths,
         problem_sampling_strategy="round_robin",
+        enable_operator_logging=enable_operator_logging,
+        operator_logging_mode="eval",
+        operator_logging_dir=str(operator_logs_dir_eval) if operator_logs_dir_eval else None,
     )
 
     mean_reward_raw, std_reward_raw = evaluate_policy(
@@ -323,6 +341,9 @@ def evaluate_trained_model(
         seed=999,
         problem_instance_paths=eval_paths,
         problem_sampling_strategy="round_robin",
+        enable_operator_logging=enable_operator_logging,
+        operator_logging_mode="eval_detail",
+        operator_logging_dir=str(operator_logs_dir_eval) if operator_logs_dir_eval else None,
     )
 
     plots_dir: Optional[Path] = None
@@ -385,16 +406,26 @@ def compare_with_baseline(
     problem_paths: Sequence[str],
     max_iterations: int = 100,
     output_dir: Optional[str] = None,
+    enable_operator_logging: bool = True,
 ) -> Tuple[float, float, List[Dict[str, Any]]]:
     """Evaluate a random baseline policy across the same problem instances."""
 
     baseline_paths = list(problem_paths) if problem_paths else ["SMALL_1"]
+    operator_logs_dir_baseline = (
+        Path(output_dir) / "operator_usage_baseline"
+        if output_dir and enable_operator_logging
+        else None
+    )
+
     env = ALNSEnvironment(
         problem_instance=baseline_paths[0],
         max_iterations=max_iterations,
         seed=2048,
         problem_instance_paths=baseline_paths,
         problem_sampling_strategy="round_robin",
+        enable_operator_logging=enable_operator_logging,
+        operator_logging_mode="baseline",
+        operator_logging_dir=str(operator_logs_dir_baseline) if operator_logs_dir_baseline else None,
     )
 
     plots_dir: Optional[Path] = None
@@ -479,14 +510,23 @@ def run_episode_with_policy(
     seed: int,
     max_iterations: int,
     deterministic: bool = True,
+    enable_operator_logging: bool = True,
+    operator_logging_mode: str = "comparison",
+    operator_logging_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
-    env = ALNSEnvironment(
-        problem_instance=problem_path,
-        max_iterations=max_iterations,
-        seed=seed,
-        problem_instance_paths=[problem_path],
-        problem_sampling_strategy="round_robin",
-    )
+    env_kwargs: Dict[str, Any] = {
+        "problem_instance": problem_path,
+        "max_iterations": max_iterations,
+        "seed": seed,
+        "problem_instance_paths": [problem_path],
+        "problem_sampling_strategy": "round_robin",
+        "enable_operator_logging": enable_operator_logging,
+        "operator_logging_mode": operator_logging_mode,
+    }
+    if operator_logging_dir:
+        env_kwargs["operator_logging_dir"] = operator_logging_dir
+
+    env = ALNSEnvironment(**env_kwargs)
 
     obs, _ = env.reset(seed=seed)
     done = False
@@ -522,6 +562,7 @@ def compare_model_against_baseline(
     max_iterations: int = 100,
     output_dir: str = "logs/ppo_alns/model_vs_baseline",
     deterministic: bool = True,
+    enable_operator_logging: bool = True,
 ) -> List[Dict[str, Any]]:
     """Run side-by-side comparisons for the PPO model and random baseline."""
 
@@ -536,6 +577,11 @@ def compare_model_against_baseline(
     combined_length = 0
     dataset_matchups: Dict[str, Dict[str, List[float]]] = {}
 
+    operator_logs_dir_rl = comparison_dir / "operator_usage_rl"
+    operator_logs_dir_baseline = comparison_dir / "operator_usage_random"
+    operator_logs_dir_rl_str = str(operator_logs_dir_rl) if enable_operator_logging else None
+    operator_logs_dir_baseline_str = str(operator_logs_dir_baseline) if enable_operator_logging else None
+
     for dataset_path in problem_paths:
         dataset_label = _format_dataset_label(dataset_path)
         for seed in seeds:
@@ -545,6 +591,9 @@ def compare_model_against_baseline(
                 seed=seed,
                 max_iterations=max_iterations,
                 deterministic=deterministic,
+                enable_operator_logging=enable_operator_logging,
+                operator_logging_mode="comparison_rl",
+                operator_logging_dir=operator_logs_dir_rl_str,
             )
 
             baseline_result = run_episode_with_policy(
@@ -553,6 +602,9 @@ def compare_model_against_baseline(
                 seed=seed,
                 max_iterations=max_iterations,
                 deterministic=deterministic,
+                enable_operator_logging=enable_operator_logging,
+                operator_logging_mode="comparison_random",
+                operator_logging_dir=operator_logs_dir_baseline_str,
             )
 
             max_len = max(

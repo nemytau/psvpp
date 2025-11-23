@@ -78,7 +78,7 @@ def test_pyo3_import():
         interface = RustALNSInterface()
         assert interface is not None
     except ImportError:
-        raise Exception("rust_alns_py module not found - run 'maturin develop' first")
+        raise Exception("rust_alns_py module not found - run 'maturin develop --release' first")
 
 def test_alns_init():
     """Test ALNS initialization"""

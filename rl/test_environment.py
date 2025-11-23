@@ -45,7 +45,7 @@ try:
     
 except ImportError as e:
     print(f"[ERROR] rust_alns_py not found: {e}")
-    print("Make sure the Rust extension is built with: cd rust_alns && maturin develop")
+    print("Make sure the Rust extension is built with: cd rust_alns && maturin develop --release")
     sys.exit(1)
 except Exception as e:
     print(f"[ERROR] Error with Rust interface: {e}")

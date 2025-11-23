@@ -99,25 +99,25 @@ tests/
 
 ### Rust Components
 
-1. **Development build:**
+1. **Recommended (release) build:**
    ```bash
-   cd src/rust_alns
-   maturin develop
-   cd ../..
+   cd rust_alns
+   maturin develop --release
+   cd ..
    ```
 
-2. **Release build:**
+2. **Alternative via Cargo:**
    ```bash
-   cd src/rust_alns
-   maturin develop --release
-   cd ../..
+   cd rust_alns
+   cargo build --release
+   cd ..
    ```
 
 3. **Building wheels:**
    ```bash
-   cd src/rust_alns
+   cd rust_alns
    maturin build --release
-   cd ../..
+   cd ..
    ```
 
 ### Python Components
