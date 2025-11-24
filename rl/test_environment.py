@@ -42,6 +42,7 @@ try:
     print(f"[OK] Operator info retrieved: {type(operator_info)}")
     print(f"   Destroy operators: {operator_info.get('destroy_operators', [])}")
     print(f"   Repair operators: {operator_info.get('repair_operators', [])}")
+    print(f"   Improvement operators: {operator_info.get('improvement_operators', [])}")
     
 except ImportError as e:
     print(f"[ERROR] rust_alns_py not found: {e}")

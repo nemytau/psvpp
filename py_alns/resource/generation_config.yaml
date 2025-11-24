@@ -634,31 +634,31 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.42
-      fcw: 0.25
+      fcs: 0.43
+      fcw: 0.26
       deck_capacity: 100
       bulk_capacity: 1000
-      cost: 0
+      cost: 150000
   SMALL_TRAIN_2:
     - type: vtype1
       name_prefix: 'v'
       num: 10
-      speed: 11
-      fcs: 0.44
-      fcw: 0.27
-      deck_capacity: 95
-      bulk_capacity: 950
-      cost: 100
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   SMALL_TRAIN_3:
     - type: vtype1
       name_prefix: 'v'
       num: 9
-      speed: 13
-      fcs: 0.40
-      fcw: 0.24
-      deck_capacity: 105
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
       bulk_capacity: 1000
-      cost: 150
+      cost: 150000
   SMALL_TEST_1:
     - type: vtype1
       name_prefix: 'v'
@@ -668,89 +668,89 @@ fleet_generation_params:
       fcw: 0.26
       deck_capacity: 100
       bulk_capacity: 1000
-      cost: 0
+      cost: 150000
 
   MEDIUM_TRAIN_1:
     - type: vtype1
       name_prefix: 'v'
       num: 10
-      speed: 11
-      fcs: 0.46
-      fcw: 0.28
-      deck_capacity: 95
-      bulk_capacity: 950
-      cost: 300
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   MEDIUM_TRAIN_2:
     - type: vtype1
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.45
-      fcw: 0.27
+      fcs: 0.43
+      fcw: 0.26
       deck_capacity: 100
-      bulk_capacity: 980
-      cost: 350
+      bulk_capacity: 1000
+      cost: 150000
   MEDIUM_TRAIN_3:
     - type: vtype1
       name_prefix: 'v'
       num: 9
-      speed: 11
-      fcs: 0.47
-      fcw: 0.29
-      deck_capacity: 98
-      bulk_capacity: 960
-      cost: 320
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   MEDIUM_TEST_1:
     - type: vtype1
       name_prefix: 'v'
       num: 9
-      speed: 11
-      fcs: 0.46
-      fcw: 0.28
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
       deck_capacity: 100
-      bulk_capacity: 980
-      cost: 310
+      bulk_capacity: 1000
+      cost: 150000
 
   LARGE_TRAIN_1:
     - type: vtype1
       name_prefix: 'v'
       num: 14
-      speed: 11
-      fcs: 0.48
-      fcw: 0.30
-      deck_capacity: 110
-      bulk_capacity: 1200
-      cost: 600
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   LARGE_TRAIN_2:
     - type: vtype1
       name_prefix: 'v'
       num: 14
-      speed: 10
-      fcs: 0.50
-      fcw: 0.32
-      deck_capacity: 105
-      bulk_capacity: 1150
-      cost: 700
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   LARGE_TRAIN_3:
     - type: vtype1
       name_prefix: 'v'
       num: 14
-      speed: 10
-      fcs: 0.51
-      fcw: 0.33
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
       deck_capacity: 100
-      bulk_capacity: 1100
-      cost: 680
+      bulk_capacity: 1000
+      cost: 150000
   LARGE_TEST_1:
     - type: vtype1
       name_prefix: 'v'
       num: 14
-      speed: 10
-      fcs: 0.5
-      fcw: 0.32
-      deck_capacity: 108
-      bulk_capacity: 1150
-      cost: 650
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
   SMALL_1:
     - type: vtype1
@@ -761,7 +761,7 @@ fleet_generation_params:
       fcw: 0.26
       deck_capacity: 100
       bulk_capacity: 1000
-      cost: 0
+      cost: 150000
   SMALL_2:
     - type: vtype1
       name_prefix: 'v'
@@ -771,7 +771,7 @@ fleet_generation_params:
       fcw: 0.26
       deck_capacity: 100
       bulk_capacity: 1000
-      cost: 0
+      cost: 150000
   SMALL_3:
     - type: vtype1
       name_prefix: 'v'
@@ -781,29 +781,29 @@ fleet_generation_params:
       fcw: 0.26
       deck_capacity: 100
       bulk_capacity: 1000
-      cost: 1000
+      cost: 150000
 
   # Easy fleet configurations (more vessels, higher capacity)
   EASY_1:
     - type: vtype1
       name_prefix: 'v'
       num: 10
-      speed: 14
-      fcs: 0.35
-      fcw: 0.20
-      deck_capacity: 120
-      bulk_capacity: 1200
-      cost: 0
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   EASY_2:
     - type: vtype1
       name_prefix: 'v'
       num: 9
-      speed: 15
-      fcs: 0.33
-      fcw: 0.18
-      deck_capacity: 130
-      bulk_capacity: 1300
-      cost: 0
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
   # Medium fleet configurations (balanced capacity and speed)
   MEDIUM_1:
@@ -815,71 +815,71 @@ fleet_generation_params:
       fcw: 0.26
       deck_capacity: 100
       bulk_capacity: 1000
-      cost: 500
+      cost: 150000
   MEDIUM_2:
     - type: vtype1
       name_prefix: 'v'
       num: 7
-      speed: 11
-      fcs: 0.45
-      fcw: 0.28
-      deck_capacity: 95
-      bulk_capacity: 950
-      cost: 800
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
   # Hard fleet configurations (fewer vessels, limited capacity)
   HARD_1:
     - type: vtype1
       name_prefix: 'v'
       num: 6
-      speed: 10
-      fcs: 0.50
-      fcw: 0.32
-      deck_capacity: 85
-      bulk_capacity: 850
-      cost: 1200
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   HARD_2:
     - type: vtype1
       name_prefix: 'v'
       num: 5
-      speed: 9
-      fcs: 0.55
-      fcw: 0.35
-      deck_capacity: 75
-      bulk_capacity: 750
-      cost: 1500
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
   # Specialized fleet configurations
   HIGH_FREQUENCY:
     - type: vtype1
       name_prefix: 'v'
       num: 9
-      speed: 13
-      fcs: 0.40
-      fcw: 0.24
-      deck_capacity: 110
-      bulk_capacity: 1100
-      cost: 300
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   HIGH_DEMAND:
     - type: vtype1
       name_prefix: 'v'
       num: 7
-      speed: 11
-      fcs: 0.48
-      fcw: 0.30
-      deck_capacity: 90
-      bulk_capacity: 900
-      cost: 1000
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
   TIGHT_WINDOWS:
     - type: vtype1
       name_prefix: 'v'
       num: 8
-      speed: 14
-      fcs: 0.42
-      fcw: 0.25
-      deck_capacity: 105
-      bulk_capacity: 1050
-      cost: 600
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
 base_generation_params:
   FMO:

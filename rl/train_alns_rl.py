@@ -49,6 +49,12 @@ except ImportError as e:  # pragma: no cover
     raise
 
 from rl.dataset_manager import GeneratedDatasetManager
+from rl.registries import (
+    DEFAULT_ACTION_KEY,
+    DEFAULT_REWARD_KEY,
+    DEFAULT_STATE_KEY,
+    list_registered_states,
+)
 
 
 def _slugify_path(path: str) -> str:
@@ -82,9 +88,22 @@ class ALNSTrainingCallback(BaseCallback):
             info = self.locals["infos"][0]
 
             if "operators_used" in info:
-                destroy_idx, repair_idx = info["operators_used"]
-                key = f"D{destroy_idx}_R{repair_idx}"
-                self.operator_usage[key] = self.operator_usage.get(key, 0) + 1
+                operators = info["operators_used"]
+                destroy_idx = operators[0] if len(operators) > 0 else None
+                repair_idx = operators[1] if len(operators) > 1 else None
+                improvement_idx = operators[2] if len(operators) > 2 else None
+
+                key_parts = []
+                if destroy_idx is not None:
+                    key_parts.append(f"D{destroy_idx}")
+                if repair_idx is not None:
+                    key_parts.append(f"R{repair_idx}")
+                if improvement_idx is not None and improvement_idx >= 0:
+                    key_parts.append(f"I{improvement_idx}")
+
+                if key_parts:
+                    key = "_".join(key_parts)
+                    self.operator_usage[key] = self.operator_usage.get(key, 0) + 1
 
             step_info = info.get("step_info", {})
             if step_info:
@@ -295,6 +314,9 @@ def evaluate_trained_model(
     output_dir: Optional[str] = None,
     max_iterations: int = 100,
     enable_operator_logging: bool = True,
+    action_module: Optional[str] = None,
+    state_module: Optional[str] = None,
+    reward_module: Optional[str] = None,
 ) -> Tuple[float, float, List[Dict[str, Any]]]:
     """Evaluate a trained PPO model across a set of problem instances."""
 
@@ -304,6 +326,10 @@ def evaluate_trained_model(
     print(f"\n[METRICS] Evaluating trained model across {episodes} episodes...")
     model = PPO.load(model_path)
     print(f"[OK] Model loaded from: {model_path}")
+
+    resolved_state_module = _resolve_state_module(model, state_module)
+    resolved_action_module = action_module
+    resolved_reward_module = reward_module
 
     operator_logs_dir_eval = (
         Path(output_dir) / "operator_usage_eval"
@@ -320,6 +346,9 @@ def evaluate_trained_model(
         enable_operator_logging=enable_operator_logging,
         operator_logging_mode="eval",
         operator_logging_dir=str(operator_logs_dir_eval) if operator_logs_dir_eval else None,
+        action_module=resolved_action_module or DEFAULT_ACTION_KEY,
+        state_module=resolved_state_module or DEFAULT_STATE_KEY,
+        reward_module=resolved_reward_module or DEFAULT_REWARD_KEY,
     )
 
     mean_reward_raw, std_reward_raw = evaluate_policy(
@@ -344,6 +373,9 @@ def evaluate_trained_model(
         enable_operator_logging=enable_operator_logging,
         operator_logging_mode="eval_detail",
         operator_logging_dir=str(operator_logs_dir_eval) if operator_logs_dir_eval else None,
+        action_module=resolved_action_module or DEFAULT_ACTION_KEY,
+        state_module=resolved_state_module or DEFAULT_STATE_KEY,
+        reward_module=resolved_reward_module or DEFAULT_REWARD_KEY,
     )
 
     plots_dir: Optional[Path] = None
@@ -504,6 +536,55 @@ def _pad_history(history: Sequence[float], target_len: int) -> List[float]:
     return history_list + [last_value] * (target_len - len(history_list))
 
 
+_STATE_SHAPE_CACHE: Dict[Tuple[int, ...], str] = {}
+
+
+def _resolve_state_module(
+    policy_model: Optional[PPO],
+    explicit_module: Optional[str],
+) -> Optional[str]:
+    if explicit_module:
+        return explicit_module
+    if policy_model is None:
+        return None
+
+    obs_space = getattr(policy_model, "observation_space", None)
+    shape = getattr(obs_space, "shape", None)
+    if not shape:
+        return None
+
+    try:
+        target_shape = tuple(int(dim) for dim in shape)
+    except TypeError:  # pragma: no cover - defensive
+        return None
+
+    if not target_shape:
+        return None
+
+    cached = _STATE_SHAPE_CACHE.get(target_shape)
+    if cached:
+        return cached
+
+    for key, cls in list_registered_states().items():
+        try:
+            encoder = cls()
+        except Exception:  # pragma: no cover - defensive instantiation guard
+            continue
+        space = encoder.space()
+        space_shape = getattr(space, "shape", None)
+        if space_shape is None:
+            continue
+        try:
+            encoder_shape = tuple(int(dim) for dim in space_shape)
+        except TypeError:  # pragma: no cover - defensive
+            continue
+        if encoder_shape == target_shape:
+            _STATE_SHAPE_CACHE[target_shape] = key
+            return key
+
+    return None
+
+
 def run_episode_with_policy(
     policy_model: Optional[PPO],
     problem_path: str,
@@ -513,7 +594,14 @@ def run_episode_with_policy(
     enable_operator_logging: bool = True,
     operator_logging_mode: str = "comparison",
     operator_logging_dir: Optional[str] = None,
+    shared_snapshot: Optional[Any] = None,
+    capture_snapshot: bool = False,
+    action_module: Optional[str] = None,
+    state_module: Optional[str] = None,
+    reward_module: Optional[str] = None,
 ) -> Dict[str, Any]:
+    resolved_state_module = _resolve_state_module(policy_model, state_module)
+
     env_kwargs: Dict[str, Any] = {
         "problem_instance": problem_path,
         "max_iterations": max_iterations,
@@ -525,34 +613,76 @@ def run_episode_with_policy(
     }
     if operator_logging_dir:
         env_kwargs["operator_logging_dir"] = operator_logging_dir
+    if policy_model is None:
+        env_kwargs["force_baseline_improvement"] = True
+        env_kwargs["baseline_improvement_idx"] = 0
+    if action_module:
+        env_kwargs["action_module"] = action_module
+    if resolved_state_module:
+        env_kwargs["state_module"] = resolved_state_module
+    if reward_module:
+        env_kwargs["reward_module"] = reward_module
 
     env = ALNSEnvironment(**env_kwargs)
 
-    obs, _ = env.reset(seed=seed)
+    reset_options: Dict[str, Any] = {}
+    if shared_snapshot is not None:
+        reset_options["initial_snapshot"] = shared_snapshot
+
+    obs, _ = env.reset(seed=seed, options=reset_options or None)
+    snapshot_obj = env.get_initial_snapshot() if capture_snapshot else None
     done = False
     truncated = False
     steps = 0
+    baseline_rng: Optional[np.random.Generator] = None
+    if policy_model is None:
+        baseline_rng = np.random.default_rng(seed)
 
     while not done and not truncated and steps < max_iterations:
         if policy_model is None:
-            action = env.action_space.sample()
+            if baseline_rng is None or not hasattr(env.action_impl, "num_pairs"):
+                action = env.action_space.sample()
+            else:
+                num_pairs = getattr(env.action_impl, "num_pairs")()
+                if num_pairs <= 0:
+                    action = env.action_space.sample()
+                else:
+                    action = int(baseline_rng.integers(0, num_pairs))
         else:
             action_array, _ = policy_model.predict(obs, deterministic=deterministic)
             action = int(action_array.item()) if hasattr(action_array, "item") else int(action_array)
         obs, reward, done, truncated, info = env.step(action)
+        if policy_model is None and info.get("baseline_improvement_triggered"):
+            env.log_improvement_usage()
         steps += 1
 
     stats = env.get_episode_statistics()
     env.close()
 
-    return {
+    module_info = {
+        "action": getattr(env, "action_module_name", action_module),
+        "state": getattr(env, "state_module_name", resolved_state_module),
+        "reward": getattr(env, "reward_module_name", reward_module),
+    }
+
+    result: Dict[str, Any] = {
         "problem_path": problem_path,
         "best_cost": stats.get("best_cost"),
         "final_cost": stats.get("final_cost"),
         "cost_history": stats.get("cost_history", []),
         "best_cost_history": stats.get("best_cost_history", []),
         "iterations": stats.get("total_iterations", steps),
+        "initial_cost": stats.get("initial_cost"),
+        "elapsed_seconds": stats.get("elapsed_seconds", []),
+        "elapsed_ms_steps": stats.get("elapsed_ms_steps", []),
+        "elapsed_ms_cumulative": stats.get("elapsed_ms_cumulative", []),
+        "modules": module_info,
+        "module_versions": getattr(env, "module_versions", {}),
     }
+    if snapshot_obj is not None:
+        result["initial_snapshot"] = snapshot_obj
+
+    return result
 
 
 def compare_model_against_baseline(
@@ -563,6 +693,9 @@ def compare_model_against_baseline(
     output_dir: str = "logs/ppo_alns/model_vs_baseline",
     deterministic: bool = True,
     enable_operator_logging: bool = True,
+    action_module: Optional[str] = None,
+    state_module: Optional[str] = None,
+    reward_module: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Run side-by-side comparisons for the PPO model and random baseline."""
 
@@ -570,11 +703,11 @@ def compare_model_against_baseline(
     comparison_dir.mkdir(parents=True, exist_ok=True)
 
     results: List[Dict[str, Any]] = []
-    rl_current_curves: List[List[float]] = []
-    rl_best_curves: List[List[float]] = []
-    baseline_current_curves: List[List[float]] = []
-    baseline_best_curves: List[List[float]] = []
-    combined_length = 0
+    rl_current_series: List[Tuple[List[float], List[float]]] = []
+    rl_best_series: List[Tuple[List[float], List[float]]] = []
+    baseline_current_series: List[Tuple[List[float], List[float]]] = []
+    baseline_best_series: List[Tuple[List[float], List[float]]] = []
+    max_elapsed_time = 0.0
     dataset_matchups: Dict[str, Dict[str, List[float]]] = {}
 
     operator_logs_dir_rl = comparison_dir / "operator_usage_rl"
@@ -594,7 +727,17 @@ def compare_model_against_baseline(
                 enable_operator_logging=enable_operator_logging,
                 operator_logging_mode="comparison_rl",
                 operator_logging_dir=operator_logs_dir_rl_str,
+                capture_snapshot=True,
+                action_module=action_module,
+                state_module=state_module,
+                reward_module=reward_module,
             )
+
+            snapshot_for_baseline = rl_result.pop("initial_snapshot", None)
+            resolved_modules = rl_result.get("modules", {})
+            baseline_action_module = resolved_modules.get("action", action_module)
+            baseline_state_module = resolved_modules.get("state", state_module)
+            baseline_reward_module = resolved_modules.get("reward", reward_module)
 
             baseline_result = run_episode_with_policy(
                 policy_model=None,
@@ -605,49 +748,99 @@ def compare_model_against_baseline(
                 enable_operator_logging=enable_operator_logging,
                 operator_logging_mode="comparison_random",
                 operator_logging_dir=operator_logs_dir_baseline_str,
+                shared_snapshot=snapshot_for_baseline,
+                action_module=baseline_action_module,
+                state_module=baseline_state_module,
+                reward_module=baseline_reward_module,
             )
 
-            max_len = max(
-                len(rl_result["cost_history"]),
-                len(baseline_result["cost_history"]),
-            )
-            steps = list(range(1, max_len + 1))
-            rl_current_raw = _pad_history(rl_result["cost_history"], max_len)
-            rl_best_raw = _pad_history(rl_result["best_cost_history"], max_len)
-            baseline_current_raw = _pad_history(baseline_result["cost_history"], max_len)
-            baseline_best_raw = _pad_history(baseline_result["best_cost_history"], max_len)
+            rl_cost_history = list(rl_result.get("cost_history", []))
+            rl_best_history = list(rl_result.get("best_cost_history", []))
+            baseline_cost_history = list(baseline_result.get("cost_history", []))
+            baseline_best_history = list(baseline_result.get("best_cost_history", []))
+
+            rl_elapsed_raw = rl_result.get("elapsed_seconds", [])
+            baseline_elapsed_raw = baseline_result.get("elapsed_seconds", [])
+            rl_elapsed = [float(v) for v in rl_elapsed_raw] if rl_elapsed_raw else []
+            baseline_elapsed = [float(v) for v in baseline_elapsed_raw] if baseline_elapsed_raw else []
+
+            rl_len = min(len(rl_cost_history), len(rl_best_history))
+            baseline_len = min(len(baseline_cost_history), len(baseline_best_history))
+
+            rl_cost_history = rl_cost_history[:rl_len]
+            rl_best_history = rl_best_history[:rl_len]
+            if len(rl_elapsed) >= rl_len and rl_len > 0:
+                rl_elapsed = rl_elapsed[:rl_len]
+            else:
+                rl_elapsed = [float(i + 1) for i in range(rl_len)]
+
+            baseline_cost_history = baseline_cost_history[:baseline_len]
+            baseline_best_history = baseline_best_history[:baseline_len]
+            if len(baseline_elapsed) >= baseline_len and baseline_len > 0:
+                baseline_elapsed = baseline_elapsed[:baseline_len]
+            else:
+                baseline_elapsed = [float(i + 1) for i in range(baseline_len)]
 
             candidates = [
                 value
-                for value in rl_best_raw + baseline_best_raw
+                for value in rl_best_history + baseline_best_history
                 if value is not None and value > 0
             ]
             min_target = min(candidates) if candidates else 1.0
 
-            rl_current = [((value / min_target) - 1.0) * 100.0 for value in rl_current_raw]
-            rl_best = [((value / min_target) - 1.0) * 100.0 for value in rl_best_raw]
-            baseline_current = [((value / min_target) - 1.0) * 100.0 for value in baseline_current_raw]
-            baseline_best = [((value / min_target) - 1.0) * 100.0 for value in baseline_best_raw]
+            rl_current = [((value / min_target) - 1.0) * 100.0 for value in rl_cost_history]
+            rl_best = [((value / min_target) - 1.0) * 100.0 for value in rl_best_history]
+            baseline_current = [((value / min_target) - 1.0) * 100.0 for value in baseline_cost_history]
+            baseline_best = [((value / min_target) - 1.0) * 100.0 for value in baseline_best_history]
 
-            rl_current_curves.append(rl_current)
-            rl_best_curves.append(rl_best)
-            baseline_current_curves.append(baseline_current)
-            baseline_best_curves.append(baseline_best)
-            combined_length = max(combined_length, max_len)
+            rl_current_series.append((rl_elapsed, rl_current))
+            rl_best_series.append((rl_elapsed, rl_best))
+            baseline_current_series.append((baseline_elapsed, baseline_current))
+            baseline_best_series.append((baseline_elapsed, baseline_best))
+
+            if rl_elapsed:
+                max_elapsed_time = max(max_elapsed_time, rl_elapsed[-1])
+            if baseline_elapsed:
+                max_elapsed_time = max(max_elapsed_time, baseline_elapsed[-1])
 
             matchup = dataset_matchups.setdefault(dataset_label, {"rl": [], "baseline": []})
-            if rl_result["best_cost"] is not None:
-                matchup["rl"].append(float(rl_result["best_cost"]))
-            if baseline_result["best_cost"] is not None:
-                matchup["baseline"].append(float(baseline_result["best_cost"]))
+            rl_best_cost = rl_result.get("best_cost")
+            baseline_best_cost = baseline_result.get("best_cost")
+            if rl_best_cost is not None:
+                matchup["rl"].append(float(rl_best_cost))
+            if baseline_best_cost is not None:
+                matchup["baseline"].append(float(baseline_best_cost))
+
+            def _prepend_zero(time_vals: List[float], series_vals: List[float]) -> Tuple[List[float], List[float]]:
+                if not time_vals or not series_vals:
+                    return time_vals, series_vals
+                if time_vals[0] <= 0.0:
+                    return time_vals, series_vals
+                return [0.0] + time_vals, [series_vals[0]] + series_vals
+
+            rl_time_for_plot, rl_current_for_plot = _prepend_zero(rl_elapsed, rl_current)
+            _, rl_best_for_plot = _prepend_zero(rl_elapsed, rl_best)
+            baseline_time_for_plot, baseline_current_for_plot = _prepend_zero(baseline_elapsed, baseline_current)
+            _, baseline_best_for_plot = _prepend_zero(baseline_elapsed, baseline_best)
 
             dataset_slug = _slugify_path(dataset_path)
             plt.figure(figsize=(10, 6))
-            plt.plot(steps, rl_current, label="RL current gap", color="tab:blue")
-            plt.plot(steps, rl_best, label="RL best gap", color="tab:blue", linestyle="--")
-            plt.plot(steps, baseline_current, label="Baseline current gap", color="tab:orange")
-            plt.plot(steps, baseline_best, label="Baseline best gap", color="tab:orange", linestyle="--")
-            plt.xlabel("Iteration")
+            plt.plot(rl_time_for_plot, rl_current_for_plot, label="RL current gap", color="tab:blue")
+            plt.plot(rl_time_for_plot, rl_best_for_plot, label="RL best gap", color="tab:blue", linestyle="--")
+            plt.plot(
+                baseline_time_for_plot,
+                baseline_current_for_plot,
+                label="Baseline current gap",
+                color="tab:orange",
+            )
+            plt.plot(
+                baseline_time_for_plot,
+                baseline_best_for_plot,
+                label="Baseline best gap",
+                color="tab:orange",
+                linestyle="--",
+            )
+            plt.xlabel("Elapsed time (s)")
             plt.ylabel("Gap to best-known (%)")
             plt.title(f"Model vs Baseline gap ({dataset_label}, seed {seed})")
             plt.legend()
@@ -657,14 +850,21 @@ def compare_model_against_baseline(
             plt.savefig(plot_file)
             plt.close()
 
-            delta = float(baseline_result["best_cost"] - rl_result["best_cost"])
+            if rl_best_cost is None or baseline_best_cost is None:
+                print(
+                    f"   Warning: Missing best_cost metrics for {dataset_label} (seed {seed}),"
+                    " skipping detailed comparison entry."
+                )
+                continue
+
+            delta = float(baseline_best_cost - rl_best_cost)
             results.append(
                 {
                     "dataset_path": dataset_path,
                     "dataset": dataset_label,
                     "seed": seed,
-                    "rl_best_cost": rl_result["best_cost"],
-                    "baseline_best_cost": baseline_result["best_cost"],
+                    "rl_best_cost": rl_best_cost,
+                    "baseline_best_cost": baseline_best_cost,
                     "best_cost_delta": delta,
                     "rl_iterations": rl_result["iterations"],
                     "baseline_iterations": baseline_result["iterations"],
@@ -673,8 +873,8 @@ def compare_model_against_baseline(
             )
 
             print(
-                f"   {dataset_label} (seed {seed}): RL best={rl_result['best_cost']:.2f}, "
-                f"baseline best={baseline_result['best_cost']:.2f}, delta={delta:+.2f}"
+                f"   {dataset_label} (seed {seed}): RL best={rl_best_cost:.2f}, "
+                f"baseline best={baseline_best_cost:.2f}, delta={delta:+.2f}"
             )
 
     if results:
@@ -700,21 +900,32 @@ def compare_model_against_baseline(
         print(f"\n[STATS] Avg best-cost delta (baseline - RL): {avg_delta:+.2f}")
         print(f"[STATS] Detailed comparison saved to: {csv_path}")
 
-    if rl_best_curves and combined_length > 0:
-        step_axis = list(range(1, combined_length + 1))
+    if rl_best_series:
+        max_time = max(max_elapsed_time, 1.0)
+        time_grid = np.linspace(0.0, max_time, 200)
 
-        rl_best_mat = np.array([
-            _pad_history(curve, combined_length) for curve in rl_best_curves
-        ], dtype=float)
-        baseline_best_mat = np.array([
-            _pad_history(curve, combined_length) for curve in baseline_best_curves
-        ], dtype=float)
-        rl_current_mat = np.array([
-            _pad_history(curve, combined_length) for curve in rl_current_curves
-        ], dtype=float)
-        baseline_current_mat = np.array([
-            _pad_history(curve, combined_length) for curve in baseline_current_curves
-        ], dtype=float)
+        def _resample_series(time_values: List[float], series_values: List[float]) -> np.ndarray:
+            if not time_values or not series_values:
+                return np.zeros_like(time_grid)
+            times = np.array(time_values, dtype=float)
+            values = np.array(series_values, dtype=float)
+            if times[0] > 0.0:
+                times = np.insert(times, 0, 0.0)
+                values = np.insert(values, 0, values[0])
+            return np.interp(time_grid, times, values, left=values[0], right=values[-1])
+
+        rl_best_mat = np.vstack([
+            _resample_series(times, values) for times, values in rl_best_series
+        ])
+        baseline_best_mat = np.vstack([
+            _resample_series(times, values) for times, values in baseline_best_series
+        ])
+        rl_current_mat = np.vstack([
+            _resample_series(times, values) for times, values in rl_current_series
+        ])
+        baseline_current_mat = np.vstack([
+            _resample_series(times, values) for times, values in baseline_current_series
+        ])
 
         def _mean_std(mat: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
             return np.mean(mat, axis=0), np.std(mat, axis=0)
@@ -723,23 +934,23 @@ def compare_model_against_baseline(
         baseline_best_mean, baseline_best_std = _mean_std(baseline_best_mat)
 
         plt.figure(figsize=(10, 6))
-        plt.plot(step_axis, baseline_best_mean, label="Baseline best gap", color="tab:orange")
+        plt.plot(time_grid, baseline_best_mean, label="Baseline best gap", color="tab:orange")
         plt.fill_between(
-            step_axis,
+            time_grid,
             baseline_best_mean - baseline_best_std,
             baseline_best_mean + baseline_best_std,
             color="tab:orange",
             alpha=0.2,
         )
-        plt.plot(step_axis, rl_best_mean, label="RL best gap", color="tab:blue")
+        plt.plot(time_grid, rl_best_mean, label="RL best gap", color="tab:blue")
         plt.fill_between(
-            step_axis,
+            time_grid,
             rl_best_mean - rl_best_std,
             rl_best_mean + rl_best_std,
             color="tab:blue",
             alpha=0.2,
         )
-        plt.xlabel("Iteration")
+        plt.xlabel("Elapsed time (s)")
         plt.ylabel("Gap to best-known (%)")
         plt.title("Combined best-cost convergence (mean +/- 1 std)")
         plt.legend()
@@ -753,30 +964,30 @@ def compare_model_against_baseline(
         baseline_current_mean, baseline_current_std = _mean_std(baseline_current_mat)
 
         plt.figure(figsize=(10, 6))
-        plt.plot(step_axis, baseline_current_mean, label="Baseline current gap", color="tab:orange")
+        plt.plot(time_grid, baseline_current_mean, label="Baseline current gap", color="tab:orange")
         plt.fill_between(
-            step_axis,
+            time_grid,
             baseline_current_mean - baseline_current_std,
             baseline_current_mean + baseline_current_std,
             color="tab:orange",
             alpha=0.2,
         )
-        plt.plot(step_axis, rl_current_mean, label="RL current gap", color="tab:blue")
+        plt.plot(time_grid, rl_current_mean, label="RL current gap", color="tab:blue")
         plt.fill_between(
-            step_axis,
+            time_grid,
             rl_current_mean - rl_current_std,
             rl_current_mean + rl_current_std,
             color="tab:blue",
             alpha=0.2,
         )
-        plt.xlabel("Iteration")
+        plt.xlabel("Elapsed time (s)")
         plt.ylabel("Gap to best-known (%)")
         plt.title("Combined current-cost convergence (mean +/- 1 std)")
         plt.legend()
         plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-        combined_current_plot = comparison_dir / "combined_current_cost_convergence.png"
+        combined_plot_current = comparison_dir / "combined_current_cost_convergence.png"
         plt.tight_layout()
-        plt.savefig(combined_current_plot)
+        plt.savefig(combined_plot_current)
         plt.close()
 
     if dataset_matchups:

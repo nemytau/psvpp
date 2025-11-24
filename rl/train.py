@@ -193,6 +193,9 @@ def main() -> None:
         output_dir=str(params["evaluation_dir"]),
         max_iterations=params["max_iterations"],
         enable_operator_logging=params["enable_operator_logging"],
+        action_module=params["action_module"],
+        state_module=params["state_module"],
+        reward_module=params["reward_module"],
     )
 
     baseline_stats: Optional[Dict[str, Any]] = None
@@ -218,6 +221,9 @@ def main() -> None:
             output_dir=str(params["comparison_dir"]),
             deterministic=params["deterministic_eval"],
             enable_operator_logging=params["enable_operator_logging"],
+            action_module=params["action_module"],
+            state_module=params["state_module"],
+            reward_module=params["reward_module"],
         )
     else:
         comparison_results = []

@@ -151,5 +151,6 @@ output.json
 
 # RL run artefacts
 logs/ppo_alns/
+logs/
 runs/
 models/

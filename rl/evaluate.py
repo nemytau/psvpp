@@ -14,6 +14,7 @@ from rl.experiment import (
     find_manifest_for_model,
     load_manifest,
 )
+from rl.registries import DEFAULT_ACTION_KEY, DEFAULT_REWARD_KEY, DEFAULT_STATE_KEY
 from rl.train_alns_rl import compare_model_against_baseline, prepare_dataset_splits
 
 
@@ -27,6 +28,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-iterations", type=int, default=None, help="Max ALNS iterations per episode")
     parser.add_argument("--deterministic", action="store_true", help="Use deterministic policy actions (default true)")
     parser.add_argument("--stochastic", action="store_true", help="Force stochastic rollout")
+    parser.add_argument("--action-module", default=None, help="Registry key for action space implementation")
+    parser.add_argument("--state-module", default=None, help="Registry key for state encoder implementation")
+    parser.add_argument("--reward-module", default=None, help="Registry key for reward function implementation")
     return parser.parse_args()
 
 
@@ -74,6 +78,11 @@ def main() -> None:
     print(f"[INFO] Loading model from {args.model}")
     model = PPO.load(args.model)
 
+    manifest_modules = (manifest or {}).get("training", {}).get("modules", {}) if manifest else {}
+    action_module = args.action_module or manifest_modules.get("action", {}).get("key") or get_config_value(config, ("modules", "action"), DEFAULT_ACTION_KEY)
+    state_module = args.state_module or manifest_modules.get("state", {}).get("key") or get_config_value(config, ("modules", "state"), DEFAULT_STATE_KEY)
+    reward_module = args.reward_module or manifest_modules.get("reward", {}).get("key") or get_config_value(config, ("modules", "reward"), DEFAULT_REWARD_KEY)
+
     test_paths: List[str] = []
     if manifest:
         test_split = manifest.get("dataset", {}).get("splits", {}).get("test")
@@ -95,6 +104,9 @@ def main() -> None:
         max_iterations=max_iterations,
         output_dir=str(output_dir),
         deterministic=deterministic,
+        action_module=action_module,
+        state_module=state_module,
+        reward_module=reward_module,
     )
     print("[DONE] Comparison outputs saved to", output_dir)
 

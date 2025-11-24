@@ -31,7 +31,7 @@ except ImportError:
 
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import json
 
@@ -57,21 +57,27 @@ class SolutionMetrics:
     num_empty_voyages: int
     num_vessels_used: int
     avg_voyage_utilization: float  # Average visits per voyage
+    avg_vessel_load_utilization: float = 0.0
+    max_vessel_load_utilization: float = 0.0
+    min_vessel_load_utilization: float = 0.0
+    avg_vessel_time_utilization: float = 0.0
+    max_vessel_time_utilization: float = 0.0
+    min_vessel_time_utilization: float = 0.0
     
     # Solution diversity/exploration metrics
-    cost_improvement_ratio: float  # (best_cost - current_cost) / best_cost
-    stagnation_count: int  # Iterations since last improvement
+    cost_improvement_ratio: float = 0.0  # (best_cost - current_cost) / best_cost
+    stagnation_count: int = 0  # Iterations since last improvement
     
     # Search progression metrics
-    iteration: int
-    iteration_normalized: float  # iteration / max_iterations
-    temperature: float
-    temperature_normalized: float
+    iteration: int = 0
+    iteration_normalized: float = 0.0  # iteration / max_iterations
+    temperature: float = 0.0
+    temperature_normalized: float = 0.0
     
     # Operator performance history (rolling averages)
-    destroy_operator_success_rates: List[float]  # Success rate per destroy operator
-    repair_operator_success_rates: List[float]   # Success rate per repair operator
-    recent_operator_rewards: List[float]         # Last N operator rewards
+    destroy_operator_success_rates: List[float] = field(default_factory=list)  # Success rate per destroy operator
+    repair_operator_success_rates: List[float] = field(default_factory=list)   # Success rate per repair operator
+    recent_operator_rewards: List[float] = field(default_factory=list)         # Last N operator rewards
     
     def to_feature_vector(self) -> np.ndarray:
         """Convert metrics to normalized feature vector for RL agent"""
@@ -84,6 +90,11 @@ class SolutionMetrics:
             self.num_empty_voyages / 20.0,
             self.num_vessels_used / 10.0,  # Assume max ~10 vessels
             self.avg_voyage_utilization,
+            self.avg_vessel_load_utilization,
+            self.max_vessel_load_utilization,
+            self.min_vessel_load_utilization,
+            self.avg_vessel_time_utilization,
+            self.max_vessel_time_utilization,
             self.cost_improvement_ratio,
             min(self.stagnation_count / 20.0, 1.0),  # Cap at 20 iterations
             self.iteration_normalized,
@@ -104,25 +115,41 @@ class SolutionMetrics:
 class OperatorSelectionAction:
     """Discrete action space for operator selection"""
     
-    def __init__(self, destroy_operators: List[str], repair_operators: List[str]):
+    def __init__(
+        self,
+        destroy_operators: List[str],
+        repair_operators: List[str],
+        improvement_operators: Optional[List[str]] = None,
+    ):
         self.destroy_operators = destroy_operators
         self.repair_operators = repair_operators
+        self.improvement_operators = improvement_operators or []
         
-        # Create combined action space: each action is a (destroy_idx, repair_idx) pair
-        self.action_combinations = []
+        # Create combined action space including optional improvement operators
+        improvement_choices: List[Optional[int]] = [None]
+        improvement_choices.extend(range(len(self.improvement_operators)))
+
+        self.action_combinations: List[Tuple[int, int, Optional[int], str]] = []
         for d_idx, d_name in enumerate(destroy_operators):
             for r_idx, r_name in enumerate(repair_operators):
-                self.action_combinations.append((d_idx, r_idx, f"{d_name}+{r_name}"))
+                for improvement_idx in improvement_choices:
+                    if improvement_idx is None:
+                        desc = f"{d_name}+{r_name}"
+                    else:
+                        improvement_name = self.improvement_operators[improvement_idx]
+                        desc = f"{d_name}+{r_name}+{improvement_name}"
+                    self.action_combinations.append((d_idx, r_idx, improvement_idx, desc))
         
         self.n_actions = len(self.action_combinations)
     
-    def action_to_operators(self, action_id: int) -> Tuple[int, int]:
-        """Convert discrete action ID to (destroy_idx, repair_idx)"""
-        return self.action_combinations[action_id][:2]
+    def action_to_operators(self, action_id: int) -> Tuple[int, int, Optional[int]]:
+        """Convert discrete action ID to operator indices."""
+        destroy_idx, repair_idx, improvement_idx, _ = self.action_combinations[action_id]
+        return destroy_idx, repair_idx, improvement_idx
     
     def get_action_description(self, action_id: int) -> str:
         """Get human-readable description of action"""
-        return self.action_combinations[action_id][2]
+        return self.action_combinations[action_id][3]
 
 # ============================================================================
 # REWARD FUNCTION DESIGN
@@ -212,17 +239,40 @@ class ALNSRLEnvironment(gym.Env):  # type: ignore
         self.max_iterations = max_iterations
         self.problem_instance = problem_instance
         
-        # Initialize operator lists (these should come from Rust interface)
-        self.destroy_operators = ["shaw_removal", "random_removal", "worst_removal"]
-        self.repair_operators = ["deep_greedy", "k_regret_2", "k_regret_3"]
+        # Initialize operator lists from Rust interface when available
+        operator_info: Dict[str, List[str]]
+        try:
+            operator_info = dict(self.rust_interface.get_operator_info())
+        except Exception:
+            operator_info = {}
+
+        self.destroy_operators = operator_info.get(
+            "destroy_operators",
+            ["shaw_removal", "random_removal", "worst_removal"],
+        )
+        self.repair_operators = operator_info.get(
+            "repair_operators",
+            ["deep_greedy", "k_regret_2", "k_regret_3"],
+        )
+        self.improvement_operators = operator_info.get("improvement_operators", [])
         
-        # Action space: discrete selection of operator combinations
-        self.action_selector = OperatorSelectionAction(self.destroy_operators, self.repair_operators)
+        # Action space: discrete selection of operator combinations (including optional improvement)
+        self.action_selector = OperatorSelectionAction(
+            self.destroy_operators,
+            self.repair_operators,
+            self.improvement_operators,
+        )
         self.action_space = gym.spaces.Discrete(self.action_selector.n_actions)
         
         # State space: will be set after first reset when we know actual size
         # Start with estimated size, will be corrected on first reset
-        estimated_state_dim = 12 + len(self.destroy_operators) + len(self.repair_operators) + 5
+        estimated_state_dim = (
+            12
+            + len(self.destroy_operators)
+            + len(self.repair_operators)
+            + len(self.improvement_operators)
+            + 5
+        )
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(estimated_state_dim,), dtype=np.float32
         )
@@ -271,12 +321,13 @@ class ALNSRLEnvironment(gym.Env):  # type: ignore
         """Execute one ALNS iteration with RL-selected operators"""
         
         # Convert action to operator indices
-        destroy_idx, repair_idx = self.action_selector.action_to_operators(action)
+        destroy_idx, repair_idx, improvement_idx = self.action_selector.action_to_operators(action)
         
         # Execute ALNS iteration through Rust interface
         iteration_result = self.rust_interface.execute_iteration(
             destroy_operator_idx=destroy_idx,
             repair_operator_idx=repair_idx,
+            improvement_operator_idx=improvement_idx,
             iteration=self.current_iteration
         )
         
@@ -317,6 +368,9 @@ class ALNSRLEnvironment(gym.Env):  # type: ignore
             "action_accepted": action_accepted,
             "is_new_best": is_new_best,
             "operators_used": self.action_selector.get_action_description(action),
+            "operators_used_indices": (destroy_idx, repair_idx, improvement_idx),
+            "improvement_operator_idx": iteration_result.get("improvement_operator_idx"),
+            "improvement_operator_name": iteration_result.get("improvement_operator_name"),
             "feasible": self.current_metrics.is_feasible,
             "complete": self.current_metrics.is_complete
         }
@@ -341,6 +395,12 @@ class ALNSRLEnvironment(gym.Env):  # type: ignore
             num_empty_voyages=metrics["num_empty_voyages"],
             num_vessels_used=metrics["num_vessels_used"],
             avg_voyage_utilization=metrics["avg_voyage_utilization"],
+            avg_vessel_load_utilization=metrics.get("avg_vessel_load_utilization", 0.0),
+            max_vessel_load_utilization=metrics.get("max_vessel_load_utilization", 0.0),
+            min_vessel_load_utilization=metrics.get("min_vessel_load_utilization", 0.0),
+            avg_vessel_time_utilization=metrics.get("avg_vessel_time_utilization", 0.0),
+            max_vessel_time_utilization=metrics.get("max_vessel_time_utilization", 0.0),
+            min_vessel_time_utilization=metrics.get("min_vessel_time_utilization", 0.0),
             cost_improvement_ratio=(self.best_cost - metrics["total_cost"]) / self.best_cost if self.best_cost > 0 else 0.0,
             stagnation_count=metrics.get("stagnation_count", 0),
             iteration=self.current_iteration,

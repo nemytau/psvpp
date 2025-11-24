@@ -53,6 +53,21 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip random baseline comparison",
     )
+    parser.add_argument(
+        "--action-module",
+        default=None,
+        help="Registry key for the action space implementation",
+    )
+    parser.add_argument(
+        "--state-module",
+        default=None,
+        help="Registry key for the state encoder implementation",
+    )
+    parser.add_argument(
+        "--reward-module",
+        default=None,
+        help="Registry key for the reward function implementation",
+    )
     return parser.parse_args()
 
 
@@ -79,16 +94,46 @@ def _write_summary(
         json.dump(summary, fh, indent=2)
 
     if summary.get("rl", {}).get("cost_history"):
-        steps = list(range(1, len(summary["rl"]["cost_history"]) + 1))
+        rl_cost = summary["rl"].get("cost_history", [])
+        rl_best = summary["rl"].get("best_cost_history", [])
+        baseline_cost = summary.get("baseline", {}).get("cost_history", [])
+        baseline_best = summary.get("baseline", {}).get("best_cost_history", [])
+
+        rl_time = summary["rl"].get("elapsed_seconds", [])
+        baseline_time = summary.get("baseline", {}).get("elapsed_seconds", [])
+
+        if not rl_time:
+            rl_time = [float(i) for i in range(len(rl_cost))]
+        if not baseline_time:
+            baseline_time = [float(i) for i in range(len(baseline_cost))]
+
+        def _prepend_zero(time_vals, values):
+            if not time_vals or not values:
+                return time_vals, values
+            if time_vals[0] <= 0.0:
+                return time_vals, values
+            return [0.0] + time_vals, [values[0]] + values
+
+        rl_time_plot, rl_cost_plot = _prepend_zero(rl_time, rl_cost)
+        _, rl_best_plot = _prepend_zero(rl_time, rl_best)
+        baseline_time_plot, baseline_cost_plot = _prepend_zero(baseline_time, baseline_cost)
+        _, baseline_best_plot = _prepend_zero(baseline_time, baseline_best)
+
         plt.figure(figsize=(8, 5))
-        plt.plot(steps, summary["rl"]["cost_history"], label="RL current cost", color="tab:blue")
-        if summary.get("rl", {}).get("best_cost_history"):
-            plt.plot(steps, summary["rl"]["best_cost_history"], label="RL best cost", color="tab:blue", linestyle="--")
-        if summary.get("baseline", {}).get("cost_history"):
-            plt.plot(steps, summary["baseline"]["cost_history"], label="Baseline current cost", color="tab:orange")
-        if summary.get("baseline", {}).get("best_cost_history"):
-            plt.plot(steps, summary["baseline"]["best_cost_history"], label="Baseline best cost", color="tab:orange", linestyle="--")
-        plt.xlabel("Iteration")
+        plt.plot(rl_time_plot, rl_cost_plot, label="RL current cost", color="tab:blue")
+        if rl_best_plot:
+            plt.plot(rl_time_plot, rl_best_plot, label="RL best cost", color="tab:blue", linestyle="--")
+        if baseline_cost_plot:
+            plt.plot(baseline_time_plot, baseline_cost_plot, label="Baseline current cost", color="tab:orange")
+        if baseline_best_plot:
+            plt.plot(
+                baseline_time_plot,
+                baseline_best_plot,
+                label="Baseline best cost",
+                color="tab:orange",
+                linestyle="--",
+            )
+        plt.xlabel("Elapsed time (s)")
         plt.ylabel("Solution cost")
         plt.title(f"RL vs baseline convergence ({dataset_slug})")
         plt.legend()
@@ -111,7 +156,12 @@ def main() -> None:
         seed=args.seed,
         max_iterations=args.max_iterations,
         deterministic=deterministic,
+        capture_snapshot=True,
+        action_module=args.action_module,
+        state_module=args.state_module,
+        reward_module=args.reward_module,
     )
+    shared_snapshot = rl_stats.pop("initial_snapshot", None)
 
     baseline_stats: Optional[Dict[str, Any]] = None
     if not args.skip_baseline:
@@ -121,17 +171,33 @@ def main() -> None:
             seed=args.seed,
             max_iterations=args.max_iterations,
             deterministic=deterministic,
+            shared_snapshot=shared_snapshot,
+            action_module=rl_stats.get("modules", {}).get("action", args.action_module),
+            state_module=rl_stats.get("modules", {}).get("state", args.state_module),
+            reward_module=rl_stats.get("modules", {}).get("reward", args.reward_module),
         )
 
     dataset_label = Path(dataset_rel).name
-    print(f"Dataset: {dataset_rel} (seed {args.seed})")
-    print(f"RL best cost: {rl_stats['best_cost']:.4f}")
-    print(f"RL final cost: {rl_stats['final_cost']:.4f}")
+    rl_best_cost = rl_stats.get("best_cost")
+    rl_final_cost = rl_stats.get("final_cost")
 
+    print(f"Dataset: {dataset_rel} (seed {args.seed})")
+    if rl_best_cost is not None:
+        print(f"RL best cost: {rl_best_cost:.4f}")
+    else:
+        print("Warning: RL best cost missing from statistics")
+    if rl_final_cost is not None:
+        print(f"RL final cost: {rl_final_cost:.4f}")
+
+    baseline_best_cost: Optional[float] = None
     if baseline_stats:
-        delta = baseline_stats["best_cost"] - rl_stats["best_cost"]
-        print(f"Baseline best cost: {baseline_stats['best_cost']:.4f}")
-        print(f"Best-cost delta (baseline - RL): {delta:+.4f}")
+        baseline_best_cost = baseline_stats.get("best_cost")
+        if baseline_best_cost is not None:
+            delta = baseline_best_cost - (rl_best_cost or baseline_best_cost)
+            print(f"Baseline best cost: {baseline_best_cost:.4f}")
+            print(f"Best-cost delta (baseline - RL): {delta:+.4f}")
+        else:
+            print("Warning: Baseline best cost missing from statistics")
 
     output_dir = _ensure_output_dir(args.output_dir)
     summary: Dict[str, Any] = {
@@ -142,7 +208,8 @@ def main() -> None:
     }
     if baseline_stats:
         summary["baseline"] = baseline_stats
-        summary["best_cost_delta"] = baseline_stats["best_cost"] - rl_stats["best_cost"]
+        if rl_best_cost is not None and baseline_best_cost is not None:
+            summary["best_cost_delta"] = baseline_best_cost - rl_best_cost
 
     _write_summary(output_dir, summary, dataset_label)
 
@@ -154,6 +221,9 @@ def main() -> None:
             max_iterations=args.max_iterations,
             output_dir=str(output_dir / "model_vs_baseline"),
             deterministic=deterministic,
+            action_module=args.action_module,
+            state_module=args.state_module,
+            reward_module=args.reward_module,
         )
 
 if __name__ == "__main__":

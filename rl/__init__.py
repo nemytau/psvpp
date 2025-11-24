@@ -21,7 +21,8 @@ Example usage:
 
 from . import modules as _modules  # noqa: F401  # Ensure default modules register themselves
 from .rl_alns_environment import ALNSEnvironment
+from .operator_usage_logger import OperatorUsageLogger
 
 __version__ = "1.0.0"
 __author__ = "PSVPP Project"
-__all__ = ["ALNSEnvironment"]
+__all__ = ["ALNSEnvironment", "OperatorUsageLogger"]

@@ -22,7 +22,12 @@ def debug_interface_output():
         
         # Iteration data
         print("\n2. Iteration execution data:")
-        iter_data = interface.execute_iteration(0, 0, 0)
+        iter_data = interface.execute_iteration(
+            0,
+            destroy_operator_idx=0,
+            repair_operator_idx=0,
+            improvement_operator_idx=None,
+        )
         print(f"Type: {type(iter_data)}")
         print(f"Keys: {list(iter_data.keys()) if hasattr(iter_data, 'keys') else 'Not a dict'}")
         for key, value in iter_data.items():

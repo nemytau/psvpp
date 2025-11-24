@@ -143,7 +143,13 @@ impl RustALNSInterface {
     }
     
     /// Execute one ALNS iteration with specified operators
-    fn execute_iteration(&mut self, destroy_operator_idx: usize, repair_operator_idx: usize, iteration: usize) -> PyResult<PyDict> {
+    fn execute_iteration(
+        &mut self,
+        destroy_operator_idx: usize,
+        repair_operator_idx: usize,
+        improvement_operator_idx: Option<usize>,
+        iteration: usize,
+    ) -> PyResult<PyDict> {
         let context = self.context.as_ref().ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
         let alns_context = self.alns_context.as_mut().ok_or_else(|| PyRuntimeError::new_err("ALNS context not available"))?;
         let operator_registry = self.operator_registry.as_ref().ok_or_else(|| PyRuntimeError::new_err("Operator registry not available"))?;
@@ -268,34 +274,18 @@ impl RustALNSInterface {
         dict.set_item("is_complete", current_solution.is_complete_solution())?;
         dict.set_item("is_feasible", current_solution.is_fully_feasible(context))?;  // Note: this mutates
         
-        // Solution structure
-        let non_empty_voyages = current_solution.voyages.iter()
-            .filter(|v| !v.borrow().visit_ids.is_empty())
-            .count();
-        let empty_voyages = current_solution.voyages.len() - non_empty_voyages;
-        
-        dict.set_item("num_voyages", non_empty_voyages)?;
-        dict.set_item("num_empty_voyages", empty_voyages)?;
-        
-        // Calculate vessels used
-        let mut vessels_used = std::collections::HashSet::new();
-        for voyage in &current_solution.voyages {
-            if !voyage.borrow().visit_ids.is_empty() {
-                vessels_used.insert(voyage.borrow().vessel_id);
-            }
-        }
-        dict.set_item("num_vessels_used", vessels_used.len())?;
-        
-        // Average voyage utilization
-        let total_visits: usize = current_solution.voyages.iter()
-            .map(|v| v.borrow().visit_ids.len())
-            .sum();
-        let avg_utilization = if non_empty_voyages > 0 {
-            total_visits as f64 / non_empty_voyages as f64
-        } else {
-            0.0
-        };
-        dict.set_item("avg_voyage_utilization", avg_utilization)?;
+        // Solution structure and vessel utilization (shared helper)
+        let structure = compute_solution_structure_metrics(current_solution, context);
+        dict.set_item("num_voyages", structure.num_voyages)?;
+        dict.set_item("num_empty_voyages", structure.num_empty_voyages)?;
+        dict.set_item("num_vessels_used", structure.num_vessels_used)?;
+        dict.set_item("avg_voyage_utilization", structure.avg_voyage_utilization)?;
+        dict.set_item("avg_vessel_load_utilization", structure.avg_vessel_load_utilization)?;
+        dict.set_item("min_vessel_load_utilization", structure.min_vessel_load_utilization)?;
+        dict.set_item("max_vessel_load_utilization", structure.max_vessel_load_utilization)?;
+        dict.set_item("avg_vessel_time_utilization", structure.avg_vessel_time_utilization)?;
+        dict.set_item("min_vessel_time_utilization", structure.min_vessel_time_utilization)?;
+        dict.set_item("max_vessel_time_utilization", structure.max_vessel_time_utilization)?;
         
         // Search progression
         dict.set_item("iteration", self.iteration_count)?;
@@ -441,13 +431,24 @@ class RustALNSBridge:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize ALNS: {e}")
     
-    def execute_iteration(self, destroy_idx: int, repair_idx: int, iteration: int) -> dict:
+    def execute_iteration(
+        self,
+        iteration: int,
+        destroy_idx: int,
+        repair_idx: int,
+        improvement_idx: int | None,
+    ) -> dict:
         """Execute one ALNS iteration and return results"""
         if not self.initialized:
             raise RuntimeError("ALNS not initialized. Call initialize() first.")
         
         try:
-            result = self.rust_interface.execute_iteration(destroy_idx, repair_idx, iteration)
+            result = self.rust_interface.execute_iteration(
+                iteration,
+                destroy_operator_idx=destroy_idx,
+                repair_operator_idx=repair_idx,
+                improvement_operator_idx=improvement_idx,
+            )
             return dict(result)
         except Exception as e:
             raise RuntimeError(f"Failed to execute iteration {iteration}: {e}")
@@ -459,7 +460,8 @@ class RustALNSBridge:
         
         return (
             self.operators_info["destroy_operators"],
-            self.operators_info["repair_operators"]
+            self.operators_info["repair_operators"],
+            self.operators_info.get("improvement_operators", []),
         )
     
     def export_solution(self, filepath: str) -> None:
@@ -524,16 +526,18 @@ def test_integration():
         print("Initial metrics:", initial_metrics)
         
         # Get operator info
-        destroy_ops, repair_ops = bridge.get_operator_names()
+        destroy_ops, repair_ops, improvement_ops = bridge.get_operator_names()
         print("Destroy operators:", destroy_ops)
         print("Repair operators:", repair_ops)
+        print("Improvement operators:", improvement_ops)
         
         # Execute a few iterations
         for i in range(5):
             result = bridge.execute_iteration(
-                destroy_idx=i % len(destroy_ops),
-                repair_idx=i % len(repair_ops),
-                iteration=i
+                i,
+                i % len(destroy_ops),
+                i % len(repair_ops),
+                None,
             )
             
             print(f"Iteration {i}: Cost={result['current_cost']:.2f}, "
@@ -562,7 +566,7 @@ if __name__ == "__main__":
         print()
         print("Key Interface Functions:")
         print("- initialize_alns(problem_instance, seed)")
-        print("- execute_iteration(destroy_idx, repair_idx, iteration)")
+        print("- execute_iteration(iteration, destroy_operator_idx?, repair_operator_idx?, improvement_operator_idx?, mode?)")
         print("- extract_solution_metrics()")
         print("- get_operator_info()")
         print("- export_solution(filepath)")

@@ -47,7 +47,12 @@ def test_pyo3_interface():
                 
                 # Test iteration execution
                 print("3. Executing ALNS iteration...")
-                iteration_result = alns_interface.execute_iteration()
+                iteration_result = alns_interface.execute_iteration(
+                    iteration=0,
+                    destroy_operator_idx=0,
+                    repair_operator_idx=0,
+                    mode="explicit",
+                )
                 print(f"   Iteration result: {iteration_result}")
                 
                 # Test metrics extraction

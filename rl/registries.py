@@ -15,8 +15,8 @@ STATE_REGISTRY: Dict[str, Type[Any]] = {}
 REWARD_REGISTRY: Dict[str, Type[Any]] = {}
 
 DEFAULT_ACTION_KEY = "op_pair_v1"
-DEFAULT_STATE_KEY = "features_v2"
-DEFAULT_REWARD_KEY = "delta_cost_v3"
+DEFAULT_STATE_KEY = "features_v3"
+DEFAULT_REWARD_KEY = "delta_cost_v4"
 
 _ActionT = TypeVar("_ActionT")
 _StateT = TypeVar("_StateT")

@@ -38,12 +38,13 @@ ALNSRLEnvironment(
 
 ```python
 # Gymnasium standard properties
-action_space: gym.spaces.Discrete        # 9 discrete actions (3×3 operator combinations)
+action_space: gym.spaces.Discrete        # |destroy| × |repair| × (|improvement| + 1) combinations
 observation_space: gym.spaces.Box        # 18-dimensional continuous state space
 
 # Environment-specific properties  
-destroy_operators: List[str]             # ["shaw_removal", "random_removal", "worst_removal"]
-repair_operators: List[str]              # ["deep_greedy", "k_regret_2", "k_regret_3"]
+destroy_operators: List[str]             # e.g. ["shaw_removal", "random_removal", "worst_removal"]
+repair_operators: List[str]              # e.g. ["deep_greedy", "k_regret_2", "k_regret_3"]
+improvement_operators: List[str]         # e.g. ["voyage_number_reduction"]
 current_iteration: int                   # Current ALNS iteration
 best_cost: float                         # Best solution cost found so far
 ```
@@ -88,17 +89,16 @@ Execute one ALNS iteration with selected operator combination.
 - `truncated`: Whether episode was truncated early
 - `info`: Detailed information about the step
 
-**Action Mapping:**
+**Action Encoding:** Actions span all destroy/repair pairs and optionally apply an improvement
+operator. The policy can select "no improvement" by choosing the dedicated slot (index -1):
+
 ```python
-# Action 0: shaw_removal + deep_greedy
-# Action 1: shaw_removal + k_regret_2  
-# Action 2: shaw_removal + k_regret_3
-# Action 3: random_removal + deep_greedy
-# Action 4: random_removal + k_regret_2
-# Action 5: random_removal + k_regret_3
-# Action 6: worst_removal + deep_greedy
-# Action 7: worst_removal + k_regret_2
-# Action 8: worst_removal + k_regret_3
+destroy_idx, repair_idx, improvement_idx = env._encode_action(action)
+
+if improvement_idx is None:
+    # Skip improvement for this iteration
+else:
+    improvement_name = env.improvement_operators[improvement_idx]
 ```
 
 **Example:**
@@ -139,6 +139,12 @@ class SolutionMetrics:
     num_empty_voyages: int                     # Number of empty voyages
     num_vessels_used: int                      # Number of vessels in use
     avg_voyage_utilization: float              # Average visits per voyage
+    avg_vessel_load_utilization: float         # Mean load ratio across active vessels
+    max_vessel_load_utilization: float         # Peak load ratio across active vessels
+    min_vessel_load_utilization: float         # Lowest load ratio across active vessels
+    avg_vessel_time_utilization: float         # Mean sailing/service share of period
+    max_vessel_time_utilization: float         # Peak time-in-use share across vessels
+    min_vessel_time_utilization: float         # Lowest time-in-use share across vessels
     
     # Performance metrics
     cost_improvement_ratio: float              # Improvement ratio vs best
@@ -163,10 +169,10 @@ class SolutionMetrics:
 def to_feature_vector() -> np.ndarray
 ```
 
-Convert metrics to 18-dimensional feature vector for RL agent.
+Convert metrics to a normalized feature vector for RL agent, including vessel utilization signals.
 
 **Returns:**
-- 18-dimensional numpy array with normalized features
+- Numpy array with normalized features ready for RL consumption
 
 ### RewardFunction
 

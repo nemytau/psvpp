@@ -34,15 +34,25 @@ def main() -> None:
     print("Initial metrics (custom: temp=100, theta=0.95, weight_update=5):")
     print(dict(init_metrics2))
 
-    destroy_ops = 3
-    repair_ops = 3
+    operator_info = interface2.get_operator_info()
+    destroy_ops = len(operator_info["destroy_operators"])
+    repair_ops = len(operator_info["repair_operators"])
+    improvement_ops = len(operator_info.get("improvement_operators", []))
+
+    print(
+        f"Configured operators -> destroy: {destroy_ops}, repair: {repair_ops}, improvement: {improvement_ops}"
+    )
 
     print("\nRunning 20 ALNS iterations with custom parameters...")
     last_metrics = None
     for iteration in range(20):
         destroy_idx = iteration % destroy_ops
         repair_idx = (iteration + 1) % repair_ops
-        metrics = interface2.execute_iteration(iteration, destroy_operator_idx=destroy_idx, repair_operator_idx=repair_idx)
+        metrics = interface2.execute_iteration(
+            iteration,
+            destroy_operator_idx=destroy_idx,
+            repair_operator_idx=repair_idx,
+        )
         metrics = dict(metrics)
         last_metrics = metrics
         

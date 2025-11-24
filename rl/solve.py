@@ -67,6 +67,7 @@ def main() -> None:
         max_iterations=max_iterations,
         deterministic=deterministic,
     )
+    stats.pop("initial_snapshot", None)
 
     summary: Dict[str, Any] = {
         "model": str(Path(args.model).resolve()),

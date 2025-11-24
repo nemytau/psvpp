@@ -13,6 +13,7 @@ import numpy as np
 import rust_alns_py
 from gymnasium import spaces
 
+from rl.instance_stats import get_instance_statistics
 from rl.registries import (
     DEFAULT_ACTION_KEY,
     DEFAULT_REWARD_KEY,
@@ -34,12 +35,13 @@ class ALNSEnvironment(gym.Env):
     improvements and acceptance decisions.
     
     Action Space:
-        Discrete space representing combinations of destroy and repair operators.
-        action_idx encodes both operator selections as: destroy_idx * num_repair + repair_idx
+        Discrete space representing combinations of destroy/repair operators with an
+        optional improvement operator (including a "no improvement" choice).
+        Each action index deterministically maps to (destroy_idx, repair_idx, improvement_idx).
         
     Observation Space:
-        Box space with shape (30,) containing solution metrics like costs,
-        temperature, utilization rates, operator success rates, etc.
+        Box space with shape (41,) when using the default features_v3 encoder,
+        containing solution metrics, operator stats, and instance-level features.
     """
     
     metadata = {"render_modes": ["human"], "render_fps": 4}
@@ -61,6 +63,8 @@ class ALNSEnvironment(gym.Env):
         operator_logging_mode: str = "train",
         operator_logging_format: str = "csv",
         operator_logging_dir: Optional[str] = None,
+        force_baseline_improvement: bool = False,
+        baseline_improvement_idx: Optional[int] = None,
     ):
         """
         Initialize the ALNS environment.
@@ -76,6 +80,8 @@ class ALNSEnvironment(gym.Env):
             operator_logging_mode: Mode label embedded in output filenames (e.g. "train")
             operator_logging_format: Log file format, either "csv" or "jsonl"
             operator_logging_dir: Target directory for operator usage logs (defaults to logs/)
+            force_baseline_improvement: Automatically execute a configured improvement after each destroy/repair pair (baseline mode)
+            baseline_improvement_idx: Optional improvement operator index to use when ``force_baseline_improvement`` is enabled
         """
         super().__init__()
         
@@ -102,6 +108,8 @@ class ALNSEnvironment(gym.Env):
         self.state_module_name = state_module or DEFAULT_STATE_KEY
         self.reward_module_name = reward_module or DEFAULT_REWARD_KEY
         self.operator_logging_enabled = bool(enable_operator_logging)
+        self.force_baseline_improvement = bool(force_baseline_improvement)
+        self.baseline_improvement_idx = baseline_improvement_idx if baseline_improvement_idx is None else int(baseline_improvement_idx)
         
         # Initialize ALNS interface
         self.alns = rust_alns_py.RustALNSInterface() # type: ignore
@@ -110,13 +118,31 @@ class ALNSEnvironment(gym.Env):
         operator_info = self.alns.get_operator_info()
         self.destroy_operators = operator_info["destroy_operators"]
         self.repair_operators = operator_info["repair_operators"]
+        self.improvement_operators = operator_info.get("improvement_operators", [])
         self.num_destroy = len(self.destroy_operators)
         self.num_repair = len(self.repair_operators)
+        self.num_improvement = len(self.improvement_operators)
+
+        if self.force_baseline_improvement and self.num_improvement <= 0:
+            print(
+                "Warning: force_baseline_improvement requested but no improvement operators are available; disabling the flag."
+            )
+            self.force_baseline_improvement = False
+            self.baseline_improvement_idx = None
+        elif self.baseline_improvement_idx is not None and (
+            self.baseline_improvement_idx < 0
+            or self.baseline_improvement_idx >= self.num_improvement
+        ):
+            print(
+                "Warning: baseline_improvement_idx out of range; defaulting to the first improvement operator."
+            )
+            self.baseline_improvement_idx = 0 if self.num_improvement > 0 else None
 
         self.action_impl = create_action_space(
             self.action_module_name,
             destroy_operators=self.destroy_operators,
             repair_operators=self.repair_operators,
+            improvement_operators=self.improvement_operators,
         )
         self.action_space = self.action_impl.gym_space()
 
@@ -140,6 +166,9 @@ class ALNSEnvironment(gym.Env):
         self._episode_counter = 0
         self._current_episode_id: Optional[int] = None
         self._latest_policy_entropy: Optional[float] = None
+        self._initial_snapshot = None
+        self._instance_stats_cache: Dict[str, Dict[str, float]] = {}
+        self.current_instance_stats: Dict[str, float] = {}
         
         # Initialize state variables
         self.iteration = 0
@@ -156,7 +185,11 @@ class ALNSEnvironment(gym.Env):
         self.last_reward: float = 0.0
         self.last_operator_id: float = -1.0
         self.last_operator_type_id: float = -1.0
+        self.last_improvement_idx: float = -1.0
+        self.last_improvement_type_id: float = -1.0
         self.last_fraction_removed: float = 0.0
+        self.last_action_type: str = "none"
+        self.last_acceptance_type: str = "unknown"
         
         print(f"ALNSEnvironment initialized:")
         print(f"  Problem: {self.problem_instance}")
@@ -165,6 +198,7 @@ class ALNSEnvironment(gym.Env):
             print(f"  Sampling strategy: {self.problem_sampling_strategy}")
         print(f"  Destroy operators: {self.num_destroy}")
         print(f"  Repair operators: {self.num_repair}")
+        print(f"  Improvement operators: {self.num_improvement}")
         print(f"  Action space size: {self.action_impl.n()}")
         print(f"  Max iterations: {max_iterations}")
 
@@ -182,6 +216,25 @@ class ALNSEnvironment(gym.Env):
         if not pool:
             raise ValueError("At least one problem instance or dataset path must be provided.")
         return pool
+
+    def _resolve_instance_stats(self, dataset_identifier: str) -> Dict[str, float]:
+        cache_key = dataset_identifier
+        candidate_path = Path(dataset_identifier)
+        if candidate_path.exists():
+            try:
+                cache_key = str(candidate_path.resolve())
+            except OSError:
+                cache_key = str(candidate_path)
+
+        if cache_key not in self._instance_stats_cache:
+            try:
+                stats = get_instance_statistics(cache_key)
+            except Exception as exc:  # pragma: no cover - defensive
+                print(f"Warning: Failed to load instance statistics for '{dataset_identifier}': {exc}")
+                stats = {}
+            self._instance_stats_cache[cache_key] = stats
+
+        return dict(self._instance_stats_cache.get(cache_key, {}))
 
     def _choose_problem_instance(
         self,
@@ -204,18 +257,27 @@ class ALNSEnvironment(gym.Env):
 
         return self.problem_paths[idx]
     
-    def _encode_action(self, action_idx: int) -> Tuple[int, int]:
+    def _encode_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
         """
-        Decode action index into destroy and repair operator indices.
+        Decode action index into destroy, repair, and optional improvement indices.
         
         Args:
             action_idx: Action index from the discrete action space
             
         Returns:
-            Tuple of (destroy_operator_idx, repair_operator_idx)
+            Tuple of (destroy_operator_idx, repair_operator_idx, improvement_operator_idx)
         """
-        destroy_idx, repair_idx = self.action_impl.id_to_action(action_idx)
-        return destroy_idx, repair_idx
+        destroy_idx, repair_idx, improvement_idx = self.action_impl.id_to_action(action_idx)
+        return destroy_idx, repair_idx, improvement_idx
+
+    def _resolve_baseline_improvement_idx(self) -> Optional[int]:
+        if self.num_improvement <= 0:
+            return None
+        if self.baseline_improvement_idx is None:
+            return 0
+        if 0 <= self.baseline_improvement_idx < self.num_improvement:
+            return self.baseline_improvement_idx
+        return 0
     
     def reset(
         self, 
@@ -247,6 +309,7 @@ class ALNSEnvironment(gym.Env):
 
         self._episode_counter += 1
         self._current_episode_id = self._episode_counter
+        self._initial_snapshot = None
         
         # Reset episode state
         self.iteration = 0
@@ -261,7 +324,14 @@ class ALNSEnvironment(gym.Env):
         self.last_reward = 0.0
         self.last_operator_id = -1.0
         self.last_operator_type_id = -1.0
+        self.last_improvement_idx = -1.0
+        self.last_improvement_type_id = -1.0
         self.last_fraction_removed = 0.0
+        self._last_step_result = None
+        self._last_step_result: Optional[Dict[str, Any]] = None
+
+        snapshot_override = options.get("initial_snapshot") if options else None
+        shared_snapshot = snapshot_override is not None
         
         # Initialize ALNS with Rust engine
         try:
@@ -272,12 +342,20 @@ class ALNSEnvironment(gym.Env):
                 theta=self.theta,
                 weight_update_interval=self.weight_update_interval
             )
+
+            if snapshot_override is not None:
+                init_result = self.alns.apply_snapshot(snapshot_override)
+
+            self._initial_snapshot = self.alns.create_snapshot()
             
             # Store initial cost for reward computation
             self.initial_cost = init_result["total_cost"]
             self.current_episode_best = self.initial_cost
             self.last_current_cost = float(self.initial_cost)
             self.last_best_cost = float(self.initial_cost)
+            self.last_action_type = "none"
+            self.last_acceptance_type = "unknown"
+            self.current_instance_stats = self._resolve_instance_stats(self.current_problem_instance)
             
             # Get initial observation
             obs = self._get_observation(init_result)
@@ -285,7 +363,9 @@ class ALNSEnvironment(gym.Env):
             info = {
                 "initial_cost": self.initial_cost,
                 "problem_instance": self.current_problem_instance,
-                "episode_seed": episode_seed
+                "episode_seed": episode_seed,
+                "shared_initial_snapshot": shared_snapshot,
+                "instance_stats": dict(self.current_instance_stats),
             }
             
             return obs, info
@@ -293,6 +373,11 @@ class ALNSEnvironment(gym.Env):
         except Exception as e:
             raise RuntimeError(f"Failed to initialize ALNS: {e}")
     
+    def get_initial_snapshot(self):
+        if self._initial_snapshot is None:
+            raise RuntimeError("No initial snapshot available; reset() must be called first")
+        return self._initial_snapshot.duplicate()
+
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
         Execute one step in the environment.
@@ -307,16 +392,67 @@ class ALNSEnvironment(gym.Env):
             raise RuntimeError("Environment must be reset before calling step()")
         
         # Decode action into operator indices
-        destroy_idx, repair_idx = self._encode_action(action)
-        
+        destroy_idx, repair_idx, improvement_idx = self._encode_action(action)
+        improvement_only = (
+            improvement_idx is not None
+            and destroy_idx is None
+            and repair_idx is None
+        )
+
+        selected_improvement_idx: Optional[int] = (
+            int(improvement_idx) if improvement_idx is not None else None
+        )
+        baseline_improvement_triggered = False
+        action_type = "improvement_only" if improvement_only else "destroy_repair"
+        acceptance_type = "unknown"
+
         try:
             # Execute ALNS iteration with selected operators
-            result = self.alns.execute_iteration(
-                iteration=self.iteration,
-                destroy_operator_idx=destroy_idx,
-                repair_operator_idx=repair_idx,
-                mode="explicit"
-            )
+            if improvement_only:
+                if selected_improvement_idx is None:
+                    raise ValueError("Improvement action must provide an improvement index")
+                result = self.alns.execute_improvement_only(
+                    iteration=self.iteration,
+                    improvement_operator_idx=selected_improvement_idx,
+                )
+            else:
+                if destroy_idx is None or repair_idx is None:
+                    raise ValueError(
+                        "Destroy and repair indices are required for paired actions"
+                    )
+
+                destroy_arg = int(destroy_idx)
+                repair_arg = int(repair_idx)
+
+                if (
+                    selected_improvement_idx is None
+                    and self.force_baseline_improvement
+                ):
+                    selected_improvement_idx = self._resolve_baseline_improvement_idx()
+                    baseline_improvement_triggered = selected_improvement_idx is not None
+
+                result = self.alns.execute_iteration(
+                    iteration=self.iteration,
+                    destroy_operator_idx=destroy_arg,
+                    repair_operator_idx=repair_arg,
+                    improvement_operator_idx=selected_improvement_idx,
+                    mode="explicit",
+                )
+
+            if improvement_only:
+                action_type = "improvement_only"
+            elif baseline_improvement_triggered:
+                action_type = "paired_with_baseline"
+            elif selected_improvement_idx is not None:
+                action_type = "paired_with_improvement"
+            else:
+                action_type = "destroy_repair"
+
+            if isinstance(result, dict):
+                result["action_type"] = action_type
+
+            self.last_action_type = action_type
+            self._last_step_result = result
 
             # Capture previous cost references (before this iteration's updates)
             prev_current_cost = (
@@ -330,6 +466,23 @@ class ALNSEnvironment(gym.Env):
                 else float(self.initial_cost or result.get("best_cost", prev_current_cost))
             )
 
+            current_cost_raw = float(result.get("current_cost", prev_current_cost))
+            improved = current_cost_raw < prev_current_cost - 1e-9
+            worse = current_cost_raw > prev_current_cost + 1e-9
+            accepted_flag = bool(result.get("accepted", False))
+            if accepted_flag:
+                if improved:
+                    acceptance_type = "improvement"
+                elif worse:
+                    acceptance_type = "annealing"
+                else:
+                    acceptance_type = "rejected_no_change"
+                    result["accepted"] = False
+                    accepted_flag = False
+            else:
+                acceptance_type = "rejected"
+            result["acceptance_type"] = acceptance_type
+
             # Ensure reward function can access the previous values via env attributes
             if self.last_current_cost is None:
                 self.last_current_cost = prev_current_cost
@@ -339,6 +492,7 @@ class ALNSEnvironment(gym.Env):
             # Compute reward using the pre-update references
             reward = self._compute_reward(result)
             self.last_reward = float(reward)
+            self.last_acceptance_type = acceptance_type
 
             current_cost = float(result.get("current_cost", prev_current_cost))
             best_cost = float(result.get("best_cost", prev_best_cost))
@@ -355,14 +509,83 @@ class ALNSEnvironment(gym.Env):
             except (TypeError, ValueError):
                 self.last_fraction_removed = 0.0
 
-            repair_operator_idx = int(result.get("repair_operator_idx", repair_idx))
-            repair_operator_type_id = int(result.get("repair_operator_type_id", 1))
-            self.last_operator_id = float(repair_operator_idx)
+            destroy_idx_result_raw = result.get("destroy_operator_idx")
+            repair_idx_result_raw = result.get("repair_operator_idx")
+
+            destroy_idx_result: Optional[int]
+            if destroy_idx_result_raw is None:
+                destroy_idx_result = destroy_idx if (destroy_idx is not None and destroy_idx >= 0) else None
+            else:
+                try:
+                    destroy_idx_result = int(destroy_idx_result_raw)
+                except (TypeError, ValueError):
+                    destroy_idx_result = None
+
+            repair_idx_result: Optional[int]
+            if repair_idx_result_raw is None:
+                repair_idx_result = repair_idx if (repair_idx is not None and repair_idx >= 0) else None
+            else:
+                try:
+                    repair_idx_result = int(repair_idx_result_raw)
+                except (TypeError, ValueError):
+                    repair_idx_result = None
+
+            repair_operator_type_id_raw = result.get("repair_operator_type_id")
+            repair_operator_type_id = -1
+            if repair_idx_result is not None and repair_operator_type_id_raw is not None:
+                try:
+                    repair_operator_type_id = int(repair_operator_type_id_raw)
+                except (TypeError, ValueError):
+                    repair_operator_type_id = -1
+
+            self.last_operator_id = float(repair_idx_result) if repair_idx_result is not None else -1.0
             self.last_operator_type_id = float(repair_operator_type_id)
+
+            improvement_idx_result_raw = result.get("improvement_operator_idx")
+            if improvement_idx_result_raw is None and selected_improvement_idx is not None:
+                improvement_idx_result_raw = selected_improvement_idx
+
+            improvement_idx_result: Optional[int]
+            if improvement_idx_result_raw is None:
+                improvement_idx_result = None
+            else:
+                try:
+                    improvement_idx_result = int(improvement_idx_result_raw)
+                except (TypeError, ValueError):
+                    improvement_idx_result = None
+
+            improvement_type_id_raw = result.get("improvement_operator_type_id")
+            improvement_type_id = None
+            if improvement_type_id_raw is not None:
+                try:
+                    improvement_type_id = int(improvement_type_id_raw)
+                except (TypeError, ValueError):
+                    improvement_type_id = None
+
+            self.last_improvement_idx = (
+                float(improvement_idx_result) if improvement_idx_result is not None else -1.0
+            )
+            self.last_improvement_type_id = (
+                float(improvement_type_id)
+                if improvement_type_id is not None
+                else -1.0
+            )
+
+            improvement_name = result.get("improvement_operator_name")
+            if improvement_name is None and improvement_idx_result is not None:
+                if 0 <= improvement_idx_result < self.num_improvement:
+                    improvement_name = self.improvement_operators[improvement_idx_result]
 
             # Attach optional fields for downstream consumers
             if isinstance(result, dict):
                 result.setdefault("fraction_removed", self.last_fraction_removed)
+                result.setdefault("improvement_operator_idx", improvement_idx_result)
+                result.setdefault("improvement_operator_name", improvement_name)
+                result.setdefault("action_type", action_type)
+
+            if isinstance(result, dict):
+                result["improvement_only_action"] = improvement_only
+                result["raw_action_index"] = action
 
             # Extract metrics and compute next observation
             obs = self._get_observation(result)
@@ -393,15 +616,33 @@ class ALNSEnvironment(gym.Env):
                     self.best_improvement_abs = improvement_abs
             
             # Store step information
+
+            destroy_name: Optional[str] = None
+            if destroy_idx_result is not None and 0 <= destroy_idx_result < self.num_destroy:
+                destroy_name = self.destroy_operators[destroy_idx_result]
+
+            repair_name: Optional[str] = None
+            if repair_idx_result is not None and 0 <= repair_idx_result < self.num_repair:
+                repair_name = self.repair_operators[repair_idx_result]
+
             step_info = {
                 "iteration": self.iteration,
-                "destroy_operator": self.destroy_operators[destroy_idx],
-                "repair_operator": self.repair_operators[repair_idx],
+                "destroy_operator": destroy_name,
+                "repair_operator": repair_name,
+                "improvement_operator": improvement_name,
+                "improvement_operator_idx": improvement_idx_result,
+                "improvement_operator_type": result.get("improvement_operator_type"),
+                "improvement_operator_type_id": result.get("improvement_operator_type_id"),
                 "current_cost": current_cost,
                 "best_cost": best_cost,
-                "accepted": result["accepted"],
+                "accepted": result.get("accepted", False),
                 "temperature": result["temperature"],
-                "elapsed_ms": result.get("elapsed_ms", 0)
+                "elapsed_ms": result.get("elapsed_ms", 0),
+                "baseline_improvement_triggered": baseline_improvement_triggered,
+                "raw_action_index": action,
+                "improvement_only_action": improvement_only,
+                "action_type": action_type,
+                "acceptance_type": acceptance_type,
             }
             self.episode_history.append(step_info)
 
@@ -409,8 +650,12 @@ class ALNSEnvironment(gym.Env):
             self._log_operator_usage(
                 result=result,
                 reward=reward,
-                destroy_idx=destroy_idx,
-                repair_idx=repair_idx,
+                destroy_idx=destroy_idx_result if destroy_idx_result is not None else -1,
+                repair_idx=repair_idx_result if repair_idx_result is not None else -1,
+                improvement_idx=improvement_idx_result,
+                log_destroy=True,
+                log_repair=True,
+                log_improvement=improvement_only,
             )
             
             # Check if episode is done
@@ -425,9 +670,21 @@ class ALNSEnvironment(gym.Env):
                 "best_improvement_pct": self.best_improvement_pct,
                 "total_improvement_pct": self.total_improvement_pct,
                 "total_improvement": self.total_improvement_abs,
-                "operators_used": (destroy_idx, repair_idx),
+                "operators_used": (
+                    destroy_idx_result,
+                    repair_idx_result,
+                    improvement_idx_result,
+                ),
+                "improvement_operator_type": result.get("improvement_operator_type"),
+                "improvement_operator_type_id": result.get("improvement_operator_type_id"),
                 "current_cost": current_cost,
                 "best_cost": best_cost,
+                "baseline_improvement_triggered": baseline_improvement_triggered,
+                "raw_action_index": action,
+                "improvement_only_action": improvement_only,
+                "action_type": action_type,
+                "acceptance_type": acceptance_type,
+                "instance_stats": dict(self.current_instance_stats),
             }
             
             if done:
@@ -459,8 +716,11 @@ class ALNSEnvironment(gym.Env):
             info = {
                 "error": str(e),
                 "iteration": self.iteration,
-                "operators_used": (destroy_idx, repair_idx)
+                "operators_used": (destroy_idx, repair_idx),
+                "instance_stats": dict(self.current_instance_stats),
             }
+            self.last_action_type = "error"
+            self.last_acceptance_type = "error"
 
             self._latest_policy_entropy = None
             
@@ -522,6 +782,21 @@ class ALNSEnvironment(gym.Env):
         costs = [step["current_cost"] for step in self.episode_history]
         best_costs = [step["best_cost"] for step in self.episode_history]
         acceptances = [step["accepted"] for step in self.episode_history]
+
+        elapsed_ms_steps: List[int] = []
+        elapsed_ms_cumulative: List[int] = []
+        cumulative_ms = 0
+        for step in self.episode_history:
+            ms_raw = step.get("elapsed_ms", 0)
+            try:
+                ms_value = int(ms_raw)
+            except (TypeError, ValueError):
+                ms_value = 0
+            elapsed_ms_steps.append(ms_value)
+            cumulative_ms += ms_value
+            elapsed_ms_cumulative.append(cumulative_ms)
+
+        elapsed_seconds = [ms / 1000.0 for ms in elapsed_ms_cumulative]
         
         return {
             "total_iterations": len(self.episode_history),
@@ -535,12 +810,60 @@ class ALNSEnvironment(gym.Env):
             "acceptance_rate": np.mean(acceptances) if acceptances else 0.0,
             "cost_history": costs,
             "best_cost_history": best_costs,
-            "problem_instance": self.current_problem_instance
+            "problem_instance": self.current_problem_instance,
+            "elapsed_ms_steps": elapsed_ms_steps,
+            "elapsed_ms_cumulative": elapsed_ms_cumulative,
+            "elapsed_seconds": elapsed_seconds,
         }
 
     def set_policy_statistics(self, *, entropy: Optional[float] = None) -> None:
         """Optionally record policy diagnostics for the next logged step."""
         self._latest_policy_entropy = entropy
+
+    def log_improvement_usage(self) -> None:
+        """Record an improvement-only operator entry for baseline runs."""
+        if not self.operator_logging_enabled or self._current_episode_id is None:
+            return
+        if self._last_step_result is None:
+            return
+
+        result = self._last_step_result
+        improvement_idx_raw = result.get("improvement_operator_idx")
+        if improvement_idx_raw is None:
+            return
+
+        try:
+            improvement_idx = int(improvement_idx_raw)
+        except (TypeError, ValueError):
+            return
+
+        destroy_idx_raw = result.get("destroy_operator_idx")
+        repair_idx_raw = result.get("repair_operator_idx")
+
+        destroy_idx = -1
+        if destroy_idx_raw is not None:
+            try:
+                destroy_idx = int(destroy_idx_raw)
+            except (TypeError, ValueError):
+                destroy_idx = -1
+
+        repair_idx = -1
+        if repair_idx_raw is not None:
+            try:
+                repair_idx = int(repair_idx_raw)
+            except (TypeError, ValueError):
+                repair_idx = -1
+
+        self._log_operator_usage(
+            result=result,
+            reward=self.last_reward,
+            destroy_idx=destroy_idx,
+            repair_idx=repair_idx,
+            improvement_idx=improvement_idx,
+            log_destroy=False,
+            log_repair=False,
+            log_improvement=True,
+        )
 
     def _log_operator_usage(
         self,
@@ -549,10 +872,41 @@ class ALNSEnvironment(gym.Env):
         reward: float,
         destroy_idx: int,
         repair_idx: int,
+        improvement_idx: Optional[int],
+        log_destroy: bool = True,
+        log_repair: bool = True,
+        log_improvement: bool = False,
     ) -> None:
         if not self.operator_logging_enabled or self._current_episode_id is None:
             self._latest_policy_entropy = None
             return
+
+        destroy_idx_result = result.get("destroy_operator_idx")
+        if destroy_idx_result is None:
+            destroy_idx_result = destroy_idx if destroy_idx >= 0 else None
+        else:
+            try:
+                destroy_idx_result = int(destroy_idx_result)
+            except (TypeError, ValueError):
+                destroy_idx_result = None
+
+        repair_idx_result = result.get("repair_operator_idx")
+        if repair_idx_result is None:
+            repair_idx_result = repair_idx if repair_idx >= 0 else None
+        else:
+            try:
+                repair_idx_result = int(repair_idx_result)
+            except (TypeError, ValueError):
+                repair_idx_result = None
+
+        improvement_idx_result = result.get("improvement_operator_idx")
+        if improvement_idx_result is None:
+            improvement_idx_result = improvement_idx if improvement_idx is not None else None
+        else:
+            try:
+                improvement_idx_result = int(improvement_idx_result)
+            except (TypeError, ValueError):
+                improvement_idx_result = None
 
         base_record = {
             "episode_id": self._current_episode_id,
@@ -567,29 +921,64 @@ class ALNSEnvironment(gym.Env):
             "is_new_best": bool(result.get("is_new_best", False)),
             "elapsed_ms": int(result.get("elapsed_ms", 0)),
             "temperature": float(result.get("temperature", 0.0)),
-            "destroy_idx": destroy_idx,
-            "repair_idx": repair_idx,
+            "destroy_idx": destroy_idx_result if destroy_idx_result is not None else -1,
+            "repair_idx": repair_idx_result if repair_idx_result is not None else -1,
+            "improvement_idx": improvement_idx_result if improvement_idx_result is not None else -1,
         }
 
-        destroy_record = {
-            **base_record,
-            "operator_name": result.get("destroy_operator_name", self.destroy_operators[destroy_idx]),
-            "operator_type": result.get("destroy_operator_type", "destroy"),
-            "operator_index": destroy_idx,
-            "num_removed_requests": result.get("destroy_removed_requests"),
-            "num_inserted_requests": None,
-        }
-        repair_record = {
-            **base_record,
-            "operator_name": result.get("repair_operator_name", self.repair_operators[repair_idx]),
-            "operator_type": result.get("repair_operator_type", "repair"),
-            "operator_index": repair_idx,
-            "num_removed_requests": None,
-            "num_inserted_requests": result.get("repair_inserted_requests"),
-        }
+        if (
+            log_destroy
+            and destroy_idx_result is not None
+            and 0 <= destroy_idx_result < self.num_destroy
+        ):
+            destroy_name = result.get("destroy_operator_name")
+            if destroy_name is None:
+                destroy_name = self.destroy_operators[destroy_idx_result]
+            destroy_record = {
+                **base_record,
+                "operator_name": destroy_name,
+                "operator_type": result.get("destroy_operator_type", "destroy"),
+                "operator_index": destroy_idx_result,
+                "num_removed_requests": result.get("destroy_removed_requests"),
+                "num_inserted_requests": None,
+            }
+            self.operator_logger.append(destroy_record)
 
-        self.operator_logger.append(destroy_record)
-        self.operator_logger.append(repair_record)
+        if (
+            log_repair
+            and repair_idx_result is not None
+            and 0 <= repair_idx_result < self.num_repair
+        ):
+            repair_name = result.get("repair_operator_name")
+            if repair_name is None:
+                repair_name = self.repair_operators[repair_idx_result]
+            repair_record = {
+                **base_record,
+                "operator_name": repair_name,
+                "operator_type": result.get("repair_operator_type", "repair"),
+                "operator_index": repair_idx_result,
+                "num_removed_requests": None,
+                "num_inserted_requests": result.get("repair_inserted_requests"),
+            }
+            self.operator_logger.append(repair_record)
+
+        if log_improvement and improvement_idx_result is not None:
+            improvement_name = result.get("improvement_operator_name")
+            if (
+                improvement_name is None
+                and 0 <= improvement_idx_result < self.num_improvement
+            ):
+                improvement_name = self.improvement_operators[improvement_idx_result]
+
+            improvement_record = {
+                **base_record,
+                "operator_name": improvement_name or "none",
+                "operator_type": result.get("improvement_operator_type", "improvement"),
+                "operator_index": improvement_idx_result,
+                "num_removed_requests": None,
+                "num_inserted_requests": None,
+            }
+            self.operator_logger.append(improvement_record)
 
         self._latest_policy_entropy = None
 
@@ -620,12 +1009,22 @@ def test_environment():
         obs, reward, done, truncated, info = env.step(action)
         total_reward += reward
         
-        destroy_idx, repair_idx = env._encode_action(action)
+        destroy_idx, repair_idx, improvement_idx = env._encode_action(action)
         step_info = info.get("step_info", {})
         
-        print(f"Step {step_num + 1}: action={action} (destroy={destroy_idx}, repair={repair_idx}), "
-              f"reward={reward:.2f}, cost={step_info.get('current_cost', 'N/A'):.2f}, "
-              f"accepted={step_info.get('accepted', 'N/A')}")
+        print(
+            "Step {step}: action={action_id} (destroy={d}, repair={r}, improvement={impr}), "
+            "reward={reward:.2f}, cost={cost:.2f}, accepted={accepted}".format(
+                step=step_num + 1,
+                action_id=action,
+                d=destroy_idx,
+                r=repair_idx,
+                impr=improvement_idx if improvement_idx is not None else "none",
+                reward=reward,
+                cost=step_info.get("current_cost", float("nan")),
+                accepted=step_info.get("accepted", "N/A"),
+            )
+        )
         
         if done:
             print("Episode finished!")

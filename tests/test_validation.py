@@ -93,7 +93,12 @@ def test_single_iteration():
     from rust_alns_py import RustALNSInterface  # type: ignore
     interface = RustALNSInterface()
     interface.initialize_alns("SMALL_1", 42)
-    result = interface.execute_iteration(0, 0, 0)
+    result = interface.execute_iteration(
+        0,
+        destroy_operator_idx=0,
+        repair_operator_idx=0,
+        improvement_operator_idx=None,
+    )
     assert isinstance(result, dict)
     assert 'current_cost' in result
 
@@ -173,6 +178,12 @@ def test_state_extraction():
         num_empty_voyages=1,
         num_vessels_used=2,
         avg_voyage_utilization=2.5,
+        avg_vessel_load_utilization=0.65,
+        max_vessel_load_utilization=0.9,
+        min_vessel_load_utilization=0.5,
+        avg_vessel_time_utilization=0.4,
+        max_vessel_time_utilization=0.6,
+        min_vessel_time_utilization=0.1,
         cost_improvement_ratio=0.05,
         stagnation_count=2,
         iteration=5,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import numpy as np
 
@@ -52,3 +52,63 @@ class DeltaCostReward(BaseRewardFunction):
         )
 
         return float(np.clip(total_reward, -20.0, 50.0))
+
+
+@register_reward("delta_cost_v4")
+class DeltaCostStepDeltaReward(BaseRewardFunction):
+    """Reward based on step-wise cost deltas (current + best)."""
+
+    version = "4.0"
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        initial = env.initial_cost or result.get("initial_cost", 0.0) or 1.0
+
+        prev_cur = float(getattr(env, "last_current_cost", initial))
+        prev_best = float(getattr(env, "last_best_cost", initial))
+
+        cur = float(result.get("current_cost", prev_cur))
+        best = float(result.get("best_cost", cur))
+
+        denom_cur = max(abs(prev_cur), 1e-9)
+        denom_best = max(abs(prev_best), 1e-9)
+
+        delta_cur = (prev_cur - cur) / denom_cur
+        delta_best = (prev_best - best) / denom_best
+
+        if delta_cur < 0.0:
+            delta_cur *= 0.3
+
+        reward = 10.0 * delta_cur + 30.0 * delta_best
+
+        acceptance_type = result.get("acceptance_type") or getattr(env, "last_acceptance_type", "unknown")
+        is_new_best = bool(result.get("is_new_best", False))
+
+        no_progress = (
+            abs(cur - prev_cur) <= 1e-9
+            and abs(best - prev_best) <= 1e-9
+        )
+        stagnation_count = int(getattr(env, "stagnation_count", 0) or 0)
+        stagn_penalty = 0.0025 * min(stagnation_count, 200)
+
+        made_progress = not no_progress
+
+        if acceptance_type == "improvement":
+            if made_progress:
+                reward += 1.0
+        elif acceptance_type == "annealing":
+            if made_progress:
+                reward += 0.2
+        else:
+            reward -= 0.5
+        if is_new_best:
+            reward += 5.0
+
+        if no_progress:
+            reward = -0.2 - stagn_penalty
+        else:
+            reward -= stagn_penalty
+
+        if result.get("improvement_only_action") or result.get("improvement_operator_idx") is not None:
+            reward -= 0.05
+
+        return float(np.clip(reward, -5.0, 20.0))
