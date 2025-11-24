@@ -1,10 +1,12 @@
+use crate::structs::constants::{
+    DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD, REL_DEPARTURE_TIME,
+};
+use crate::structs::time_window::TimeWindow;
+use rand::seq::SliceRandom;
+use rand::Rng;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::error::Error;
-use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
-use rand::seq::SliceRandom;
-use rand::Rng;
-use crate::structs::time_window::TimeWindow;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Location {
@@ -23,7 +25,10 @@ impl Default for Location {
 
 impl Location {
     pub fn new(latitude: f64, longitude: f64) -> Self {
-        Self { latitude, longitude }
+        Self {
+            latitude,
+            longitude,
+        }
     }
 }
 
@@ -77,10 +82,7 @@ impl Installation {
 
     // Generates a departure scenario for the installation. Returns a vector of days.
     // The days are represented as indices in the range [0, DAYS_IN_PERIOD).
-    pub fn generate_departure_scenario(
-        &self,
-        rng: &mut impl Rng,
-    ) -> Vec<usize> {
+    pub fn generate_departure_scenario(&self, rng: &mut impl Rng) -> Vec<usize> {
         let visit_count = self.visit_frequency as usize;
         let departure_spread = self.departure_spread as i32;
         assert!(visit_count > 0);
@@ -97,7 +99,7 @@ impl Installation {
                 let wrapped = DAYS_IN_PERIOD as i32 - diff;
                 diff.min(wrapped) >= departure_spread
             });
-        
+
             if valid {
                 scenario.insert(day as usize);
             }
@@ -116,7 +118,7 @@ impl Installation {
 
         scenario.into_iter().collect()
     }
-    
+
     pub fn get_service_time(&self) -> f64 {
         self.service_time
     }
@@ -180,7 +182,7 @@ impl InstallationBuilder {
         self.time_window = time_window;
         self
     }
-    
+
     pub fn service_tw(mut self, time_window: TimeWindow) -> Self {
         self.service_time_window = Some(time_window);
         self
@@ -237,7 +239,9 @@ impl HasTimeWindows for Installation {
         if relative_arrival_time < service_tw.earliest.unwrap() {
             return service_tw.earliest.unwrap() + self.service_time;
         } else {
-            return HOURS_IN_DAY as f64 - service_tw.latest.unwrap() + service_tw.earliest.unwrap() + self.service_time;
+            return HOURS_IN_DAY as f64 - service_tw.latest.unwrap()
+                + service_tw.earliest.unwrap()
+                + self.service_time;
         }
     }
 }
@@ -292,7 +296,7 @@ impl BaseBuilder {
         self.time_window = Some(time_window);
         self
     }
-    
+
     pub fn service_tw(mut self, time_window: TimeWindow) -> Self {
         self.service_time_window = Some(time_window);
         self
@@ -301,7 +305,7 @@ impl BaseBuilder {
     pub fn build(self) -> Result<Base, &'static str> {
         let time_window = self.time_window.ok_or("time_window is required")?;
         let service_time = self.service_time.ok_or("service_time is required")?;
-        
+
         // Calculate service time window if not explicitly set
         let service_time_window = self.service_time_window.unwrap_or_else(|| {
             if let (Some(start), Some(end)) = (time_window.earliest, time_window.latest) {
@@ -314,7 +318,7 @@ impl BaseBuilder {
                 TimeWindow::new(time_window.earliest, time_window.latest).unwrap_or_default()
             }
         });
-        
+
         Ok(Base {
             id: self.id.ok_or("id is required")?,
             node: Node::new(
@@ -350,7 +354,9 @@ impl HasTimeWindows for Base {
         if relative_arrival_time < service_tw.earliest.unwrap() {
             return service_tw.earliest.unwrap() + self.service_time;
         } else {
-            return HOURS_IN_DAY as f64 - service_tw.latest.unwrap() + service_tw.earliest.unwrap() + self.service_time;
+            return HOURS_IN_DAY as f64 - service_tw.latest.unwrap()
+                + service_tw.earliest.unwrap()
+                + self.service_time;
         }
     }
 }
@@ -358,8 +364,8 @@ impl HasTimeWindows for Base {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{SeedableRng, rngs::StdRng};
     use crate::structs::constants::DAYS_IN_PERIOD;
+    use rand::{rngs::StdRng, SeedableRng};
 
     fn assert_valid_scenario(scenario: &[usize], freq: usize, spread: i32) {
         assert_eq!(scenario.len(), freq, "Wrong number of visit days");
@@ -370,7 +376,9 @@ mod tests {
                 assert!(
                     diff.min(wrapped) >= spread,
                     "Spread condition violated: day1={}, day2={}, spread={}",
-                    day1, day2, spread
+                    day1,
+                    day2,
+                    spread
                 );
             }
         }

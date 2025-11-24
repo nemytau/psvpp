@@ -1,5 +1,6 @@
 use crate::{structs::problem_data::ProblemData, utils::tsp_solver::TSPSolver};
 
+#[derive(Clone)]
 pub struct Context {
     pub problem: ProblemData,
     pub tsp_solver: TSPSolver,

@@ -1,8 +1,8 @@
-use core::panic;
-use log::{info, debug, warn, error};
-use rand::RngCore;
-use crate::structs::{context::Context, solution::Solution};
 use crate::operators::traits::RepairOperator;
+use crate::structs::{context::Context, solution::Solution};
+use core::panic;
+use log::{debug, error, info, warn};
+use rand::RngCore;
 
 pub struct DeepGreedyInsertion;
 
@@ -13,7 +13,11 @@ impl RepairOperator for DeepGreedyInsertion {
             info!(target: "operator::repair", "Solution schedule is not up-to-date before operator application, updating now.");
             solution.ensure_schedule_is_updated();
         }
-        let mut uninserted_visits: Vec<usize> = solution.get_unassigned_visits().iter().map(|v| v.id()).collect();
+        let mut uninserted_visits: Vec<usize> = solution
+            .get_unassigned_visits()
+            .iter()
+            .map(|v| v.id())
+            .collect();
         let mut iteration = 0;
         debug!(target: "operator::repair", "[DeepGreedyInsertion] Starting with {} uninserted visits", uninserted_visits.len());
         while !uninserted_visits.is_empty() {
@@ -30,14 +34,19 @@ impl RepairOperator for DeepGreedyInsertion {
 
             if let Some((visit_id, voyage_id, cost)) = best_insertion {
                 debug!(target: "operator::repair", "[DeepGreedyInsertion] Iteration {}: Chosen insertion: visit_id={}, voyage_id={}, cost={}", iteration, visit_id, voyage_id, cost);
-                if let Some(voyage_cell) = solution.voyages.iter().find(|v| v.borrow().id == voyage_id) {
+                if let Some(voyage_cell) =
+                    solution.voyages.iter().find(|v| v.borrow().id == voyage_id)
+                {
                     let voyage = voyage_cell.borrow();
                     debug!(target: "operator::repair", "  Target voyage: id={}, vessel_id={:?}, start_time={:?}, end_time={:?}, visit_ids={:?}",
                         voyage.id, voyage.vessel_id, voyage.start_time(), voyage.end_time(), voyage.visit_ids);
                 }
                 let possible = solution.visit_insertion_is_possible(context, visit_id, voyage_id);
                 debug!(target: "operator::repair", "  visit_insertion_is_possible for visit {} into voyage {}: {}", visit_id, voyage_id, possible);
-                if solution.greedy_insert_visit(visit_id, voyage_id, context).is_ok() {
+                if solution
+                    .greedy_insert_visit(visit_id, voyage_id, context)
+                    .is_ok()
+                {
                     // TODO: Instead of fully rebuilding the schedule, we could just update the affected voyage
                     solution.ensure_schedule_is_updated(); // Ensure schedule is up-to-date before next iteration
                     uninserted_visits.retain(|&v_id| v_id != visit_id);

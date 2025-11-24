@@ -1,9 +1,9 @@
-use log::info;
-use log::{debug};
-use rand::RngCore;
-use rand::Rng;
-use crate::structs::{solution::Solution, context::Context};
 use crate::operators::traits::DestroyOperator;
+use crate::structs::{context::Context, solution::Solution};
+use log::debug;
+use log::info;
+use rand::Rng;
+use rand::RngCore;
 
 pub struct WorstVisitRemovalInVoyages {
     pub xi_min: f64,
@@ -15,7 +15,11 @@ impl DestroyOperator for WorstVisitRemovalInVoyages {
     fn apply(&self, solution: &mut Solution, context: &Context, rng: &mut dyn RngCore) {
         info!(target: "operator::destroy", "[WorstVisitRemovalInVoyages] Invoked");
         // Determine number of visits to remove
-        let n_visits = solution.voyages.iter().map(|v| v.borrow().visit_ids.len()).sum::<usize>();
+        let n_visits = solution
+            .voyages
+            .iter()
+            .map(|v| v.borrow().visit_ids.len())
+            .sum::<usize>();
         if n_visits == 0 {
             return;
         }
@@ -34,7 +38,9 @@ impl DestroyOperator for WorstVisitRemovalInVoyages {
                     all_visits.push((visit_id, removal_cost));
                 }
             }
-            if all_visits.is_empty() { break; }
+            if all_visits.is_empty() {
+                break;
+            }
             // Sort by removal cost, descending
             all_visits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             // Select index using p-deterministic selection

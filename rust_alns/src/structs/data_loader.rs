@@ -1,6 +1,6 @@
+use crate::structs::csv_reader::{read_from_csv, BaseCSV, InstallationCSV, VesselCSV};
 use crate::structs::node::{Base, Installation};
 use crate::structs::vessel::Vessel;
-use crate::structs::csv_reader::{InstallationCSV, BaseCSV, read_from_csv, VesselCSV};
 use std::error::Error;
 
 pub struct Data {
@@ -43,7 +43,11 @@ pub fn load_base(file_path: &str) -> Result<Base, Box<dyn Error>> {
 }
 
 // Load all data together
-pub fn read_data(installations_path: &str, vessels_path: &str, base_path: &str) -> Result<Data, Box<dyn Error>> {
+pub fn read_data(
+    installations_path: &str,
+    vessels_path: &str,
+    base_path: &str,
+) -> Result<Data, Box<dyn Error>> {
     let installations = load_installations(installations_path)?;
     let vessels = load_vessels(vessels_path)?;
     let base = load_base(base_path)?;

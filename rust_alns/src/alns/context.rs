@@ -1,6 +1,7 @@
 use rand::rngs::StdRng;
 use rand::Rng; // Ensure Rng trait is imported
 
+#[derive(Clone)]
 pub struct ALNSContext {
     pub iteration: usize,
     pub temperature: f64,
@@ -13,7 +14,7 @@ pub struct ALNSContext {
     pub destroy_operator_counts: Vec<usize>,
     pub repair_operator_counts: Vec<usize>,
     pub cost_history: Vec<f64>,
-    pub reaction_factor: f64, // γ
+    pub reaction_factor: f64,    // γ
     pub reward_values: Vec<f64>, // [σ1, σ2, σ3]
 }
 
@@ -37,7 +38,7 @@ impl ALNSContext {
                 if let Some(count) = self.destroy_operator_counts.get_mut(index) {
                     *count += 1;
                 }
-            },
+            }
             "repair" => {
                 if let Some(score) = self.repair_operator_scores.get_mut(index) {
                     *score += reward;
@@ -45,7 +46,7 @@ impl ALNSContext {
                 if let Some(count) = self.repair_operator_counts.get_mut(index) {
                     *count += 1;
                 }
-            },
+            }
             _ => {}
         }
     }
@@ -58,17 +59,19 @@ impl ALNSContext {
                     let n = self.destroy_operator_counts[i].max(1) as f64;
                     let pi = self.destroy_operator_scores[i];
                     let w = self.destroy_operator_weights[i];
-                    self.destroy_operator_weights[i] = (1.0 - self.reaction_factor) * w + self.reaction_factor * (pi / n);
+                    self.destroy_operator_weights[i] =
+                        (1.0 - self.reaction_factor) * w + self.reaction_factor * (pi / n);
                 }
-            },
+            }
             "repair" => {
                 for i in 0..self.repair_operator_weights.len() {
                     let n = self.repair_operator_counts[i].max(1) as f64;
                     let pi = self.repair_operator_scores[i];
                     let w = self.repair_operator_weights[i];
-                    self.repair_operator_weights[i] = (1.0 - self.reaction_factor) * w + self.reaction_factor * (pi / n);
+                    self.repair_operator_weights[i] =
+                        (1.0 - self.reaction_factor) * w + self.reaction_factor * (pi / n);
                 }
-            },
+            }
             _ => {}
         }
     }

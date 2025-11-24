@@ -34,7 +34,10 @@ impl DistanceManager {
         DistanceManager { distances }
     }
     // Constructor: initializes a distance matrix using the base and installations
-    pub fn from_base_and_installations(base: &dyn HasLocation, installations: &[&dyn HasLocation]) -> Self {
+    pub fn from_base_and_installations(
+        base: &dyn HasLocation,
+        installations: &[&dyn HasLocation],
+    ) -> Self {
         let num_nodes = installations.len() + 1;
         let mut distances = vec![vec![0.0; num_nodes]; num_nodes];
         let mut dm = DistanceManager { distances };
@@ -43,7 +46,11 @@ impl DistanceManager {
     }
 
     // Populates the distance matrix using the coordinates of nodes
-    pub fn calculate_distances(&mut self, base: &dyn HasLocation, installations: &[&dyn HasLocation]) {
+    pub fn calculate_distances(
+        &mut self,
+        base: &dyn HasLocation,
+        installations: &[&dyn HasLocation],
+    ) {
         let num_nodes = installations.len() + 1;
         let mut nodes = Vec::with_capacity(num_nodes);
         nodes.push(base);

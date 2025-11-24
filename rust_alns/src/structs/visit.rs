@@ -1,5 +1,7 @@
+use crate::structs::constants::{
+    DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD, REL_DEPARTURE_TIME,
+};
 use crate::structs::node::Installation;
-use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// `Visit` represents a single visit to an installation within a route.
@@ -28,12 +30,12 @@ impl Visit {
             is_assigned: false,
         }
     }
-    
+
     pub fn assign_to_voyage(&mut self, voyage_id: usize) {
         self.assigned_voyage_id = Some(voyage_id);
         self.is_assigned = true;
     }
-    
+
     pub fn unassign(&mut self) {
         self.assigned_voyage_id = None;
         self.is_assigned = false;
@@ -43,17 +45,17 @@ impl Visit {
     pub fn id(&self) -> usize {
         self.id
     }
-    
+
     /// Returns the installation ID this visit is for
     pub fn installation_id(&self) -> usize {
         self.installation_id
     }
-    
+
     /// Returns the demand for this visit
     pub fn demand(&self) -> u32 {
         self.demand
     }
-    
+
     /// Returns the service time required for this visit
     pub fn service_time(&self) -> f64 {
         self.service_time

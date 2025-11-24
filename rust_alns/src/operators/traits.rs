@@ -1,6 +1,6 @@
-use rand::RngCore;
-use crate::structs::solution::Solution;
 use crate::structs::context::Context;
+use crate::structs::solution::Solution;
+use rand::RngCore;
 
 pub trait DestroyOperator {
     fn apply(&self, solution: &mut Solution, context: &Context, rng: &mut dyn RngCore);

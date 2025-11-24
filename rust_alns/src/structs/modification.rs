@@ -26,13 +26,22 @@ pub enum Modification {
 }
 
 pub trait SolutionModification {
-    fn apply(&self, solution: &mut crate::structs::solution::Solution, context: &crate::structs::context::Context) -> Result<(), String>;
+    fn apply(
+        &self,
+        solution: &mut crate::structs::solution::Solution,
+        context: &crate::structs::context::Context,
+    ) -> Result<(), String>;
     fn cost(&self) -> f64;
 }
 
 impl SolutionModification for GreedyInsertion {
-    fn apply(&self, solution: &mut crate::structs::solution::Solution, context: &crate::structs::context::Context) -> Result<(), String> {
-        solution.greedy_insert_visit(self.visit_id, self.voyage_id, context)
+    fn apply(
+        &self,
+        solution: &mut crate::structs::solution::Solution,
+        context: &crate::structs::context::Context,
+    ) -> Result<(), String> {
+        solution
+            .greedy_insert_visit(self.visit_id, self.voyage_id, context)
             .map_err(|e| format!("Failed to apply GreedyInsertion: {}", e))
     }
 

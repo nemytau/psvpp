@@ -2,28 +2,28 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Vessel {
-    pub id: usize,                 
+    pub id: usize,
     pub name: String,
-    pub deck_capacity: f64,       // Changed from u32 to f64
-    pub bulk_capacity: f64,       // Changed from u32 to f64
+    pub deck_capacity: f64, // Changed from u32 to f64
+    pub bulk_capacity: f64, // Changed from u32 to f64
     pub speed: f64,
     pub vessel_type: String,
-    pub fcs: f64,                 // Fuel consumption sailing
-    pub fcw: f64,                 // Fuel consumption waiting
-    pub cost: f64,                // Changed from u32 to f64
+    pub fcs: f64,  // Fuel consumption sailing
+    pub fcw: f64,  // Fuel consumption waiting
+    pub cost: f64, // Changed from u32 to f64
 }
 
 impl Vessel {
     pub fn new(
         id: usize,
         name: String,
-        deck_capacity: f64,       // Changed from u32 to f64
-        bulk_capacity: f64,       // Changed from u32 to f64
+        deck_capacity: f64, // Changed from u32 to f64
+        bulk_capacity: f64, // Changed from u32 to f64
         speed: f64,
         vessel_type: String,
         fcs: f64,
         fcw: f64,
-        cost: f64,                // Changed from u32 to f64
+        cost: f64, // Changed from u32 to f64
     ) -> Self {
         Self {
             id,
@@ -114,8 +114,12 @@ impl VesselBuilder {
             bulk_capacity: self.bulk_capacity.ok_or("bulk_capacity is required")?,
             speed: self.speed.ok_or("speed is required")?,
             vessel_type: self.vessel_type.ok_or("vessel_type is required")?,
-            fcs: self.fcs.ok_or("fuel consumption sailing (fcs) is required")?,
-            fcw: self.fcw.ok_or("fuel consumption waiting (fcw) is required")?,
+            fcs: self
+                .fcs
+                .ok_or("fuel consumption sailing (fcs) is required")?,
+            fcw: self
+                .fcw
+                .ok_or("fuel consumption waiting (fcw) is required")?,
             cost: self.cost.ok_or("cost is required")?,
         })
     }

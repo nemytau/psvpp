@@ -1,8 +1,8 @@
-use crate::structs::context::Context;
-use crate::structs::solution::Solution;
+use crate::alns::acceptance;
 use crate::alns::context::ALNSContext;
 use crate::operators::registry::OperatorRegistry;
-use crate::alns::acceptance;
+use crate::structs::context::Context;
+use crate::structs::solution::Solution;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -21,7 +21,16 @@ pub struct ALNSEngineLegacy<'a> {
 }
 
 impl<'a> ALNSEngineLegacy<'a> {
-    pub fn new(context: &'a Context, alns_context: &'a mut ALNSContext, operator_registry: OperatorRegistry, mut initial_solution: Solution, temperature: f64, theta: f64, max_iterations: usize, rng_seed: u64) -> Self {
+    pub fn new(
+        context: &'a Context,
+        alns_context: &'a mut ALNSContext,
+        operator_registry: OperatorRegistry,
+        mut initial_solution: Solution,
+        temperature: f64,
+        theta: f64,
+        max_iterations: usize,
+        rng_seed: u64,
+    ) -> Self {
         initial_solution.update_total_cost(context);
         let best_solution = initial_solution.clone();
         Self {
@@ -60,7 +69,12 @@ impl<'a> ALNSEngineLegacy<'a> {
             let best_cost = self.best_solution.total_cost;
 
             // Accept or reject
-            let accept = acceptance::accept(current_cost, candidate_cost, self.temperature, &mut self.rng);
+            let accept = acceptance::accept(
+                current_cost,
+                candidate_cost,
+                self.temperature,
+                &mut self.rng,
+            );
             if candidate_cost < best_cost {
                 self.best_solution = candidate_solution.clone();
                 self.current_solution = candidate_solution;
@@ -102,7 +116,12 @@ impl<'a> ALNSEngineLegacy<'a> {
             let candidate_cost = candidate_solution.total_cost;
             let current_cost = self.current_solution.total_cost;
             let best_cost = self.best_solution.total_cost;
-            let accept = crate::alns::acceptance::accept(current_cost, candidate_cost, self.temperature, &mut self.rng);
+            let accept = crate::alns::acceptance::accept(
+                current_cost,
+                candidate_cost,
+                self.temperature,
+                &mut self.rng,
+            );
             if candidate_cost < best_cost {
                 self.best_solution = candidate_solution.clone();
                 self.best_solution.total_cost = candidate_cost;
@@ -132,7 +151,8 @@ impl<'a> ALNSEngineLegacy<'a> {
                 repair_reward_idx = Some(2);
             }
             if let Some(idx) = destroy_reward_idx {
-                self.alns_context.reward_operator("destroy", destroy_idx, idx);
+                self.alns_context
+                    .reward_operator("destroy", destroy_idx, idx);
             }
             if let Some(idx) = repair_reward_idx {
                 self.alns_context.reward_operator("repair", repair_idx, idx);

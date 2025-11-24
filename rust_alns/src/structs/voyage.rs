@@ -1,18 +1,20 @@
-use rand::seq::index::sample;
 use itertools::Itertools;
+use rand::seq::index::sample;
 
-use crate::structs::node::{Base, Installation};
+use crate::structs::constants::{
+    DAYS_IN_PERIOD, HOURS_IN_DAY, HOURS_IN_PERIOD, REL_DEPARTURE_TIME,
+};
+use crate::structs::context::Context;
 use crate::structs::distance_manager::DistanceManager;
-use crate::structs::visit::Visit;
+use crate::structs::node::{Base, Installation};
+use crate::structs::problem_data::ProblemData;
 use crate::structs::vessel::Vessel;
+use crate::structs::visit::Visit;
 use crate::utils::tsp_solver::{self, TSPResult, TSPSolver};
 use core::panic;
-use std::rc::Rc;
-use crate::structs::constants::{HOURS_IN_PERIOD, DAYS_IN_PERIOD, HOURS_IN_DAY, REL_DEPARTURE_TIME};
 use std::clone::Clone;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::structs::problem_data::ProblemData;
-use crate::structs::context::Context;
 
 use super::visit;
 
@@ -21,20 +23,20 @@ static VOYAGE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 #[derive(Debug, Clone)]
 pub struct Voyage {
     pub id: usize, // always required
-    pub vessel_id: Option<usize>,        
+    pub vessel_id: Option<usize>,
     pub voyage_speed: Option<f64>,
-    pub departure_day: Option<usize>,    // 0..DAYS_IN_PERIOD-1 
-    pub visit_ids: Vec<usize>,           // Represents the ROUTE of the voyage
-    pub sailing_time: Option<f64>,       // Total sailing time
-    pub waiting_time: Option<f64>,       // Total waiting time at installations
-    pub arrival_time: Option<f64>,       // Time when vessel arrives back at the base [0, +∞)
-    pub end_time_at_base: Option<f64>,   // (arrival_time + wait_time + service_time) [0, +∞)
+    pub departure_day: Option<usize>,  // 0..DAYS_IN_PERIOD-1
+    pub visit_ids: Vec<usize>,         // Represents the ROUTE of the voyage
+    pub sailing_time: Option<f64>,     // Total sailing time
+    pub waiting_time: Option<f64>,     // Total waiting time at installations
+    pub arrival_time: Option<f64>,     // Time when vessel arrives back at the base [0, +∞)
+    pub end_time_at_base: Option<f64>, // (arrival_time + wait_time + service_time) [0, +∞)
     pub load: Option<u32>,
-    pub route_dirty: bool,     // Indicates if routing needs recomputation
-    pub state_dirty: bool,     // Indicates if derived state (load, feasibility) needs update
+    pub route_dirty: bool, // Indicates if routing needs recomputation
+    pub state_dirty: bool, // Indicates if derived state (load, feasibility) needs update
 }
 
-impl Voyage {       
+impl Voyage {
     // Creates a new voyage object
     pub fn new() -> Self {
         let id = VOYAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -88,7 +90,7 @@ impl Voyage {
             state_dirty: true,
         }
     }
-    
+
     // Creates an empty voyage object
     pub fn empty() -> Self {
         let id = VOYAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -107,7 +109,7 @@ impl Voyage {
             state_dirty: false,
         }
     }
-    
+
     pub fn id(&self) -> usize {
         self.id
     }
@@ -161,14 +163,13 @@ impl Voyage {
         let to_remove = n.min(len);
         let indices = sample(rng, len, to_remove).into_vec();
 
-        indices.into_iter()
-            .map(|i| self.visit_ids[i])
-            .collect()
+        indices.into_iter().map(|i| self.visit_ids[i]).collect()
     }
 
     pub fn remove_visits(&mut self, visit_ids_to_remove: &[usize]) -> usize {
         let before = self.visit_ids.len();
-        self.visit_ids.retain(|id| !visit_ids_to_remove.contains(id));
+        self.visit_ids
+            .retain(|id| !visit_ids_to_remove.contains(id));
         let removed = before - self.visit_ids.len();
         if removed > 0 {
             self.route_dirty = true;
@@ -201,11 +202,16 @@ impl Voyage {
     /// Update timing and metadata (sailing_time, waiting_time, arrival_time, end_time) using the current visit_ids order.
     /// This does not solve TSP or change the route. Sets route_dirty = false after update.
     pub fn update_details(&mut self, tsp_solver: &crate::utils::tsp_solver::TSPSolver) {
-        let speed = self.speed().unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
-        let start_time = self.start_time().unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
+        let speed = self
+            .speed()
+            .unwrap_or_else(|| panic!("Vessel speed must be set up for the voyage"));
+        let start_time = self
+            .start_time()
+            .unwrap_or_else(|| panic!("Start time must be set up for the voyage"));
         // Use the visit_ids order directly, do not clone self or solve TSP
         let route = tsp_solver.visit_sequence_to_route_public(&self.visit_ids);
-        let (sailing_time, waiting_time, arrival_time, end_time) = tsp_solver.calculate_voyage_details_public(&route, speed, start_time);
+        let (sailing_time, waiting_time, arrival_time, end_time) =
+            tsp_solver.calculate_voyage_details_public(&route, speed, start_time);
         self.sailing_time = Some(sailing_time);
         self.waiting_time = Some(waiting_time);
         self.arrival_time = Some(arrival_time);
@@ -221,12 +227,12 @@ impl Voyage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_new_with_id() {
         let id = 42;
         let voyage = Voyage::new_with_id(id);
-        
+
         assert_eq!(voyage.id, id);
         assert_eq!(voyage.vessel_id, None);
         assert_eq!(voyage.departure_day, None);

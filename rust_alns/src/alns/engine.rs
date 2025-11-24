@@ -1,11 +1,13 @@
-use crate::structs::solution::Solution;
-use crate::structs::context::Context;
-use crate::operators::registry::OperatorRegistry;
 use crate::alns::acceptance;
 use crate::alns::context::ALNSContext;
+use crate::operators::improvement::voyage_number_reduction::VoyageNumberReduction;
+use crate::operators::registry::OperatorRegistry;
+use crate::structs::context::Context;
+use crate::structs::solution::Solution;
 use rand::rngs::StdRng;
-use rand::{SeedableRng, Rng};
-use std::collections::HashSet;
+use rand::{Rng, SeedableRng};
+use std::collections::{HashMap, HashSet};
+use std::f64::{INFINITY, NEG_INFINITY};
 use std::path::{Path, PathBuf};
 
 /// ALNS operator selection modes
@@ -24,8 +26,20 @@ pub struct ALNSMetrics {
     pub accepted: bool,
     pub is_new_best: bool,
     pub is_better_than_current: bool,
-    pub destroy_idx: usize,
-    pub repair_idx: usize,
+    pub destroy_idx: Option<usize>,
+    pub repair_idx: Option<usize>,
+    pub destroy_operator_name: Option<String>,
+    pub repair_operator_name: Option<String>,
+    pub destroy_operator_type: Option<String>,
+    pub repair_operator_type: Option<String>,
+    pub destroy_removed_requests: Option<usize>,
+    pub repair_inserted_requests: Option<usize>,
+    pub destroy_operator_type_id: Option<i32>,
+    pub repair_operator_type_id: Option<i32>,
+    pub improvement_idx: Option<usize>,
+    pub improvement_operator_name: Option<String>,
+    pub improvement_operator_type: Option<String>,
+    pub improvement_operator_type_id: Option<i32>,
     pub temperature: f64,
     pub stagnation_count: usize,
     pub iteration: usize,
@@ -36,6 +50,12 @@ pub struct ALNSMetrics {
     pub num_empty_voyages: usize,
     pub num_vessels_used: usize,
     pub avg_voyage_utilization: f64,
+    pub avg_vessel_load_utilization: f64,
+    pub min_vessel_load_utilization: f64,
+    pub max_vessel_load_utilization: f64,
+    pub avg_vessel_time_utilization: f64,
+    pub min_vessel_time_utilization: f64,
+    pub max_vessel_time_utilization: f64,
     pub destroy_success_rates: Vec<f64>,
     pub repair_success_rates: Vec<f64>,
     pub recent_rewards: Vec<f64>,
@@ -44,11 +64,30 @@ pub struct ALNSMetrics {
     pub elapsed_ms: u128,
 }
 
+#[derive(Clone)]
+pub struct ALNSEngineSnapshot {
+    pub current_solution: Solution,
+    pub best_solution: Solution,
+    pub initial_solution: Solution,
+    pub alns_context: ALNSContext,
+    pub rng: StdRng,
+    pub iteration: usize,
+    pub max_iterations: usize,
+    pub temperature: f64,
+    pub theta: f64,
+    pub weight_update_interval: usize,
+    pub stagnation_count: usize,
+    pub initial_cost: f64,
+}
+
 /// Unified ALNS Engine - canonical implementation for all interfaces
 pub struct ALNSEngine {
     pub context: Context,
     pub alns_context: ALNSContext,
     pub operator_registry: OperatorRegistry,
+    pub destroy_operator_labels: Vec<String>,
+    pub repair_operator_labels: Vec<String>,
+    pub improvement_operator_labels: Vec<String>,
     pub current_solution: Solution,
     pub best_solution: Solution,
     pub initial_solution: Solution,
@@ -84,7 +123,10 @@ impl ALNSEngine {
                     candidate_path
                         .parent()
                         .ok_or_else(|| {
-                            format!("Provided dataset path has no parent directory: {}", problem_instance)
+                            format!(
+                                "Provided dataset path has no parent directory: {}",
+                                problem_instance
+                            )
                         })?
                         .to_path_buf()
                 };
@@ -120,9 +162,15 @@ impl ALNSEngine {
             } else {
                 match problem_instance {
                     "SMALL_1" => (
-                        format!("{}/sample/installations/SMALL_1/i_test1.csv", project_dir.display()),
-                        format!("{}/sample/vessels/SMALL_1/v_test1.csv", project_dir.display()),
-                        format!("{}/sample/base/SMALL_1/b_test1.csv", project_dir.display())
+                        format!(
+                            "{}/sample/installations/SMALL_1/i_test1.csv",
+                            project_dir.display()
+                        ),
+                        format!(
+                            "{}/sample/vessels/SMALL_1/v_test1.csv",
+                            project_dir.display()
+                        ),
+                        format!("{}/sample/base/SMALL_1/b_test1.csv", project_dir.display()),
                     ),
                     _ => {
                         let candidate_relative = project_dir.join(problem_instance);
@@ -132,10 +180,12 @@ impl ALNSEngine {
                             } else {
                                 candidate_relative
                                     .parent()
-                                    .ok_or_else(|| format!(
-                                        "Provided dataset path has no parent directory: {}",
-                                        problem_instance
-                                    ))?
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Provided dataset path has no parent directory: {}",
+                                            problem_instance
+                                        )
+                                    })?
                                     .to_path_buf()
                             };
                             let installations = directory.join("installations.csv");
@@ -153,15 +203,19 @@ impl ALNSEngine {
                                 base.to_string_lossy().into_owned(),
                             )
                         } else {
-                            return Err(format!("Unknown problem instance or dataset path: {}", problem_instance));
+                            return Err(format!(
+                                "Unknown problem instance or dataset path: {}",
+                                problem_instance
+                            ));
                         }
                     }
                 }
             }
         };
 
-        let data = crate::structs::data_loader::read_data(&installations_path, &vessels_path, &base_path)
-            .map_err(|e| format!("Failed to load data: {}", e))?;
+        let data =
+            crate::structs::data_loader::read_data(&installations_path, &vessels_path, &base_path)
+                .map_err(|e| format!("Failed to load data: {}", e))?;
 
         let problem_data = crate::structs::problem_data::ProblemData::new(
             data.vessels.clone(),
@@ -169,14 +223,21 @@ impl ALNSEngine {
             data.base.clone(),
         );
         let tsp_solver = crate::utils::tsp_solver::TSPSolver::new_from_problem_data(&problem_data);
-        let context = Context { problem: problem_data, tsp_solver };
+        let context = Context {
+            problem: problem_data,
+            tsp_solver,
+        };
 
         let mut rng = StdRng::seed_from_u64(seed);
-        let mut initial_solution = crate::operators::initial_solution::construct_initial_solution(&context, &mut rng);
+        let mut initial_solution =
+            crate::operators::initial_solution::construct_initial_solution(&context, &mut rng);
         initial_solution.update_total_cost(&context);
 
         let mut operator_registry = OperatorRegistry::new();
         Self::setup_operators(&mut operator_registry);
+
+        let (destroy_operator_labels, repair_operator_labels, improvement_operator_labels) =
+            Self::get_operator_info();
 
         let n_destroy = operator_registry.destroy_operators.len();
         let n_repair = operator_registry.repair_operators.len();
@@ -202,6 +263,9 @@ impl ALNSEngine {
             context,
             alns_context,
             operator_registry,
+            destroy_operator_labels,
+            repair_operator_labels,
+            improvement_operator_labels,
             current_solution: initial_solution.clone(),
             best_solution: initial_solution.clone(),
             initial_solution,
@@ -216,12 +280,51 @@ impl ALNSEngine {
         })
     }
 
+    /// Capture a clone of the current engine state for later reuse.
+    pub fn create_snapshot(&self) -> ALNSEngineSnapshot {
+        ALNSEngineSnapshot {
+            current_solution: self.current_solution.clone(),
+            best_solution: self.best_solution.clone(),
+            initial_solution: self.initial_solution.clone(),
+            alns_context: self.alns_context.clone(),
+            rng: self.rng.clone(),
+            iteration: self.iteration,
+            max_iterations: self.max_iterations,
+            temperature: self.temperature,
+            theta: self.theta,
+            weight_update_interval: self.weight_update_interval,
+            stagnation_count: self.stagnation_count,
+            initial_cost: self.initial_cost,
+        }
+    }
+
+    /// Restore the engine state from a previously captured snapshot.
+    pub fn apply_snapshot(&mut self, snapshot: &ALNSEngineSnapshot) {
+        self.current_solution = snapshot.current_solution.clone();
+        self.best_solution = snapshot.best_solution.clone();
+        self.initial_solution = snapshot.initial_solution.clone();
+        self.alns_context = snapshot.alns_context.clone();
+        self.rng = snapshot.rng.clone();
+        self.iteration = snapshot.iteration;
+        self.max_iterations = snapshot.max_iterations;
+        self.temperature = snapshot.temperature;
+        self.theta = snapshot.theta;
+        self.weight_update_interval = snapshot.weight_update_interval;
+        self.stagnation_count = snapshot.stagnation_count;
+        self.initial_cost = snapshot.initial_cost;
+    }
+
     /// Setup standard ALNS operators
     pub fn setup_operators(registry: &mut OperatorRegistry) {
         registry.add_destroy_operator(Box::new(
             crate::operators::destroy::shaw_removal::ShawRemoval {
-                xi_min: 0.2, xi_max: 0.4, p: 5.0, alpha: 1.0, beta: 5.0, phi: 2.0,
-            }
+                xi_min: 0.2,
+                xi_max: 0.4,
+                p: 5.0,
+                alpha: 1.0,
+                beta: 5.0,
+                phi: 2.0,
+            },
         ));
         registry.add_destroy_operator(Box::new(
             crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
@@ -230,35 +333,41 @@ impl ALNSEngine {
         ));
         registry.add_destroy_operator(Box::new(
             crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
-                xi_min: 0.2, xi_max: 0.4, p: 5.0,
-            }
+                xi_min: 0.2,
+                xi_max: 0.4,
+                p: 5.0,
+            },
         ));
         registry.add_repair_operator(Box::new(
-            crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {}
+            crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {},
         ));
         registry.add_repair_operator(Box::new(
-            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2 }
+            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2 },
         ));
         registry.add_repair_operator(Box::new(
-            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3 }
+            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3 },
         ));
+
+        registry.add_improvement_operator(Box::new(VoyageNumberReduction));
     }
 
     /// Get operator information for external interfaces
-    pub fn get_operator_info() -> (Vec<String>, Vec<String>) {
+    pub fn get_operator_info() -> (Vec<String>, Vec<String>, Vec<String>) {
         let destroy_operators = vec![
             "shaw_removal".to_string(),
-            "random_visit_removal".to_string(), 
-            "worst_visit_removal".to_string()
+            "random_visit_removal".to_string(),
+            "worst_visit_removal".to_string(),
         ];
-        
+
         let repair_operators = vec![
             "deep_greedy_insertion".to_string(),
             "k_regret_2".to_string(),
-            "k_regret_3".to_string()
+            "k_regret_3".to_string(),
         ];
-        
-        (destroy_operators, repair_operators)
+
+        let improvement_operators = vec!["voyage_number_reduction".to_string()];
+
+        (destroy_operators, repair_operators, improvement_operators)
     }
 
     /// Run a single ALNS iteration with specified mode
@@ -266,23 +375,33 @@ impl ALNSEngine {
         &mut self,
         mode: ALNSRunMode,
         iteration: usize,
+        improvement_operator_idx: Option<usize>,
     ) -> Result<ALNSMetrics, String> {
         // Select operator indices based on mode
         let (destroy_operator_idx, repair_operator_idx) = match mode {
             ALNSRunMode::Random => {
-                let destroy_idx = self.rng.gen_range(0..self.operator_registry.destroy_operators.len());
-                let repair_idx = self.rng.gen_range(0..self.operator_registry.repair_operators.len());
+                let destroy_idx = self
+                    .rng
+                    .gen_range(0..self.operator_registry.destroy_operators.len());
+                let repair_idx = self
+                    .rng
+                    .gen_range(0..self.operator_registry.repair_operators.len());
                 (destroy_idx, repair_idx)
-            },
+            }
             ALNSRunMode::Weighted => {
                 let destroy_idx = self.alns_context.pick_destroy_operator_idx();
                 let repair_idx = self.alns_context.pick_repair_operator_idx();
                 (destroy_idx, repair_idx)
-            },
+            }
             ALNSRunMode::Explicit(destroy_idx, repair_idx) => (destroy_idx, repair_idx),
         };
 
-        self.run_iteration_internal(destroy_operator_idx, repair_operator_idx, iteration)
+        self.run_iteration_internal(
+            destroy_operator_idx,
+            repair_operator_idx,
+            improvement_operator_idx,
+            iteration,
+        )
     }
 
     /// Backward compatibility method for explicit operator selection
@@ -290,9 +409,14 @@ impl ALNSEngine {
         &mut self,
         destroy_operator_idx: usize,
         repair_operator_idx: usize,
+        improvement_operator_idx: Option<usize>,
         iteration: usize,
     ) -> Result<ALNSMetrics, String> {
-        self.run_iteration(ALNSRunMode::Explicit(destroy_operator_idx, repair_operator_idx), iteration)
+        self.run_iteration(
+            ALNSRunMode::Explicit(destroy_operator_idx, repair_operator_idx),
+            iteration,
+            improvement_operator_idx,
+        )
     }
 
     /// Internal implementation of ALNS iteration logic
@@ -300,28 +424,74 @@ impl ALNSEngine {
         &mut self,
         destroy_operator_idx: usize,
         repair_operator_idx: usize,
+        improvement_operator_idx: Option<usize>,
         iteration: usize,
     ) -> Result<ALNSMetrics, String> {
         let start_time = std::time::Instant::now();
-        
+
         if destroy_operator_idx >= self.operator_registry.destroy_operators.len() {
-            return Err(format!("Invalid destroy operator index: {}", destroy_operator_idx));
+            return Err(format!(
+                "Invalid destroy operator index: {}",
+                destroy_operator_idx
+            ));
         }
         if repair_operator_idx >= self.operator_registry.repair_operators.len() {
-            return Err(format!("Invalid repair operator index: {}", repair_operator_idx));
+            return Err(format!(
+                "Invalid repair operator index: {}",
+                repair_operator_idx
+            ));
+        }
+        if let Some(idx) = improvement_operator_idx {
+            if idx >= self.operator_registry.improvement_operators.len() {
+                return Err(format!("Invalid improvement operator index: {}", idx));
+            }
         }
 
-        let destroy_op = self.operator_registry.get_destroy_operator(destroy_operator_idx);
-        let repair_op = self.operator_registry.get_repair_operator(repair_operator_idx);
+        let destroy_op = self
+            .operator_registry
+            .get_destroy_operator(destroy_operator_idx);
+        let repair_op = self
+            .operator_registry
+            .get_repair_operator(repair_operator_idx);
+
+        let improvement_operator_name = improvement_operator_idx.map(|idx| {
+            self.improvement_operator_labels
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| format!("improvement_{}", idx))
+        });
+        let improvement_operator_type = improvement_operator_idx.map(|_| "improvement".to_string());
+        let improvement_operator_type_id = improvement_operator_idx.map(|_| 2);
+
+        let destroy_operator_name = self
+            .destroy_operator_labels
+            .get(destroy_operator_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("destroy_{}", destroy_operator_idx));
+        let repair_operator_name = self
+            .repair_operator_labels
+            .get(repair_operator_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("repair_{}", repair_operator_idx));
+        let destroy_operator_type_id = 0;
+        let repair_operator_type_id = 1;
 
         let mut candidate_solution = self.current_solution.clone();
 
         // Apply destroy and repair operators
+        // TODO: expose destroy_removed_requests + fraction_removed to Python result
         destroy_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
         candidate_solution.add_idle_vessel_and_add_empty_voyages(&self.context);
         repair_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
+
+        if let Some(idx) = improvement_operator_idx {
+            let improvement_op = self.operator_registry.get_improvement_operator(idx);
+            improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
+            candidate_solution.ensure_consistency_updated(&self.context);
+        }
+
         candidate_solution.update_total_cost(&self.context);
 
         let candidate_cost = candidate_solution.total_cost;
@@ -329,7 +499,12 @@ impl ALNSEngine {
         let best_cost = self.best_solution.total_cost;
 
         // Acceptance decision
-        let accept = acceptance::accept(current_cost, candidate_cost, self.temperature, &mut self.rng);
+        let accept = acceptance::accept(
+            current_cost,
+            candidate_cost,
+            self.temperature,
+            &mut self.rng,
+        );
         let mut accepted = false;
         let mut is_new_best = false;
         let mut is_better_than_current = false;
@@ -361,14 +536,20 @@ impl ALNSEngine {
 
         // Reward operators based on performance
         if is_new_best {
-            self.alns_context.reward_operator("destroy", destroy_operator_idx, 0);
-            self.alns_context.reward_operator("repair", repair_operator_idx, 0);
+            self.alns_context
+                .reward_operator("destroy", destroy_operator_idx, 0);
+            self.alns_context
+                .reward_operator("repair", repair_operator_idx, 0);
         } else if is_better_than_current {
-            self.alns_context.reward_operator("destroy", destroy_operator_idx, 1);
-            self.alns_context.reward_operator("repair", repair_operator_idx, 1);
+            self.alns_context
+                .reward_operator("destroy", destroy_operator_idx, 1);
+            self.alns_context
+                .reward_operator("repair", repair_operator_idx, 1);
         } else if accepted {
-            self.alns_context.reward_operator("destroy", destroy_operator_idx, 2);
-            self.alns_context.reward_operator("repair", repair_operator_idx, 2);
+            self.alns_context
+                .reward_operator("destroy", destroy_operator_idx, 2);
+            self.alns_context
+                .reward_operator("repair", repair_operator_idx, 2);
         }
 
         // Update operator weights at configurable intervals
@@ -404,32 +585,42 @@ impl ALNSEngine {
         let is_feasible = temp_solution.is_fully_feasible(&self.context);
         let is_complete = current_solution.is_complete_solution();
 
-        let non_empty_voyages = current_solution.voyages.iter().filter(|v| !v.borrow().visit_ids.is_empty()).count();
-        let empty_voyages = current_solution.voyages.len() - non_empty_voyages;
+        let structure_metrics = compute_solution_structure_metrics(current_solution, &self.context);
 
-        let mut vessels_used = HashSet::new();
-        for voyage in &current_solution.voyages { 
-            if !voyage.borrow().visit_ids.is_empty() { 
-                vessels_used.insert(voyage.borrow().vessel_id); 
-            } 
-        }
-
-        let total_visits: usize = current_solution.voyages.iter().map(|v| v.borrow().visit_ids.len()).sum();
-        let avg_utilization = if non_empty_voyages > 0 { 
-            total_visits as f64 / non_empty_voyages as f64 
-        } else { 
-            0.0 
-        };
-
-        let destroy_success_rates: Vec<f64> = self.alns_context.destroy_operator_scores.iter()
+        let destroy_success_rates: Vec<f64> = self
+            .alns_context
+            .destroy_operator_scores
+            .iter()
             .zip(self.alns_context.destroy_operator_counts.iter())
-            .map(|(score, count)| if *count > 0 { score / (*count as f64) } else { 0.5 })
+            .map(|(score, count)| {
+                if *count > 0 {
+                    score / (*count as f64)
+                } else {
+                    0.5
+                }
+            })
             .collect();
-        let repair_success_rates: Vec<f64> = self.alns_context.repair_operator_scores.iter()
+        let repair_success_rates: Vec<f64> = self
+            .alns_context
+            .repair_operator_scores
+            .iter()
             .zip(self.alns_context.repair_operator_counts.iter())
-            .map(|(score, count)| if *count > 0 { score / (*count as f64) } else { 0.5 })
+            .map(|(score, count)| {
+                if *count > 0 {
+                    score / (*count as f64)
+                } else {
+                    0.5
+                }
+            })
             .collect();
-        let recent_rewards: Vec<f64> = self.alns_context.cost_history.iter().rev().take(5).cloned().collect();
+        let recent_rewards: Vec<f64> = self
+            .alns_context
+            .cost_history
+            .iter()
+            .rev()
+            .take(5)
+            .cloned()
+            .collect();
 
         Ok(ALNSMetrics {
             total_cost: current_solution.total_cost,
@@ -437,18 +628,214 @@ impl ALNSEngine {
             accepted,
             is_new_best,
             is_better_than_current,
-            destroy_idx: destroy_operator_idx,
-            repair_idx: repair_operator_idx,
+            destroy_idx: Some(destroy_operator_idx),
+            repair_idx: Some(repair_operator_idx),
+            destroy_operator_name: Some(destroy_operator_name),
+            repair_operator_name: Some(repair_operator_name),
+            destroy_operator_type: Some("destroy".to_string()),
+            repair_operator_type: Some("repair".to_string()),
+            destroy_operator_type_id: Some(destroy_operator_type_id),
+            repair_operator_type_id: Some(repair_operator_type_id),
+            improvement_idx: improvement_operator_idx,
+            improvement_operator_name,
+            improvement_operator_type,
+            improvement_operator_type_id,
+            destroy_removed_requests: None,
+            repair_inserted_requests: None,
             temperature: self.temperature,
             stagnation_count: self.stagnation_count,
             iteration: self.iteration,
             initial_cost: self.initial_cost,
             is_complete,
             is_feasible,
-            num_voyages: non_empty_voyages,
-            num_empty_voyages: empty_voyages,
-            num_vessels_used: vessels_used.len(),
-            avg_voyage_utilization: avg_utilization,
+            num_voyages: structure_metrics.num_voyages,
+            num_empty_voyages: structure_metrics.num_empty_voyages,
+            num_vessels_used: structure_metrics.num_vessels_used,
+            avg_voyage_utilization: structure_metrics.avg_voyage_utilization,
+            avg_vessel_load_utilization: structure_metrics.avg_vessel_load_utilization,
+            min_vessel_load_utilization: structure_metrics.min_vessel_load_utilization,
+            max_vessel_load_utilization: structure_metrics.max_vessel_load_utilization,
+            avg_vessel_time_utilization: structure_metrics.avg_vessel_time_utilization,
+            min_vessel_time_utilization: structure_metrics.min_vessel_time_utilization,
+            max_vessel_time_utilization: structure_metrics.max_vessel_time_utilization,
+            destroy_success_rates,
+            repair_success_rates,
+            recent_rewards,
+            destroy_weights: self.alns_context.destroy_operator_weights.clone(),
+            repair_weights: self.alns_context.repair_operator_weights.clone(),
+            elapsed_ms,
+        })
+    }
+
+    pub fn run_improvement_only(
+        &mut self,
+        iteration: usize,
+        improvement_operator_idx: usize,
+    ) -> Result<ALNSMetrics, String> {
+        let start_time = std::time::Instant::now();
+
+        if improvement_operator_idx >= self.operator_registry.improvement_operators.len() {
+            return Err(format!(
+                "Invalid improvement operator index: {}",
+                improvement_operator_idx
+            ));
+        }
+
+        let improvement_operator_name = self
+            .improvement_operator_labels
+            .get(improvement_operator_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("improvement_{}", improvement_operator_idx));
+
+        let improvement_operator_type = Some("improvement".to_string());
+        let improvement_operator_type_id = Some(2);
+
+        let mut candidate_solution = self.current_solution.clone();
+        let improvement_op = self
+            .operator_registry
+            .get_improvement_operator(improvement_operator_idx);
+        improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
+        candidate_solution.ensure_consistency_updated(&self.context);
+        candidate_solution.update_total_cost(&self.context);
+
+        let candidate_cost = candidate_solution.total_cost;
+        let current_cost = self.current_solution.total_cost;
+        let best_cost = self.best_solution.total_cost;
+
+        let accept = acceptance::accept(
+            current_cost,
+            candidate_cost,
+            self.temperature,
+            &mut self.rng,
+        );
+
+        let mut accepted = false;
+        let mut is_new_best = false;
+        let mut is_better_than_current = false;
+
+        if candidate_cost < best_cost {
+            self.best_solution = candidate_solution.clone();
+            self.current_solution = candidate_solution;
+            accepted = true;
+            is_new_best = true;
+            is_better_than_current = true;
+            self.stagnation_count = 0;
+        } else if candidate_cost < current_cost {
+            self.current_solution = candidate_solution;
+            accepted = true;
+            is_better_than_current = true;
+            self.stagnation_count = 0;
+        } else if accept {
+            self.current_solution = candidate_solution;
+            accepted = true;
+            self.stagnation_count += 1;
+        } else {
+            self.stagnation_count += 1;
+        }
+
+        self.temperature = acceptance::cool_down(self.temperature, self.theta, iteration + 1);
+        self.iteration = iteration;
+        self.alns_context.iteration = iteration;
+
+        if (iteration + 1) % self.weight_update_interval == 0 {
+            self.alns_context.update_operator_weights("destroy");
+            self.alns_context.update_operator_weights("repair");
+            self.alns_context.reset_segment_scores();
+        }
+
+        let elapsed_ms = start_time.elapsed().as_millis();
+
+        log::info!(
+            "Iter {:3} (improvement): cost={:.4}, best={:.4}, temp={:6.1}, improvement={}, accepted={}, elapsed={}ms",
+            iteration + 1,
+            candidate_cost,
+            self.best_solution.total_cost,
+            self.temperature,
+            improvement_operator_idx,
+            accepted,
+            elapsed_ms
+        );
+
+        let current_solution = &self.current_solution;
+        let best_solution = &self.best_solution;
+
+        let mut temp_solution = current_solution.clone();
+        let is_feasible = temp_solution.is_fully_feasible(&self.context);
+        let is_complete = current_solution.is_complete_solution();
+
+        let structure_metrics = compute_solution_structure_metrics(current_solution, &self.context);
+
+        let destroy_success_rates: Vec<f64> = self
+            .alns_context
+            .destroy_operator_scores
+            .iter()
+            .zip(self.alns_context.destroy_operator_counts.iter())
+            .map(|(score, count)| {
+                if *count > 0 {
+                    score / (*count as f64)
+                } else {
+                    0.5
+                }
+            })
+            .collect();
+        let repair_success_rates: Vec<f64> = self
+            .alns_context
+            .repair_operator_scores
+            .iter()
+            .zip(self.alns_context.repair_operator_counts.iter())
+            .map(|(score, count)| {
+                if *count > 0 {
+                    score / (*count as f64)
+                } else {
+                    0.5
+                }
+            })
+            .collect();
+        let recent_rewards: Vec<f64> = self
+            .alns_context
+            .cost_history
+            .iter()
+            .rev()
+            .take(5)
+            .cloned()
+            .collect();
+
+        Ok(ALNSMetrics {
+            total_cost: current_solution.total_cost,
+            best_cost: best_solution.total_cost,
+            accepted,
+            is_new_best,
+            is_better_than_current,
+            destroy_idx: None,
+            repair_idx: None,
+            destroy_operator_name: None,
+            repair_operator_name: None,
+            destroy_operator_type: None,
+            repair_operator_type: None,
+            destroy_operator_type_id: None,
+            repair_operator_type_id: None,
+            improvement_idx: Some(improvement_operator_idx),
+            improvement_operator_name: Some(improvement_operator_name),
+            improvement_operator_type,
+            improvement_operator_type_id,
+            destroy_removed_requests: None,
+            repair_inserted_requests: None,
+            temperature: self.temperature,
+            stagnation_count: self.stagnation_count,
+            iteration: self.iteration,
+            initial_cost: self.initial_cost,
+            is_complete,
+            is_feasible,
+            num_voyages: structure_metrics.num_voyages,
+            num_empty_voyages: structure_metrics.num_empty_voyages,
+            num_vessels_used: structure_metrics.num_vessels_used,
+            avg_voyage_utilization: structure_metrics.avg_voyage_utilization,
+            avg_vessel_load_utilization: structure_metrics.avg_vessel_load_utilization,
+            min_vessel_load_utilization: structure_metrics.min_vessel_load_utilization,
+            max_vessel_load_utilization: structure_metrics.max_vessel_load_utilization,
+            avg_vessel_time_utilization: structure_metrics.avg_vessel_time_utilization,
+            min_vessel_time_utilization: structure_metrics.min_vessel_time_utilization,
+            max_vessel_time_utilization: structure_metrics.max_vessel_time_utilization,
             destroy_success_rates,
             repair_success_rates,
             recent_rewards,
@@ -466,18 +853,39 @@ impl ALNSEngine {
             accepted: false,
             is_new_best: false,
             is_better_than_current: false,
-            destroy_idx: 0,
-            repair_idx: 0,
+            destroy_idx: None,
+            repair_idx: None,
+            destroy_operator_name: None,
+            repair_operator_name: None,
+            destroy_operator_type: None,
+            repair_operator_type: None,
+            destroy_operator_type_id: None,
+            repair_operator_type_id: None,
+            improvement_idx: None,
+            improvement_operator_name: None,
+            improvement_operator_type: None,
+            improvement_operator_type_id: None,
+            destroy_removed_requests: None,
+            repair_inserted_requests: None,
             temperature: self.temperature,
             stagnation_count: self.stagnation_count,
             iteration: 0,
             initial_cost: self.initial_cost,
             is_complete: self.current_solution.is_complete_solution(),
-            is_feasible: self.current_solution.clone().is_fully_feasible(&self.context),
+            is_feasible: self
+                .current_solution
+                .clone()
+                .is_fully_feasible(&self.context),
             num_voyages: 0,
             num_empty_voyages: 0,
             num_vessels_used: 0,
             avg_voyage_utilization: 0.0,
+            avg_vessel_load_utilization: 0.0,
+            min_vessel_load_utilization: 0.0,
+            max_vessel_load_utilization: 0.0,
+            avg_vessel_time_utilization: 0.0,
+            min_vessel_time_utilization: 0.0,
+            max_vessel_time_utilization: 0.0,
             destroy_success_rates: vec![],
             repair_success_rates: vec![],
             recent_rewards: vec![],
@@ -489,8 +897,8 @@ impl ALNSEngine {
         for iter in 0..self.max_iterations {
             let destroy_idx = self.alns_context.pick_destroy_operator_idx();
             let repair_idx = self.alns_context.pick_repair_operator_idx();
-            
-            match self.run_iteration(ALNSRunMode::Explicit(destroy_idx, repair_idx), iter) {
+
+            match self.run_iteration(ALNSRunMode::Explicit(destroy_idx, repair_idx), iter, None) {
                 Ok(metrics) => last_metrics = metrics,
                 Err(e) => {
                     log::error!("Error in iteration {}: {}", iter, e);
@@ -513,23 +921,135 @@ impl ALNSEngine {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct SolutionStructureMetrics {
+    pub num_voyages: usize,
+    pub num_empty_voyages: usize,
+    pub num_vessels_used: usize,
+    pub avg_voyage_utilization: f64,
+    pub avg_vessel_load_utilization: f64,
+    pub min_vessel_load_utilization: f64,
+    pub max_vessel_load_utilization: f64,
+    pub avg_vessel_time_utilization: f64,
+    pub min_vessel_time_utilization: f64,
+    pub max_vessel_time_utilization: f64,
+}
+
+pub(crate) fn compute_solution_structure_metrics(
+    solution: &Solution,
+    context: &Context,
+) -> SolutionStructureMetrics {
+    use crate::structs::constants::HOURS_IN_PERIOD;
+
+    let mut non_empty_voyages = 0usize;
+    let mut total_visits = 0usize;
+    let mut vessels_used: HashSet<usize> = HashSet::new();
+    let mut vessel_load_totals: HashMap<usize, (f64, usize)> = HashMap::new();
+    let mut vessel_time_totals: HashMap<usize, f64> = HashMap::new();
+
+    for voyage_cell in &solution.voyages {
+        let voyage = voyage_cell.borrow();
+        if voyage.visit_ids.is_empty() {
+            continue;
+        }
+        non_empty_voyages += 1;
+        total_visits += voyage.visit_ids.len();
+
+        if let Some(vessel_id) = voyage.vessel_id {
+            vessels_used.insert(vessel_id);
+
+            let load = voyage.load.unwrap_or(0) as f64;
+            let entry = vessel_load_totals.entry(vessel_id).or_insert((0.0, 0));
+            entry.0 += load;
+            entry.1 += 1;
+
+            if let (Some(start_time), Some(end_time)) = (voyage.start_time(), voyage.end_time()) {
+                let mut duration = end_time - start_time;
+                if duration < 0.0 {
+                    duration += HOURS_IN_PERIOD as f64;
+                }
+                vessel_time_totals
+                    .entry(vessel_id)
+                    .and_modify(|total| *total += duration)
+                    .or_insert(duration);
+            }
+        }
+    }
+
+    let empty_voyages = solution.voyages.len().saturating_sub(non_empty_voyages);
+    let avg_voyage_utilization = if non_empty_voyages > 0 {
+        total_visits as f64 / non_empty_voyages as f64
+    } else {
+        0.0
+    };
+
+    let period_hours = HOURS_IN_PERIOD as f64;
+    let mut vessel_load_metrics = Vec::new();
+    let mut vessel_time_metrics = Vec::new();
+
+    for (vessel_id, (total_load, voyage_count)) in &vessel_load_totals {
+        if let Some(vessel) = context.problem.vessels.get(*vessel_id) {
+            let total_capacity = vessel.deck_capacity * (*voyage_count as f64);
+            if total_capacity > 0.0 {
+                vessel_load_metrics.push(total_load / total_capacity);
+            }
+        }
+        if let Some(total_time) = vessel_time_totals.get(vessel_id) {
+            if period_hours > 0.0 {
+                vessel_time_metrics.push(*total_time / period_hours);
+            }
+        }
+    }
+
+    let (avg_load, min_load, max_load) = summarize_utilization(&vessel_load_metrics);
+    let (avg_time, min_time, max_time) = summarize_utilization(&vessel_time_metrics);
+
+    SolutionStructureMetrics {
+        num_voyages: non_empty_voyages,
+        num_empty_voyages: empty_voyages,
+        num_vessels_used: vessels_used.len(),
+        avg_voyage_utilization,
+        avg_vessel_load_utilization: avg_load,
+        min_vessel_load_utilization: min_load,
+        max_vessel_load_utilization: max_load,
+        avg_vessel_time_utilization: avg_time,
+        min_vessel_time_utilization: min_time,
+        max_vessel_time_utilization: max_time,
+    }
+}
+
+fn summarize_utilization(values: &[f64]) -> (f64, f64, f64) {
+    if values.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let sum: f64 = values.iter().sum();
+    let avg = sum / values.len() as f64;
+    let min = values.iter().copied().fold(INFINITY, f64::min);
+    let max = values.iter().copied().fold(NEG_INFINITY, f64::max);
+
+    (avg, min, max)
+}
+
 /// Enable file logging for ALNS operations
 pub fn enable_file_logging(log_path: &str) -> Result<(), String> {
     use std::fs::OpenOptions;
     use std::io::Write;
-    
-    let target = Box::new(OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open(log_path)
-        .map_err(|e| format!("Failed to open log file {}: {}", log_path, e))?);
-    
+
+    let target = Box::new(
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(log_path)
+            .map_err(|e| format!("Failed to open log file {}: {}", log_path, e))?,
+    );
+
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(target))
         .try_init()
         .map_err(|e| format!("Logger already initialized or configuration error: {}", e))?;
-    
+
     Ok(())
 }
 

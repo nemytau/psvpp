@@ -1,25 +1,18 @@
 use crate::structs::{
-    solution::Solution,
-    visit::Visit,
-    vessel::Vessel,
+    context::Context, schedule::Schedule, solution::Solution, vessel::Vessel, visit::Visit,
     voyage::Voyage,
-    schedule::Schedule,
-    context::Context,  
 };
 use crate::utils::assignment::assign_smallest_available_vessel;
-use log::{debug, warn, error};
-use rand::Rng;
+use log::{debug, error, warn};
 use rand::seq::SliceRandom;
+use rand::Rng;
 use std::collections::HashMap;
 
 const MAX_VISITS_PER_VOYAGE: usize = 5;
 const MAX_ATTEMPTS: usize = 10;
 const MAX_VESSEL_CAPACITY: f64 = 100.0; // Define appropriate capacity value
 
-pub fn construct_initial_solution(
-    context: &Context,
-    rng: &mut impl Rng,
-) -> Solution {
+pub fn construct_initial_solution(context: &Context, rng: &mut impl Rng) -> Solution {
     debug!(target: "operator::initial", "[InitialSolution] Construction started");
     let base_visits = context.problem.generate_visits();
     'outer: for attempt in 0..MAX_ATTEMPTS {
@@ -45,7 +38,13 @@ pub fn construct_initial_solution(
                 }
             }
         }
-        let min_vessel_capacity = context.problem.vessels.iter().map(|v| v.deck_capacity).min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        let min_vessel_capacity = context
+            .problem
+            .vessels
+            .iter()
+            .map(|v| v.deck_capacity)
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
         // === 2. For each day, split visits into voyages ===
         let mut days: Vec<_> = day_to_visits.keys().cloned().collect();
         days.sort_unstable(); // Ensure deterministic order

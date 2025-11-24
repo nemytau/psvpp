@@ -1,9 +1,9 @@
+use crate::operators::traits::DestroyOperator;
+use crate::structs::{context::Context, solution::Solution};
 use log::{debug, info};
 use rand::seq::SliceRandom;
-use rand::RngCore;
 use rand::Rng;
-use crate::structs::{solution::Solution, context::Context};
-use crate::operators::traits::DestroyOperator;
+use rand::RngCore;
 
 pub struct RandomVisitRemovalInVoyages {
     pub xi_min: f64,

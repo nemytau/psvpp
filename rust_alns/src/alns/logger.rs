@@ -1,6 +1,6 @@
-use std::time::{Instant, Duration};
 use std::fs::File;
-use std::io::{Write, BufWriter};
+use std::io::{BufWriter, Write};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct IterationLog {
@@ -29,7 +29,8 @@ impl AlnsLogger {
         }
     }
 
-    pub fn log_iteration(&mut self,
+    pub fn log_iteration(
+        &mut self,
         iteration: usize,
         current_cost: f64,
         best_cost: f64,

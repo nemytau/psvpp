@@ -8,7 +8,12 @@ use rand::Rng;
 /// * `new_cost` - Cost of the new solution (C(s'))
 /// * `temperature` - Current temperature (τ)
 /// * `rng` - Random number generator implementing rand::Rng
-pub fn accept<R: Rng + ?Sized>(current_cost: f64, new_cost: f64, temperature: f64, rng: &mut R) -> bool {
+pub fn accept<R: Rng + ?Sized>(
+    current_cost: f64,
+    new_cost: f64,
+    temperature: f64,
+    rng: &mut R,
+) -> bool {
     if new_cost < current_cost {
         true
     } else {

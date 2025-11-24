@@ -1,14 +1,14 @@
+use crate::operators::traits::DestroyOperator;
+use crate::structs::{context::Context, solution::Solution};
 use log::info;
 use log::{debug, warn};
-use rand::RngCore;
 use rand::Rng;
-use crate::structs::{solution::Solution, context::Context};
-use crate::operators::traits::DestroyOperator;
+use rand::RngCore;
 
 pub struct ShawRemoval {
     pub xi_min: f64,
     pub xi_max: f64,
-    pub p: f64, // determinism parameter
+    pub p: f64,     // determinism parameter
     pub alpha: f64, // weight for travel time
     pub beta: f64,  // weight for arrival time difference
     pub phi: f64,   // weight for load difference
@@ -45,12 +45,20 @@ impl DestroyOperator for ShawRemoval {
         let mut iteration = 0;
         while removed_visit_ids.len() < to_remove && !candidates.is_empty() {
             // For each candidate, compute min relatedness to any already removed
-            let mut relatedness: Vec<(usize, f64)> = candidates.iter().map(|&j| {
-                let r = removed_visit_ids.iter().map(|&i| {
-                    shaw_relatedness(i, j, solution, context, self.alpha, self.beta, self.phi)
-                }).fold(f64::INFINITY, f64::min);
-                (j, r)
-            }).collect();
+            let mut relatedness: Vec<(usize, f64)> = candidates
+                .iter()
+                .map(|&j| {
+                    let r = removed_visit_ids
+                        .iter()
+                        .map(|&i| {
+                            shaw_relatedness(
+                                i, j, solution, context, self.alpha, self.beta, self.phi,
+                            )
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    (j, r)
+                })
+                .collect();
             // Sort by relatedness (lower is more related)
             relatedness.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             // p-deterministic selection
@@ -75,7 +83,15 @@ impl DestroyOperator for ShawRemoval {
 }
 
 // Helper: compute relatedness between two visits
-fn shaw_relatedness(i: usize, j: usize, solution: &Solution, context: &Context, alpha: f64, beta: f64, phi: f64) -> f64 {
+fn shaw_relatedness(
+    i: usize,
+    j: usize,
+    solution: &Solution,
+    context: &Context,
+    alpha: f64,
+    beta: f64,
+    phi: f64,
+) -> f64 {
     // Get visits
     let visit_i = solution.visit(i).expect("Invalid visit id i");
     let visit_j = solution.visit(j).expect("Invalid visit id j");

@@ -2,7 +2,13 @@ pub fn intervals_overlap(start1: f64, end1: f64, start2: f64, end2: f64) -> bool
     start1 < end2 && start2 < end1
 }
 
-pub fn cyclic_intervals_overlap(start1: f64, end1: f64, start2: f64, end2: f64, period: f64) -> bool {
+pub fn cyclic_intervals_overlap(
+    start1: f64,
+    end1: f64,
+    start2: f64,
+    end2: f64,
+    period: f64,
+) -> bool {
     let intervals1 = if end1 > period {
         vec![(start1, period), (0.0, end1 - period)]
     } else {
@@ -42,6 +48,8 @@ mod tests {
         let period = 168.0;
         assert!(cyclic_intervals_overlap(160.0, 208.0, 16.0, 64.0, period)); // overlaps due to wrap
         assert!(cyclic_intervals_overlap(160.0, 208.0, 200.0, 220.0, period)); // overlaps after wrap
-        assert!(!cyclic_intervals_overlap(100.0, 120.0, 130.0, 150.0, period)); // no overlap
+        assert!(!cyclic_intervals_overlap(
+            100.0, 120.0, 130.0, 150.0, period
+        )); // no overlap
     }
 }

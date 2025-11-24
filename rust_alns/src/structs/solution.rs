@@ -1,16 +1,11 @@
-use crate::structs::{
-    visit::Visit,
-    voyage::Voyage,
-    schedule::Schedule,
-    context::Context,
-};
+use crate::structs::{context::Context, schedule::Schedule, visit::Visit, voyage::Voyage};
 use std::cell::RefCell;
 
 #[derive(Clone)]
 pub struct Solution {
     pub voyages: Vec<RefCell<Voyage>>, // All voyages, assigned to vesels
-    _visits: Vec<Visit>, // All visits, including unserved ones (private)
-    pub schedule: Schedule, // Informational class on how voyages are assigned to vessels
+    _visits: Vec<Visit>,               // All visits, including unserved ones (private)
+    pub schedule: Schedule,            // Informational class on how voyages are assigned to vessels
     pub total_cost: f64,
     pub is_feasible: bool,
 }
@@ -36,10 +31,7 @@ impl Solution {
         self.voyages.push(RefCell::new(voyage));
         self.schedule.set_need_update(true);
     }
-    pub fn construct_initial_solution(
-        &mut self,
-        _context: &Context,
-    ) {
+    pub fn construct_initial_solution(&mut self, _context: &Context) {
         // Initialize the solution with a greedy or random approach
         // This is a placeholder for the actual implementation
         // You can call the construct_initial_solution function here
@@ -88,21 +80,38 @@ impl Solution {
     /// Checks if the solution meets all the constraints. Might be incomplete.
     pub fn is_fully_feasible(&mut self, context: &Context) -> bool {
         self.ensure_consistency_updated(context);
-        use itertools::Itertools;
         use crate::structs::constants::HOURS_IN_PERIOD;
         use crate::utils::utils::cyclic_intervals_overlap;
-        let mut vessel_voyages: std::collections::HashMap<usize, Vec<_>> = std::collections::HashMap::new();
+        use itertools::Itertools;
+        let mut vessel_voyages: std::collections::HashMap<usize, Vec<_>> =
+            std::collections::HashMap::new();
         for voyage_cell in &self.voyages {
             let voyage = voyage_cell.borrow();
             if let Some(vessel_id) = voyage.vessel_id {
-                vessel_voyages.entry(vessel_id).or_default().push(voyage.clone());
+                vessel_voyages
+                    .entry(vessel_id)
+                    .or_default()
+                    .push(voyage.clone());
             }
         }
         for (vessel_id, voyages) in &vessel_voyages {
             for (a, b) in voyages.iter().tuple_combinations() {
-                if let (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) = (a.start_time(), a.end_time(), b.start_time(), b.end_time()) {
-                    if cyclic_intervals_overlap(a_start, a_end, b_start, b_end, HOURS_IN_PERIOD as f64) {
-                        log::warn!("Infeasible: Vessel {} has overlapping voyages {} and {}", vessel_id, a.id, b.id);
+                if let (Some(a_start), Some(a_end), Some(b_start), Some(b_end)) =
+                    (a.start_time(), a.end_time(), b.start_time(), b.end_time())
+                {
+                    if cyclic_intervals_overlap(
+                        a_start,
+                        a_end,
+                        b_start,
+                        b_end,
+                        HOURS_IN_PERIOD as f64,
+                    ) {
+                        log::warn!(
+                            "Infeasible: Vessel {} has overlapping voyages {} and {}",
+                            vessel_id,
+                            a.id,
+                            b.id
+                        );
                         return false;
                     }
                 }
@@ -126,21 +135,33 @@ impl Solution {
             let voyage = voyage_cell.borrow();
             let voyage_id = voyage.id;
             if !self.schedule.voyage_start_times.contains_key(&voyage_id) {
-                log::warn!("Infeasible: Voyage {} missing from schedule.voyage_start_times", voyage_id);
+                log::warn!(
+                    "Infeasible: Voyage {} missing from schedule.voyage_start_times",
+                    voyage_id
+                );
                 return false;
             }
             if !self.schedule.voyage_end_times.contains_key(&voyage_id) {
-                log::warn!("Infeasible: Voyage {} missing from schedule.voyage_end_times", voyage_id);
+                log::warn!(
+                    "Infeasible: Voyage {} missing from schedule.voyage_end_times",
+                    voyage_id
+                );
                 return false;
             }
             let vessel_day_key = (voyage.vessel_id.unwrap(), voyage.departure_day.unwrap());
-            if let Some(&scheduled_voyage_id) = self.schedule.vessel_day_voyages.get(&vessel_day_key) {
+            if let Some(&scheduled_voyage_id) =
+                self.schedule.vessel_day_voyages.get(&vessel_day_key)
+            {
                 if scheduled_voyage_id != voyage_id {
                     log::warn!("Infeasible: Schedule vessel_day_voyages for vessel {:?} day {:?} points to voyage {} but expected {}", voyage.vessel_id, voyage.departure_day, scheduled_voyage_id, voyage_id);
                     return false;
                 }
             } else {
-                log::warn!("Infeasible: No entry in schedule.vessel_day_voyages for vessel {:?} day {:?}", voyage.vessel_id, voyage.departure_day);
+                log::warn!(
+                    "Infeasible: No entry in schedule.vessel_day_voyages for vessel {:?} day {:?}",
+                    voyage.vessel_id,
+                    voyage.departure_day
+                );
                 return false;
             }
             for visit_id in &voyage.visit_ids {
@@ -166,23 +187,24 @@ impl Solution {
             };
             let spread = installation.departure_spread as i32;
             let period = DAYS_IN_PERIOD as i32;
-            
+
             // Check all pairs of visits to this installation
-            let departure_visits: Vec<_> = departures.iter()
+            let departure_visits: Vec<_> = departures
+                .iter()
                 .filter_map(|&visit_id| self.visit(visit_id))
                 .filter_map(|visit| visit.departure_day.map(|day| (visit.id(), day)))
                 .collect();
-            
+
             for (i, (visit_a_id, day_a)) in departure_visits.iter().enumerate() {
                 for (visit_b_id, day_b) in departure_visits.iter().skip(i + 1) {
                     // Calculate cyclic difference between departure days
-                    let diff = (*day_a as i32 - *day_b as i32).abs().min(
-                        period - (*day_a as i32 - *day_b as i32).abs()
-                    );
+                    let diff = (*day_a as i32 - *day_b as i32)
+                        .abs()
+                        .min(period - (*day_a as i32 - *day_b as i32).abs());
                     if diff < spread {
                         log::warn!("Infeasible: Visits {} and {} to installation {} violate spread constraint (days {} and {}, diff={}, required spread={})", 
                                 visit_a_id, visit_b_id, installation_id, day_a, day_b, diff, spread);
-                        
+
                         // Temporary debug output: show all voyages with starting days and route sequences
                         log::warn!("=== DEBUG: All voyages in solution ===");
                         for voyage_cell in &self.voyages {
@@ -190,7 +212,9 @@ impl Solution {
                             if !voyage.visit_ids.is_empty() {
                                 let vessel_id = voyage.vessel_id.unwrap_or(999);
                                 let departure_day = voyage.departure_day.unwrap_or(999);
-                                let route_sequence: Vec<String> = voyage.visit_ids.iter()
+                                let route_sequence: Vec<String> = voyage
+                                    .visit_ids
+                                    .iter()
                                     .map(|&vid| {
                                         if let Some(visit) = self.visit(vid) {
                                             format!("V{}(I{})", vid, visit.installation_id())
@@ -199,12 +223,17 @@ impl Solution {
                                         }
                                     })
                                     .collect();
-                                log::warn!("Voyage {}: Vessel={}, Day={}, Route=[{}]", 
-                                          voyage.id, vessel_id, departure_day, route_sequence.join(" -> "));
+                                log::warn!(
+                                    "Voyage {}: Vessel={}, Day={}, Route=[{}]",
+                                    voyage.id,
+                                    vessel_id,
+                                    departure_day,
+                                    route_sequence.join(" -> ")
+                                );
                             }
                         }
                         log::warn!("=== END DEBUG OUTPUT ===");
-                        
+
                         return false;
                     }
                 }
@@ -224,7 +253,12 @@ impl Solution {
         let after = self.voyages.len();
         let removed = before - after;
         if removed > 0 {
-            log::debug!("Removed {} empty voyages from solution ({} -> {})", removed, before, after);
+            log::debug!(
+                "Removed {} empty voyages from solution ({} -> {})",
+                removed,
+                before,
+                after
+            );
         } else {
             log::debug!("No empty voyages removed. Total voyages: {}", after);
         }
@@ -245,7 +279,11 @@ impl Solution {
             }
         }
         if route_updates > 0 || state_updates > 0 {
-            log::debug!("Updated {} voyage routes and {} voyage states", route_updates, state_updates);
+            log::debug!(
+                "Updated {} voyage routes and {} voyage states",
+                route_updates,
+                state_updates
+            );
         } else {
             log::debug!("No voyage route/state updates needed");
         }
@@ -282,7 +320,7 @@ impl Solution {
     pub fn get_unassigned_visits(&self) -> Vec<&Visit> {
         self._visits.iter().filter(|v| !v.is_assigned).collect()
     }
-    
+
     /// Returns the top-k cheapest feasible insertion costs for a visit.
     ///
     /// # Schedule Consistency
@@ -304,7 +342,9 @@ impl Solution {
             if !self.visit_insertion_is_possible(context, visit, voyage.id) {
                 continue;
             }
-            let tsp_result = context.tsp_solver.evaluate_greedy_insertion(&*voyage, visit);
+            let tsp_result = context
+                .tsp_solver
+                .evaluate_greedy_insertion(&*voyage, visit);
             let new_start = voyage.start_time().unwrap_or(0.0);
             let new_end = tsp_result.end_time;
             let vessel_id = match voyage.vessel_id {
@@ -337,7 +377,11 @@ impl Solution {
         };
         let voyage = match self.voyages.iter().find_map(|v| {
             let v = v.borrow();
-            if v.id == voyage_id { Some(v) } else { None }
+            if v.id == voyage_id {
+                Some(v)
+            } else {
+                None
+            }
         }) {
             Some(v) => v,
             None => return false,
@@ -347,7 +391,11 @@ impl Solution {
             Some(day) => day,
             None => return false, // Can't check spread if no departure day
         };
-        if voyage.visit_ids.iter().any(|&vid| self._visits[vid].installation_id() == installation_id) {
+        if voyage
+            .visit_ids
+            .iter()
+            .any(|&vid| self._visits[vid].installation_id() == installation_id)
+        {
             return false;
         }
         // Get the installation to check spread
@@ -358,15 +406,21 @@ impl Solution {
         let spread = installation.departure_spread as i32;
         let period = crate::structs::constants::DAYS_IN_PERIOD as i32;
         // Check all other visits to this installation
-        if let Some(departures) = self.schedule.departures_by_installation.get(&installation_id) {
+        if let Some(departures) = self
+            .schedule
+            .departures_by_installation
+            .get(&installation_id)
+        {
             for &other_visit_id in departures {
-                if other_visit_id == visit_id { continue; }
+                if other_visit_id == visit_id {
+                    continue;
+                }
                 if let Some(other_visit) = self.visit(other_visit_id) {
                     if let Some(other_day) = other_visit.departure_day {
                         // Cyclic difference
-                        let diff = (departure_day as i32 - other_day as i32).abs().min(
-                            period - (departure_day as i32 - other_day as i32).abs()
-                        );
+                        let diff = (departure_day as i32 - other_day as i32)
+                            .abs()
+                            .min(period - (departure_day as i32 - other_day as i32).abs());
                         if diff < spread {
                             return false;
                         }
@@ -386,7 +440,11 @@ impl Solution {
         };
         // TODO: Voyage's load is calculated from scratch, not from the current state. It prevents problems, but it is not the place to do.
         // I might change it to first check if it is updated, and if not, calculate it.
-        let current_load: u32 = voyage.visit_ids.iter().map(|vid| self._visits[*vid].demand()).sum();
+        let current_load: u32 = voyage
+            .visit_ids
+            .iter()
+            .map(|vid| self._visits[*vid].demand())
+            .sum();
         let visit_demand = visit.demand();
         if (current_load + visit_demand) as f64 > vessel.deck_capacity {
             return false;
@@ -408,12 +466,15 @@ impl Solution {
 
         {
             let mut voyage = voyage_cell.borrow_mut();
-            let result = context.tsp_solver.evaluate_greedy_insertion(&*voyage, visit_id);
+            let result = context
+                .tsp_solver
+                .evaluate_greedy_insertion(&*voyage, visit_id);
             voyage.apply_tsp_result(result);
             // Update the voyage load after insertion
             self.update_voyage_load(&mut voyage);
         }
-        let visit = self.visit_mut(visit_id)
+        let visit = self
+            .visit_mut(visit_id)
             .ok_or_else(|| format!("Visit {} not found", visit_id))?;
         visit.assign_to_voyage(voyage_id);
         self.schedule.set_need_update(true);
@@ -443,14 +504,13 @@ impl Solution {
 
     pub fn update_voyage_load(&self, voyage: &mut Voyage) {
         let mut total_load = 0;
-        for visit_id in &voyage.visit_ids { 
+        for visit_id in &voyage.visit_ids {
             if let Some(visit) = self._visits.get(*visit_id) {
                 total_load += visit.demand();
             }
         }
         voyage.finalize_state(total_load);
     }
-    
 
     /// Returns the number of visits in the solution.
     pub fn visit_count(&self) -> usize {
@@ -519,11 +579,18 @@ impl Solution {
         }
         // For all other vessels, fill their free days with empty voyages
         for (vessel_id, &used) in vessel_has_voyage.iter().enumerate() {
-            if !used { continue; } // skip the newly added idle vessel (already filled)
+            if !used {
+                continue;
+            } // skip the newly added idle vessel (already filled)
             let mut assigned_days = std::collections::HashSet::new();
             for day in 0..DAYS_IN_PERIOD {
                 let day_usize = day as usize;
-                if self.schedule.vessel_day_voyages.get(&(vessel_id, day_usize)).is_some() {
+                if self
+                    .schedule
+                    .vessel_day_voyages
+                    .get(&(vessel_id, day_usize))
+                    .is_some()
+                {
                     assigned_days.insert(day_usize);
                 }
             }
@@ -562,7 +629,11 @@ impl Solution {
         // Try to find the voyage in the current solution
         if let Some(voyage) = self.voyages.iter().find_map(|v| {
             let v = v.borrow();
-            if v.id == voyage_id { Some(v) } else { None }
+            if v.id == voyage_id {
+                Some(v)
+            } else {
+                None
+            }
         }) {
             return Self::is_empty_voyage(&voyage);
         }
@@ -570,7 +641,13 @@ impl Solution {
     }
 
     /// Checks for overlaps with real (non-empty) voyages only.
-    pub fn overlaps_with_real_voyages(&self, vessel_id: usize, voyage_id: usize, start_time: f64, end_time: f64) -> bool {
+    pub fn overlaps_with_real_voyages(
+        &self,
+        vessel_id: usize,
+        voyage_id: usize,
+        start_time: f64,
+        end_time: f64,
+    ) -> bool {
         self.schedule.overlaps_with_other_voyages(
             vessel_id,
             voyage_id,
@@ -620,11 +697,18 @@ impl Solution {
         }
         // For all other vessels, fill their free days with empty voyages
         for (vessel_id, &used) in vessel_has_voyage.iter().enumerate() {
-            if !used { continue; } // skip the newly added idle vessel (already filled)
+            if !used {
+                continue;
+            } // skip the newly added idle vessel (already filled)
             let mut assigned_days = std::collections::HashSet::new();
             for day in 0..DAYS_IN_PERIOD {
                 let day_usize = day as usize;
-                if self.schedule.vessel_day_voyages.get(&(vessel_id, day_usize)).is_some() {
+                if self
+                    .schedule
+                    .vessel_day_voyages
+                    .get(&(vessel_id, day_usize))
+                    .is_some()
+                {
                     assigned_days.insert(day_usize);
                 }
             }
@@ -665,26 +749,49 @@ impl Solution {
         for voyage_cell in &self.voyages {
             let voyage = voyage_cell.borrow();
             // Only count non-empty voyages
-            if voyage.visit_ids.is_empty() { continue; }
-            let vessel_id = match voyage.vessel_id { Some(id) => id, None => continue };
+            if voyage.visit_ids.is_empty() {
+                continue;
+            }
+            let vessel_id = match voyage.vessel_id {
+                Some(id) => id,
+                None => continue,
+            };
             vessels_used.insert(vessel_id);
-            let vessel = match context.problem.vessels.get(vessel_id) { Some(v) => v, None => continue };
+            let vessel = match context.problem.vessels.get(vessel_id) {
+                Some(v) => v,
+                None => continue,
+            };
             let sailing_time = voyage.sailing_time.unwrap_or(0.0);
             let waiting_time = voyage.waiting_time.unwrap_or(0.0);
             // Service time: sum of service times for all visits in this voyage
-            let service_time: f64 = voyage.visit_ids.iter()
+            let service_time: f64 = voyage
+                .visit_ids
+                .iter()
                 .filter_map(|&vid| self._visits.get(vid))
-                .map(|v| context.problem.installations.get(v.installation_id()).map(|inst| inst.get_service_time()).unwrap_or(0.0))
+                .map(|v| {
+                    context
+                        .problem
+                        .installations
+                        .get(v.installation_id())
+                        .map(|inst| inst.get_service_time())
+                        .unwrap_or(0.0)
+                })
                 .sum();
-            variable_cost += sailing_time * vessel.fcs * fuel_cost;
-            variable_cost += (waiting_time + service_time) * vessel.fcw * fuel_cost;
+            let sailing_fuel = sailing_time * vessel.fcs;
+            let idle_fuel = (waiting_time + service_time) * vessel.fcw;
+            variable_cost += (sailing_fuel + idle_fuel) * fuel_cost;
         }
         for &vessel_id in &vessels_used {
             if let Some(vessel) = context.problem.vessels.get(vessel_id) {
                 fixed_cost += vessel.cost;
             }
         }
-        log::debug!("Cost calculation: fixed_cost = {:.2}, variable_cost = {:.2}, total = {:.2}", fixed_cost, variable_cost, fixed_cost + variable_cost);
+        log::debug!(
+            "Cost calculation: fixed_cost = {:.2}, variable_cost = {:.2}, total = {:.2}",
+            fixed_cost,
+            variable_cost,
+            fixed_cost + variable_cost
+        );
         fixed_cost + variable_cost
     }
 
@@ -703,30 +810,64 @@ impl Solution {
             if voyage.visit_ids.contains(&visit_id) {
                 let mut new_voyage = voyage.clone();
                 new_voyage.visit_ids.retain(|&id| id != visit_id);
-                if new_voyage.visit_ids.is_empty() { continue; }
-                let vessel_id = match new_voyage.vessel_id { Some(id) => id, None => continue };
+                if new_voyage.visit_ids.is_empty() {
+                    continue;
+                }
+                let vessel_id = match new_voyage.vessel_id {
+                    Some(id) => id,
+                    None => continue,
+                };
                 *vessel_usage.entry(vessel_id).or_insert(0) += 1;
-                let vessel = match context.problem.vessels.get(vessel_id) { Some(v) => v, None => continue };
+                let vessel = match context.problem.vessels.get(vessel_id) {
+                    Some(v) => v,
+                    None => continue,
+                };
                 let sailing_time = new_voyage.sailing_time.unwrap_or(0.0);
                 let waiting_time = new_voyage.waiting_time.unwrap_or(0.0);
-                let service_time: f64 = new_voyage.visit_ids.iter()
+                let service_time: f64 = new_voyage
+                    .visit_ids
+                    .iter()
                     .filter_map(|&vid| self._visits.get(vid))
-                    .map(|v| context.problem.installations.get(v.installation_id()).map(|inst| inst.get_service_time()).unwrap_or(0.0))
+                    .map(|v| {
+                        context
+                            .problem
+                            .installations
+                            .get(v.installation_id())
+                            .map(|inst| inst.get_service_time())
+                            .unwrap_or(0.0)
+                    })
                     .sum();
-                variable_cost += sailing_time * vessel.fcs * fuel_cost;
-                variable_cost += (waiting_time + service_time) * vessel.fcw * fuel_cost;
+                let sailing_fuel = sailing_time * vessel.fcs;
+                let idle_fuel = (waiting_time + service_time) * vessel.fcw;
+                variable_cost += (sailing_fuel + idle_fuel) * fuel_cost;
             } else if !voyage.visit_ids.is_empty() {
-                let vessel_id = match voyage.vessel_id { Some(id) => id, None => continue };
+                let vessel_id = match voyage.vessel_id {
+                    Some(id) => id,
+                    None => continue,
+                };
                 *vessel_usage.entry(vessel_id).or_insert(0) += 1;
-                let vessel = match context.problem.vessels.get(vessel_id) { Some(v) => v, None => continue };
+                let vessel = match context.problem.vessels.get(vessel_id) {
+                    Some(v) => v,
+                    None => continue,
+                };
                 let sailing_time = voyage.sailing_time.unwrap_or(0.0);
                 let waiting_time = voyage.waiting_time.unwrap_or(0.0);
-                let service_time: f64 = voyage.visit_ids.iter()
+                let service_time: f64 = voyage
+                    .visit_ids
+                    .iter()
                     .filter_map(|&vid| self._visits.get(vid))
-                    .map(|v| context.problem.installations.get(v.installation_id()).map(|inst| inst.get_service_time()).unwrap_or(0.0))
+                    .map(|v| {
+                        context
+                            .problem
+                            .installations
+                            .get(v.installation_id())
+                            .map(|inst| inst.get_service_time())
+                            .unwrap_or(0.0)
+                    })
                     .sum();
-                variable_cost += sailing_time * vessel.fcs * fuel_cost;
-                variable_cost += (waiting_time + service_time) * vessel.fcw * fuel_cost;
+                let sailing_fuel = sailing_time * vessel.fcs;
+                let idle_fuel = (waiting_time + service_time) * vessel.fcw;
+                variable_cost += (sailing_fuel + idle_fuel) * fuel_cost;
             }
         }
         for (&vessel_id, &count) in &vessel_usage {

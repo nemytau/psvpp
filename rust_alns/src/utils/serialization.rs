@@ -97,11 +97,7 @@ fn advance_time(current: f64, delta: f64) -> f64 {
     }
 }
 
-pub fn dump_explicit_schedule_to_json(
-    solution: &Solution,
-    context: &Context,
-    output_path: &str,
-) {
+pub fn dump_explicit_schedule_to_json(solution: &Solution, context: &Context, output_path: &str) {
     let mut stages = Vec::new();
     let base = &context.problem.base;
     let vessels = &context.problem.vessels;
@@ -114,7 +110,8 @@ pub fn dump_explicit_schedule_to_json(
             .iter()
             .find(|v| v.id == voyage.vessel_id.unwrap())
             .unwrap();
-        let visits = voyage.visit_ids
+        let visits = voyage
+            .visit_ids
             .iter()
             .filter_map(|&idx| solution.visit(idx).cloned())
             .collect::<Vec<_>>();
@@ -215,15 +212,24 @@ pub fn dump_explicit_schedule_to_json(
     file.write_all(json.as_bytes()).unwrap();
 }
 
-pub fn dump_schedule_to_json(solution: &Solution, vessels: &[Vessel], output_path: &str, context: &Context) {
+pub fn dump_schedule_to_json(
+    solution: &Solution,
+    vessels: &[Vessel],
+    output_path: &str,
+    context: &Context,
+) {
     let mut viz_voyages = Vec::new();
 
     for voyage_cell in &solution.voyages {
         let voyage = voyage_cell.borrow();
         let vessel_id = voyage.vessel_id.expect("Voyage missing vessel ID");
-        let vessel = vessels.iter().find(|v| v.id == vessel_id).expect("Vessel not found");
+        let vessel = vessels
+            .iter()
+            .find(|v| v.id == vessel_id)
+            .expect("Vessel not found");
 
-        let route = voyage.visit_ids
+        let route = voyage
+            .visit_ids
             .iter()
             .filter_map(|&idx| solution.visit(idx).map(|v| v.installation_id()))
             .map(|id| id.to_string())
@@ -256,11 +262,15 @@ pub fn dump_schedule_to_json(solution: &Solution, vessels: &[Vessel], output_pat
             });
         }
     }
-    
+
     // Calculate cost with context, not just solution.total_cost
     let cost = solution.cost_with_context(context);
-    let json_schedule = VizSchedule { voyages: viz_voyages, cost };
+    let json_schedule = VizSchedule {
+        voyages: viz_voyages,
+        cost,
+    };
     let json = serde_json::to_string_pretty(&json_schedule).expect("Failed to serialize");
     let mut file = File::create(output_path).expect("Failed to create file");
-    file.write_all(json.as_bytes()).expect("Failed to write to file");
+    file.write_all(json.as_bytes())
+        .expect("Failed to write to file");
 }

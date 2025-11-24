@@ -1,4 +1,4 @@
-use crate::operators::traits::{DestroyOperator, RepairOperator, ImprovementOperator};
+use crate::operators::traits::{DestroyOperator, ImprovementOperator, RepairOperator};
 
 pub struct OperatorRegistry {
     pub destroy_operators: Vec<Box<dyn DestroyOperator>>,

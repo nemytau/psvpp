@@ -1,9 +1,9 @@
 // Implements the voyage number reduction improvement operator
 // See: user prompt for algorithm description
 
-use rand::RngCore;
-use crate::structs::{solution::Solution, context::Context};
 use crate::operators::traits::ImprovementOperator;
+use crate::structs::{context::Context, solution::Solution};
+use rand::RngCore;
 
 pub struct VoyageNumberReduction;
 
@@ -17,7 +17,9 @@ impl ImprovementOperator for VoyageNumberReduction {
             let mut any_found = false;
             for voyage_cell in &solution.voyages {
                 let voyage = voyage_cell.borrow();
-                if voyage.visit_ids.is_empty() { continue; }
+                if voyage.visit_ids.is_empty() {
+                    continue;
+                }
                 let voyage_id = voyage.id;
                 let visit_ids = voyage.visit_ids.clone();
                 drop(voyage);
@@ -35,11 +37,16 @@ impl ImprovementOperator for VoyageNumberReduction {
                     for voyage_cell2 in &temp_solution.voyages {
                         let v2 = voyage_cell2.borrow();
                         let v2_id = v2.id;
-                        if v2_id == voyage_id { continue; }
+                        if v2_id == voyage_id {
+                            continue;
+                        }
                         if temp_solution.visit_insertion_is_possible(context, visit_id, v2_id) {
-                            let costs = temp_solution.top_k_visit_insertion_costs(context, visit_id, 1);
+                            let costs =
+                                temp_solution.top_k_visit_insertion_costs(context, visit_id, 1);
                             if let Some((_, cost)) = costs.first() {
-                                if best_insertion.is_none() || *cost < best_insertion.as_ref().unwrap().1 {
+                                if best_insertion.is_none()
+                                    || *cost < best_insertion.as_ref().unwrap().1
+                                {
                                     best_insertion = Some((v2_id, *cost));
                                 }
                             }
@@ -47,7 +54,10 @@ impl ImprovementOperator for VoyageNumberReduction {
                     }
                     if let Some((target_voyage, _)) = best_insertion {
                         // Insert visit into target voyage
-                        if temp_solution.greedy_insert_visit(visit_id, target_voyage, context).is_ok() {
+                        if temp_solution
+                            .greedy_insert_visit(visit_id, target_voyage, context)
+                            .is_ok()
+                        {
                             relocations.push((visit_id, target_voyage));
                         } else {
                             feasible = false;
@@ -61,14 +71,17 @@ impl ImprovementOperator for VoyageNumberReduction {
                 if feasible {
                     any_found = true;
                     temp_solution.ensure_consistency_updated(context);
-                    let cost_increase = temp_solution.cost_with_context(context) - solution.cost_with_context(context);
+                    let cost_increase = temp_solution.cost_with_context(context)
+                        - solution.cost_with_context(context);
                     if best_voyage.is_none() || cost_increase < best_voyage.as_ref().unwrap().1 {
                         best_voyage = Some((voyage_id, cost_increase, relocations));
                     }
                 }
             }
             // 2. If no voyage can be removed, break
-            if !any_found || best_voyage.is_none() { break; }
+            if !any_found || best_voyage.is_none() {
+                break;
+            }
             // 3. Apply the best relocation to the real solution
             let (_voyage_id, _cost_increase, relocations) = best_voyage.unwrap();
             // Remove all visits from the voyage
