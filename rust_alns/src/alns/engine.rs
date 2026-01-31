@@ -1,5 +1,6 @@
 use crate::alns::acceptance;
 use crate::alns::context::ALNSContext;
+use crate::operators::improvement::fleet_and_cost_reduction::FleetAndCostReduction;
 use crate::operators::improvement::voyage_number_reduction::VoyageNumberReduction;
 use crate::operators::registry::OperatorRegistry;
 use crate::structs::context::Context;
@@ -349,6 +350,7 @@ impl ALNSEngine {
         ));
 
         registry.add_improvement_operator(Box::new(VoyageNumberReduction));
+        registry.add_improvement_operator(Box::new(FleetAndCostReduction));
     }
 
     /// Get operator information for external interfaces
@@ -365,7 +367,10 @@ impl ALNSEngine {
             "k_regret_3".to_string(),
         ];
 
-        let improvement_operators = vec!["voyage_number_reduction".to_string()];
+        let improvement_operators = vec![
+            "voyage_number_reduction".to_string(),
+            "fleet_and_cost_reduction".to_string(),
+        ];
 
         (destroy_operators, repair_operators, improvement_operators)
     }
@@ -1033,10 +1038,11 @@ fn summarize_utilization(values: &[f64]) -> (f64, f64, f64) {
 
 /// Enable file logging for ALNS operations
 pub fn enable_file_logging(log_path: &str) -> Result<(), String> {
+    use log::LevelFilter;
     use std::fs::OpenOptions;
     use std::io::Write;
 
-    let target = Box::new(
+    let log_pipe = Box::new(
         OpenOptions::new()
             .create(true)
             .write(true)
@@ -1045,8 +1051,10 @@ pub fn enable_file_logging(log_path: &str) -> Result<(), String> {
             .map_err(|e| format!("Failed to open log file {}: {}", log_path, e))?,
     );
 
-    env_logger::Builder::from_default_env()
-        .target(env_logger::Target::Pipe(target))
+    let mut builder = env_logger::Builder::from_default_env();
+    builder.filter_level(LevelFilter::Info);
+    builder.target(env_logger::Target::Pipe(log_pipe));
+    builder
         .try_init()
         .map_err(|e| format!("Logger already initialized or configuration error: {}", e))?;
 
@@ -1055,8 +1063,12 @@ pub fn enable_file_logging(log_path: &str) -> Result<(), String> {
 
 /// Enable console logging for ALNS operations
 pub fn enable_console_logging() -> Result<(), String> {
-    env_logger::Builder::from_default_env()
-        .target(env_logger::Target::Stdout)
+    use log::LevelFilter;
+
+    let mut builder = env_logger::Builder::from_default_env();
+    builder.filter_level(LevelFilter::Info);
+    builder.target(env_logger::Target::Stdout);
+    builder
         .try_init()
         .map_err(|e| format!("Logger already initialized or configuration error: {}", e))
 }

@@ -61,6 +61,11 @@ with Reinforcement Learning for maritime logistics optimization.
 - `tests/test_validation.py` - Comprehensive validation
 - `tests/integration/` - Integration tests with real instances
 
+### Rust ALNS diagnostics
+
+- Run `cargo test --package rust_alns --test fleet_and_cost_reduction -- --nocapture` to regenerate the before/after schedule snapshots written to [rust_alns/output/tests/fleet_reduction_before.json](rust_alns/output/tests/fleet_reduction_before.json) and [rust_alns/output/tests/fleet_reduction_after.json](rust_alns/output/tests/fleet_reduction_after.json).
+- Use `python tests/plot_fleet_reduction.py` (or pass `--output report.html`) to render the comparison chart defined in [tests/plot_fleet_reduction.py](tests/plot_fleet_reduction.py).
+
 📋 **[Full Testing Guide](docs/DEVELOPMENT.md#-testing-procedures)**
 
 ## 🎯 Components

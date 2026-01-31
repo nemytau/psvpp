@@ -1,14 +1,11 @@
 use crate::alns::engine::{
     compute_solution_structure_metrics, ALNSEngine, ALNSEngineSnapshot, ALNSMetrics,
 };
-use crate::operators::registry::OperatorRegistry;
-use crate::operators::traits::{DestroyOperator, RepairOperator};
-use crate::structs::{context::Context, solution::Solution};
+use crate::utils::serialization::dump_schedule_to_json;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // Global flag to track if logging has been initialized for Python interface
@@ -61,7 +58,10 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         "repair_success_rates",
         PyList::new(py, metrics.repair_success_rates.clone()),
     )?;
-    solution_dict.set_item("recent_rewards", PyList::new(py, metrics.recent_rewards.clone()))?;
+    solution_dict.set_item(
+        "recent_rewards",
+        PyList::new(py, metrics.recent_rewards.clone()),
+    )?;
     dict.set_item("solution_metrics", solution_dict)?;
     dict.set_item("accepted", metrics.accepted)?;
     dict.set_item("is_new_best", metrics.is_new_best)?;
@@ -124,8 +124,14 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
 
     dict.set_item("destroy_removed_requests", metrics.destroy_removed_requests)?;
     dict.set_item("repair_inserted_requests", metrics.repair_inserted_requests)?;
-    dict.set_item("destroy_weights", PyList::new(py, metrics.destroy_weights.clone()))?;
-    dict.set_item("repair_weights", PyList::new(py, metrics.repair_weights.clone()))?;
+    dict.set_item(
+        "destroy_weights",
+        PyList::new(py, metrics.destroy_weights.clone()),
+    )?;
+    dict.set_item(
+        "repair_weights",
+        PyList::new(py, metrics.repair_weights.clone()),
+    )?;
     dict.set_item("elapsed_ms", metrics.elapsed_ms)?;
     Ok(dict.into())
 }
@@ -254,6 +260,34 @@ impl RustALNSInterface {
         self.extract_solution_metrics(py)
     }
 
+    fn dump_current_solution(&self, path: &str) -> PyResult<()> {
+        let engine = self
+            .engine
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
+
+        if let Some(parent) = Path::new(path).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    PyRuntimeError::new_err(format!(
+                        "Failed to create snapshot directory {}: {}",
+                        parent.display(),
+                        e
+                    ))
+                })?;
+            }
+        }
+
+        dump_schedule_to_json(
+            &engine.current_solution,
+            &engine.context.problem.vessels,
+            path,
+            &engine.context,
+        );
+
+        Ok(())
+    }
+
     #[pyo3(signature = (
         iteration,
         destroy_operator_idx=None,
@@ -318,6 +352,71 @@ impl RustALNSInterface {
         let metrics = engine
             .run_improvement_only(iteration, improvement_operator_idx)
             .map_err(|e| PyRuntimeError::new_err(e))?;
+
+        metrics_to_pydict(py, &metrics)
+    }
+
+    #[pyo3(signature = (iteration, improvement_operator_idx, before_path=None, after_path=None))]
+    fn execute_improvement_with_snapshots(
+        &mut self,
+        py: Python,
+        iteration: usize,
+        improvement_operator_idx: usize,
+        before_path: Option<&str>,
+        after_path: Option<&str>,
+    ) -> PyResult<PyObject> {
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
+
+        let solution_before = engine.current_solution.clone();
+
+        let metrics = engine
+            .run_improvement_only(iteration, improvement_operator_idx)
+            .map_err(|e| PyRuntimeError::new_err(e))?;
+
+        if let Some(path) = before_path {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        PyRuntimeError::new_err(format!(
+                            "Failed to create snapshot directory {}: {}",
+                            parent.display(),
+                            e
+                        ))
+                    })?;
+                }
+            }
+
+            dump_schedule_to_json(
+                &solution_before,
+                &engine.context.problem.vessels,
+                path,
+                &engine.context,
+            );
+        }
+
+        if let Some(path) = after_path {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        PyRuntimeError::new_err(format!(
+                            "Failed to create snapshot directory {}: {}",
+                            parent.display(),
+                            e
+                        ))
+                    })?;
+                }
+            }
+
+            dump_schedule_to_json(
+                &engine.current_solution,
+                &engine.context.problem.vessels,
+                path,
+                &engine.context,
+            );
+        }
 
         metrics_to_pydict(py, &metrics)
     }

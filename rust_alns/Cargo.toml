@@ -5,7 +5,7 @@ edition = "2021"
 
 [lib]
 name = "rust_alns_py"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 csv = "1.1"
