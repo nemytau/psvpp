@@ -66,6 +66,7 @@ with Reinforcement Learning for maritime logistics optimization.
 - Run `cargo test --package rust_alns --test fleet_and_cost_reduction -- --nocapture` to regenerate the before/after schedule snapshots written to [rust_alns/output/tests/fleet_reduction_before.json](rust_alns/output/tests/fleet_reduction_before.json) and [rust_alns/output/tests/fleet_reduction_after.json](rust_alns/output/tests/fleet_reduction_after.json).
 - Use `python tests/plot_fleet_reduction.py` (or pass `--output report.html`) to render the comparison chart defined in [tests/plot_fleet_reduction.py](tests/plot_fleet_reduction.py).
 - Run `python tests/run_deep_relocation.py --limit 10 --seed 0` to exercise destroy+repair plus deep relocation across the first ten processed datasets, writing per-case snapshots and plots under [rust_alns/output/python/deep_relocation](rust_alns/output/python/deep_relocation).
+- Run `python tests/run_deep_swap.py --limit 10 --seed 0` to evaluate the deep swap operator with identical destroy/repair preparation, storing snapshots and Plotly reports under [rust_alns/output/python/deep_swap](rust_alns/output/python/deep_swap).
 
 📋 **[Full Testing Guide](docs/DEVELOPMENT.md#-testing-procedures)**
 

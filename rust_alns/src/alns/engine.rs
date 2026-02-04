@@ -1,6 +1,7 @@
 use crate::alns::acceptance;
 use crate::alns::context::ALNSContext;
 use crate::operators::improvement::deep_relocation::DeepRelocation;
+use crate::operators::improvement::deep_swap::DeepSwap;
 use crate::operators::improvement::fleet_and_cost_reduction::FleetAndCostReduction;
 use crate::operators::improvement::voyage_number_reduction::VoyageNumberReduction;
 use crate::operators::registry::OperatorRegistry;
@@ -353,6 +354,7 @@ impl ALNSEngine {
         registry.add_improvement_operator(Box::new(VoyageNumberReduction));
         registry.add_improvement_operator(Box::new(FleetAndCostReduction));
         registry.add_improvement_operator(Box::new(DeepRelocation));
+        registry.add_improvement_operator(Box::new(DeepSwap));
     }
 
     /// Get operator information for external interfaces
@@ -373,6 +375,7 @@ impl ALNSEngine {
             "voyage_number_reduction".to_string(),
             "fleet_and_cost_reduction".to_string(),
             "deep_relocation".to_string(),
+            "deep_swap".to_string(),
         ];
 
         (destroy_operators, repair_operators, improvement_operators)
