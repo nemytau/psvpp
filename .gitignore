@@ -154,3 +154,6 @@ logs/ppo_alns/
 logs/
 runs/
 models/
+
+# Rust ALNS generated artefacts
+rust_alns/output/
