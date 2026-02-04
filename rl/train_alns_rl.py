@@ -9,12 +9,17 @@ against a random baseline using shared problem samples.
 from __future__ import annotations
 
 import csv
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+LOGGER = logging.getLogger("psvpp.rl")
+LOG_PREFIX = "[RL]"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -27,25 +32,25 @@ try:
     from stable_baselines3.common.evaluation import evaluate_policy
     from stable_baselines3.common.logger import configure
     from stable_baselines3.common.vec_env import DummyVecEnv
-    print("[OK] Stable-Baselines3 imported successfully")
+    LOGGER.info("%s Stable-Baselines3 imported successfully", LOG_PREFIX)
 except ImportError as e:  # pragma: no cover
-    print(f"[ERROR] Stable-Baselines3 not found: {e}")
-    print("Please install with: pip install stable-baselines3[extra]")
+    LOGGER.error("%s Stable-Baselines3 not found: %s", LOG_PREFIX, e)
+    LOGGER.error("%s Please install with: pip install stable-baselines3[extra]", LOG_PREFIX)
     raise
 
 try:
     import gymnasium as gym  # noqa: F401
-    print("[OK] Gymnasium imported successfully")
+    LOGGER.info("%s Gymnasium imported successfully", LOG_PREFIX)
 except ImportError as e:  # pragma: no cover
-    print(f"[ERROR] Gymnasium not found: {e}")
-    print("Please install with: pip install gymnasium")
+    LOGGER.error("%s Gymnasium not found: %s", LOG_PREFIX, e)
+    LOGGER.error("%s Please install with: pip install gymnasium", LOG_PREFIX)
     raise
 
 try:
     from rl.rl_alns_environment import ALNSEnvironment
-    print("[OK] ALNSEnvironment imported successfully")
+    LOGGER.info("%s ALNSEnvironment imported successfully", LOG_PREFIX)
 except ImportError as e:  # pragma: no cover
-    print(f"[ERROR] ALNSEnvironment import failed: {e}")
+    LOGGER.error("%s ALNSEnvironment import failed: %s", LOG_PREFIX, e)
     raise
 
 from rl.dataset_manager import GeneratedDatasetManager
@@ -82,6 +87,7 @@ class ALNSTrainingCallback(BaseCallback):
         self.training_current_costs: List[float] = []
         self.training_best_costs: List[float] = []
         self.step_counter = 0
+        self.current_episode_reward: float = 0.0
 
     def _on_step(self) -> bool:
         if len(self.locals.get("infos", [])) > 0:
@@ -113,6 +119,70 @@ class ALNSTrainingCallback(BaseCallback):
                 self.training_steps.append(self.step_counter)
                 self.training_current_costs.append(current_cost)
                 self.training_best_costs.append(best_cost)
+
+            rewards = self.locals.get("rewards")
+            reward_value = 0.0
+            if rewards is not None:
+                try:
+                    reward_value = float(np.array(rewards).reshape(-1)[0])
+                except Exception:  # pragma: no cover - defensive
+                    try:
+                        reward_value = float(rewards[0])
+                    except Exception:
+                        reward_value = 0.0
+            self.current_episode_reward += reward_value
+
+            dones = self.locals.get("dones")
+            done_flag = False
+            if dones is not None:
+                try:
+                    done_flag = bool(np.array(dones).reshape(-1)[0])
+                except Exception:
+                    done_flag = bool(dones)
+
+            if done_flag:
+                summary = info.get("episode_summary", {})
+                improvement_value_raw = summary.get("total_improvement")
+                if improvement_value_raw is None:
+                    improvement_value_raw = summary.get("best_improvement_abs", 0.0)
+                try:
+                    improvement_value = float(improvement_value_raw)
+                except (TypeError, ValueError):  # pragma: no cover - defensive
+                    improvement_value = 0.0
+
+                iterations_completed_raw = summary.get("iterations_completed", self.step_counter)
+                try:
+                    iterations_completed = int(iterations_completed_raw)
+                except (TypeError, ValueError):  # pragma: no cover
+                    iterations_completed = self.step_counter
+
+                best_cost_value: Optional[float] = None
+                best_cost_raw = summary.get("final_best_cost")
+                if best_cost_raw is not None:
+                    try:
+                        best_cost_value = float(best_cost_raw)
+                    except (TypeError, ValueError):  # pragma: no cover
+                        best_cost_value = None
+
+                if best_cost_value is not None and best_cost_value < self.best_solution_cost:
+                    self.best_solution_cost = best_cost_value
+
+                self.episode_rewards.append(self.current_episode_reward)
+                self.episode_improvements.append(improvement_value)
+                self.episode_lengths.append(iterations_completed)
+
+                best_cost_display = f"{best_cost_value:.3f}" if best_cost_value is not None else "n/a"
+                LOGGER.info(
+                    "%s Episode %d finished: reward=%.3f best_cost=%s improvement=%.3f iterations=%d",
+                    LOG_PREFIX,
+                    len(self.episode_rewards),
+                    self.current_episode_reward,
+                    best_cost_display,
+                    improvement_value,
+                    iterations_completed,
+                )
+
+                self.current_episode_reward = 0.0
         return True
 
     def _on_rollout_end(self) -> None:
@@ -135,7 +205,7 @@ class ALNSTrainingCallback(BaseCallback):
                 f.write(f"{key}: {value}\n")
 
         if self.verbose > 0:
-            print(f"[INFO] Training summary saved to: {summary_file}")
+            LOGGER.info("%s Training summary saved to: %s", LOG_PREFIX, summary_file)
 
         self._export_training_metrics()
 
@@ -172,11 +242,15 @@ def test_environment_manually(problem_instance: Optional[str] = "SMALL_1") -> bo
     """Quick smoke test to ensure the ALNS environment is functional."""
 
     dataset_label = problem_instance or "SMALL_1"
-    print("\n[TEST] Testing ALNSEnvironment manually...")
-    print(f"   Using problem instance: {dataset_label}")
+    LOGGER.info("%s Testing ALNSEnvironment manually (instance=%s)", LOG_PREFIX, dataset_label)
     path_obj = Path(dataset_label)
     absolute_path = path_obj if path_obj.is_absolute() else PROJECT_ROOT / path_obj
-    print(f"   Path exists: {absolute_path.exists()} (dir={absolute_path.is_dir()})")
+    LOGGER.info(
+        "%s Path exists: %s (dir=%s)",
+        LOG_PREFIX,
+        absolute_path.exists(),
+        absolute_path.is_dir(),
+    )
 
     try:
         env = ALNSEnvironment(
@@ -187,16 +261,16 @@ def test_environment_manually(problem_instance: Optional[str] = "SMALL_1") -> bo
             problem_sampling_strategy="round_robin",
         )
 
-        print(f"Action space: {env.action_space}")
-        print(f"Observation space: {env.observation_space}")
+        LOGGER.info("%s Action space: %s", LOG_PREFIX, env.action_space)
+        LOGGER.info("%s Observation space: %s", LOG_PREFIX, env.observation_space)
 
-        print("Checking environment with Stable-Baselines3...")
+        LOGGER.info("%s Checking environment with Stable-Baselines3...", LOG_PREFIX)
         check_env(env, warn=True)
-        print("[OK] Environment check passed!")
+        LOGGER.info("%s Environment check passed!", LOG_PREFIX)
 
         obs, info = env.reset()
-        print(f"Initial observation shape: {obs.shape}")
-        print(f"Initial cost: {info.get('initial_cost', 'N/A')}")
+        LOGGER.info("%s Initial observation shape: %s", LOG_PREFIX, obs.shape)
+        LOGGER.info("%s Initial cost: %s", LOG_PREFIX, info.get("initial_cost", "N/A"))
 
         total_reward = 0.0
         for step in range(5):
@@ -205,26 +279,26 @@ def test_environment_manually(problem_instance: Optional[str] = "SMALL_1") -> bo
             total_reward += reward
 
             step_info = info.get("step_info", {})
-            print(
-                f"Step {step + 1}: reward={reward:.2f}, "
-                f"cost={step_info.get('current_cost', 'N/A'):.2f}, "
-                f"done={done}"
+            LOGGER.info(
+                "%s Step %d: reward=%.2f cost=%.2f done=%s",
+                LOG_PREFIX,
+                step + 1,
+                reward,
+                float(step_info.get("current_cost", 0.0)),
+                done,
             )
 
             if done or truncated:
                 break
 
-        print(f"Total reward: {total_reward:.2f}")
-        print("[OK] Manual test completed successfully!")
+        LOGGER.info("%s Total reward: %.2f", LOG_PREFIX, total_reward)
+        LOGGER.info("%s Manual test completed successfully!", LOG_PREFIX)
 
         env.close()
         return True
 
     except Exception as exc:  # pragma: no cover
-        print(f"[ERROR] Manual test failed: {exc}")
-        import traceback
-
-        traceback.print_exc()
+        LOGGER.exception("%s Manual test failed: %s", LOG_PREFIX, exc)
         return False
 
 
@@ -244,14 +318,16 @@ def train_ppo_agent(
 ) -> Tuple[PPO, DummyVecEnv]:
     """Train a PPO agent on the ALNS environment using provided datasets."""
 
-    print(f"\n[TRAIN] Training PPO agent for {total_timesteps} timesteps...")
+    LOGGER.info("%s Training PPO agent for %d timesteps", LOG_PREFIX, total_timesteps)
 
     train_instances = list(train_instance_paths) if train_instance_paths else ["SMALL_1"]
     if not train_instances:
         raise ValueError("train_instance_paths must provide at least one dataset")
-    print(
-        f"   Training on {len(train_instances)} instances "
-        f"(sampling={sampling_strategy})"
+    LOGGER.info(
+        "%s Training on %d instances (sampling=%s)",
+        LOG_PREFIX,
+        len(train_instances),
+        sampling_strategy,
     )
 
     log_dir_path = Path(log_dir)
@@ -301,7 +377,7 @@ def train_ppo_agent(
     model.learn(total_timesteps=total_timesteps, callback=callback)
 
     model.save(model_save_path)
-    print(f"[SAVED] Model saved to: {model_save_path}")
+    LOGGER.info("%s Model saved to: %s", LOG_PREFIX, model_save_path)
 
     return model, vec_env
 
@@ -323,9 +399,13 @@ def evaluate_trained_model(
     eval_paths = list(problem_paths) if problem_paths else ["SMALL_1"]
     episodes = n_eval_episodes or len(eval_paths)
 
-    print(f"\n[METRICS] Evaluating trained model across {episodes} episodes...")
+    LOGGER.info(
+        "%s Evaluating trained model across %d episodes",
+        LOG_PREFIX,
+        episodes,
+    )
     model = PPO.load(model_path)
-    print(f"[OK] Model loaded from: {model_path}")
+    LOGGER.info("%s Model loaded from: %s", LOG_PREFIX, model_path)
 
     resolved_state_module = _resolve_state_module(model, state_module)
     resolved_action_module = action_module
@@ -430,7 +510,12 @@ def evaluate_trained_model(
 
     details_env.close()
 
-    print(f"[RESULT] Evaluation: mean {mean_reward:.2f} +/- {std_reward:.2f}")
+    LOGGER.info(
+        "%s Evaluation: mean reward %.2f +/- %.2f",
+        LOG_PREFIX,
+        mean_reward,
+        std_reward,
+    )
     return mean_reward, std_reward, detailed_stats
 
 
@@ -519,9 +604,11 @@ def compare_with_baseline(
     mean_reward = float(np.mean(rewards)) if rewards else 0.0
     mean_improvement = float(np.mean(improvements)) if improvements else 0.0
 
-    print(
-        f"[BASELINE] Random policy: mean reward {mean_reward:.2f}, "
-        f"mean improvement {mean_improvement:.2f}"
+    LOGGER.info(
+        "%s Random policy: mean reward %.2f, mean improvement %.2f",
+        LOG_PREFIX,
+        mean_reward,
+        mean_improvement,
     )
     return mean_reward, mean_improvement, results
 
@@ -851,9 +938,11 @@ def compare_model_against_baseline(
             plt.close()
 
             if rl_best_cost is None or baseline_best_cost is None:
-                print(
-                    f"   Warning: Missing best_cost metrics for {dataset_label} (seed {seed}),"
-                    " skipping detailed comparison entry."
+                LOGGER.warning(
+                    "%s Missing best_cost metrics for %s (seed %s); skipping detailed comparison entry.",
+                    LOG_PREFIX,
+                    dataset_label,
+                    seed,
                 )
                 continue
 
@@ -872,9 +961,14 @@ def compare_model_against_baseline(
                 }
             )
 
-            print(
-                f"   {dataset_label} (seed {seed}): RL best={rl_best_cost:.2f}, "
-                f"baseline best={baseline_best_cost:.2f}, delta={delta:+.2f}"
+            LOGGER.info(
+                "%s %s (seed %s): RL best=%.2f baseline best=%.2f delta=%+0.2f",
+                LOG_PREFIX,
+                dataset_label,
+                seed,
+                rl_best_cost,
+                baseline_best_cost,
+                delta,
             )
 
     if results:
@@ -897,8 +991,16 @@ def compare_model_against_baseline(
             writer.writeheader()
             writer.writerows(results)
         avg_delta = float(np.mean([row["best_cost_delta"] for row in results]))
-        print(f"\n[STATS] Avg best-cost delta (baseline - RL): {avg_delta:+.2f}")
-        print(f"[STATS] Detailed comparison saved to: {csv_path}")
+        LOGGER.info(
+            "%s Avg best-cost delta (baseline - RL): %+0.2f",
+            LOG_PREFIX,
+            avg_delta,
+        )
+        LOGGER.info(
+            "%s Detailed comparison saved to: %s",
+            LOG_PREFIX,
+            csv_path,
+        )
 
     if rl_best_series:
         max_time = max(max_elapsed_time, 1.0)
@@ -1041,24 +1143,32 @@ def _to_relative_path(path_obj: Path) -> str:
 
 
 def main() -> None:
-    print("[PIPELINE] ALNS Reinforcement Learning Training")
-    print("=" * 50)
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
+
+    LOGGER.info("%s ALNS Reinforcement Learning Training", LOG_PREFIX)
 
     dataset_splits = prepare_dataset_splits("small")
     train_paths = dataset_splits.get("train", [])
     test_paths = dataset_splits.get("test", [])
 
     if not train_paths or not test_paths:
-        print("[ERROR] No training or test datasets were found. Aborting.")
+        LOGGER.error("%s No training or test datasets were found. Aborting.", LOG_PREFIX)
         return
 
-    print(
-        f"Datasets prepared: {len(train_paths)} train / {len(test_paths)} test instances"
+    LOGGER.info(
+        "%s Datasets prepared: %d train / %d test instances",
+        LOG_PREFIX,
+        len(train_paths),
+        len(test_paths),
     )
 
     primary_train_instance = train_paths[0]
     if not test_environment_manually(primary_train_instance):
-        print("[ERROR] Manual environment test failed, aborting training")
+        LOGGER.error("%s Manual environment test failed, aborting training", LOG_PREFIX)
         return
 
     max_iterations = 100
@@ -1107,17 +1217,25 @@ def main() -> None:
         else 0.0
     )
 
-    print("\n[SUMMARY] Final results:")
-    print(f"   Trained agent: {mean_reward:.2f} +/- {std_reward:.2f}")
-    print(f"   Random baseline: {baseline_reward:.2f}")
-    print(f"   Reward improvement: {improvement_vs_baseline:+.2f} ({pct_improvement:+.1f}%)")
+    LOGGER.info("%s Summary: trained agent %.2f +/- %.2f", LOG_PREFIX, mean_reward, std_reward)
+    LOGGER.info("%s Summary: random baseline %.2f", LOG_PREFIX, baseline_reward)
+    LOGGER.info(
+        "%s Summary: reward improvement %+0.2f (%+0.1f%%)",
+        LOG_PREFIX,
+        improvement_vs_baseline,
+        pct_improvement,
+    )
 
     if comparison_results:
         rl_wins = sum(1 for row in comparison_results if row["best_cost_delta"] > 0)
         ties = sum(1 for row in comparison_results if row["best_cost_delta"] == 0)
         total = len(comparison_results)
-        print(
-            f"   Best-cost wins: RL {rl_wins}, ties {ties}, baseline {total - rl_wins - ties}"
+        LOGGER.info(
+            "%s Best-cost wins: RL %d, ties %d, baseline %d",
+            LOG_PREFIX,
+            rl_wins,
+            ties,
+            total - rl_wins - ties,
         )
 
     vec_env.close()

@@ -5,6 +5,7 @@ This module provides a Gymnasium-compatible environment that wraps the Rust ALNS
 library, allowing RL agents to learn optimal operator selection strategies.
 """
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -23,6 +24,10 @@ from rl.registries import (
     create_state_encoder,
 )
 from rl.operator_usage_logger import OperatorUsageLogger
+
+
+LOGGER = logging.getLogger("psvpp.alns")
+LOG_PREFIX = "[ALNS]"
 
 
 class ALNSEnvironment(gym.Env):
@@ -90,9 +95,10 @@ class ALNSEnvironment(gym.Env):
         self.problem_paths = self._init_problem_pool(problem_instance, problem_instance_paths)
         self.problem_sampling_strategy = problem_sampling_strategy.lower()
         if self.problem_sampling_strategy not in {"round_robin", "random", "seed"}:
-            print(
-                f"Warning: Unknown sampling strategy '{problem_sampling_strategy}',"
-                " falling back to 'round_robin'"
+            LOGGER.warning(
+                "%s Unknown sampling strategy '%s'; falling back to 'round_robin'",
+                LOG_PREFIX,
+                problem_sampling_strategy,
             )
             self.problem_sampling_strategy = "round_robin"
         self._pool_index = 0
@@ -124,8 +130,9 @@ class ALNSEnvironment(gym.Env):
         self.num_improvement = len(self.improvement_operators)
 
         if self.force_baseline_improvement and self.num_improvement <= 0:
-            print(
-                "Warning: force_baseline_improvement requested but no improvement operators are available; disabling the flag."
+            LOGGER.warning(
+                "%s force_baseline_improvement requested but no improvement operators are available; disabling the flag.",
+                LOG_PREFIX,
             )
             self.force_baseline_improvement = False
             self.baseline_improvement_idx = None
@@ -133,8 +140,9 @@ class ALNSEnvironment(gym.Env):
             self.baseline_improvement_idx < 0
             or self.baseline_improvement_idx >= self.num_improvement
         ):
-            print(
-                "Warning: baseline_improvement_idx out of range; defaulting to the first improvement operator."
+            LOGGER.warning(
+                "%s baseline_improvement_idx out of range; defaulting to the first improvement operator.",
+                LOG_PREFIX,
             )
             self.baseline_improvement_idx = 0 if self.num_improvement > 0 else None
 
@@ -191,16 +199,24 @@ class ALNSEnvironment(gym.Env):
         self.last_action_type: str = "none"
         self.last_acceptance_type: str = "unknown"
         
-        print(f"ALNSEnvironment initialized:")
-        print(f"  Problem: {self.problem_instance}")
+        action_space_size = self.action_impl.n()
+        LOGGER.info(
+            "%s Environment initialized for problem '%s' (destroy=%d, repair=%d, improvement=%d, action_space=%d, max_iterations=%d)",
+            LOG_PREFIX,
+            self.problem_instance,
+            self.num_destroy,
+            self.num_repair,
+            self.num_improvement,
+            action_space_size,
+            max_iterations,
+        )
         if len(self.problem_paths) > 1:
-            print(f"  Problem pool size: {len(self.problem_paths)}")
-            print(f"  Sampling strategy: {self.problem_sampling_strategy}")
-        print(f"  Destroy operators: {self.num_destroy}")
-        print(f"  Repair operators: {self.num_repair}")
-        print(f"  Improvement operators: {self.num_improvement}")
-        print(f"  Action space size: {self.action_impl.n()}")
-        print(f"  Max iterations: {max_iterations}")
+            LOGGER.info(
+                "%s Problem pool configured with %d instances (sampling=%s)",
+                LOG_PREFIX,
+                len(self.problem_paths),
+                self.problem_sampling_strategy,
+            )
 
     def _init_problem_pool(
         self,
@@ -230,7 +246,12 @@ class ALNSEnvironment(gym.Env):
             try:
                 stats = get_instance_statistics(cache_key)
             except Exception as exc:  # pragma: no cover - defensive
-                print(f"Warning: Failed to load instance statistics for '{dataset_identifier}': {exc}")
+                LOGGER.warning(
+                    "%s Failed to load instance statistics for '%s': %s",
+                    LOG_PREFIX,
+                    dataset_identifier,
+                    exc,
+                )
                 stats = {}
             self._instance_stats_cache[cache_key] = stats
 
@@ -310,6 +331,14 @@ class ALNSEnvironment(gym.Env):
         self._episode_counter += 1
         self._current_episode_id = self._episode_counter
         self._initial_snapshot = None
+
+        LOGGER.info(
+            "%s Restarting ALNS episode %d for problem '%s' (seed=%d)",
+            LOG_PREFIX,
+            self._current_episode_id,
+            self.current_problem_instance,
+            episode_seed,
+        )
         
         # Reset episode state
         self.iteration = 0
@@ -406,6 +435,8 @@ class ALNSEnvironment(gym.Env):
         action_type = "improvement_only" if improvement_only else "destroy_repair"
         acceptance_type = "unknown"
 
+        iteration_index = self.iteration + 1
+
         try:
             # Execute ALNS iteration with selected operators
             if improvement_only:
@@ -451,6 +482,33 @@ class ALNSEnvironment(gym.Env):
             if isinstance(result, dict):
                 result["action_type"] = action_type
 
+            feasible_flag = True
+            infeasible_reason: Optional[str] = None
+            infeasible_flagged = False
+            if isinstance(result, dict):
+                feasible_raw = result.get("feasible")
+                if feasible_raw is not None:
+                    feasible_flag = bool(feasible_raw)
+                status_value = result.get("status")
+                if isinstance(status_value, str) and "infeas" in status_value.lower():
+                    feasible_flag = False
+                    infeasible_reason = status_value
+                reject_reason = result.get("reject_reason")
+                if isinstance(reject_reason, str) and "infeas" in reject_reason.lower():
+                    feasible_flag = False
+                    infeasible_reason = reject_reason
+                extra_reason = result.get("infeasible_reason")
+                if isinstance(extra_reason, str) and extra_reason:
+                    feasible_flag = False
+                    infeasible_reason = extra_reason
+                if not feasible_flag and infeasible_reason is None:
+                    infeasible_reason = "unspecified"
+
+            if not feasible_flag:
+                infeasible_flagged = True
+                if isinstance(result, dict):
+                    result["accepted"] = False
+
             self.last_action_type = action_type
             self._last_step_result = result
 
@@ -470,14 +528,20 @@ class ALNSEnvironment(gym.Env):
             improved = current_cost_raw < prev_current_cost - 1e-9
             worse = current_cost_raw > prev_current_cost + 1e-9
             accepted_flag = bool(result.get("accepted", False))
-            if accepted_flag:
+            if not feasible_flag:
+                acceptance_type = "infeasible"
+                if isinstance(result, dict):
+                    result["accepted"] = False
+                accepted_flag = False
+            elif accepted_flag:
                 if improved:
                     acceptance_type = "improvement"
                 elif worse:
                     acceptance_type = "annealing"
                 else:
                     acceptance_type = "rejected_no_change"
-                    result["accepted"] = False
+                    if isinstance(result, dict):
+                        result["accepted"] = False
                     accepted_flag = False
             else:
                 acceptance_type = "rejected"
@@ -625,6 +689,64 @@ class ALNSEnvironment(gym.Env):
             if repair_idx_result is not None and 0 <= repair_idx_result < self.num_repair:
                 repair_name = self.repair_operators[repair_idx_result]
 
+            destroy_display = destroy_name or "none"
+            repair_display = repair_name or "none"
+            improvement_display = improvement_name or "none"
+
+            if infeasible_flagged:
+                LOGGER.error(
+                    "%s Iteration %d produced infeasible solution (destroy=%s, repair=%s, improvement=%s); reason=%s",
+                    LOG_PREFIX,
+                    iteration_index,
+                    destroy_display,
+                    repair_display,
+                    improvement_display,
+                    infeasible_reason,
+                )
+
+            try:
+                current_cost_value = (
+                    float(self.last_current_cost)
+                    if self.last_current_cost is not None
+                    else float(current_cost)
+                )
+            except (TypeError, ValueError):
+                current_cost_value = prev_current_cost
+
+            if acceptance_type == "improvement":
+                LOGGER.info(
+                    "%s Iteration %d improvement: cost %.4f -> %.4f (destroy=%s, repair=%s, improvement=%s)",
+                    LOG_PREFIX,
+                    iteration_index,
+                    prev_current_cost,
+                    current_cost_value,
+                    destroy_display,
+                    repair_display,
+                    improvement_display,
+                )
+            elif acceptance_type == "annealing":
+                LOGGER.info(
+                    "%s Iteration %d annealing accepted worse solution: cost %.4f -> %.4f (destroy=%s, repair=%s, improvement=%s)",
+                    LOG_PREFIX,
+                    iteration_index,
+                    prev_current_cost,
+                    current_cost_value,
+                    destroy_display,
+                    repair_display,
+                    improvement_display,
+                )
+            elif worse and acceptance_type == "rejected":
+                LOGGER.debug(
+                    "%s Iteration %d annealing rejected worse solution: cost %.4f -> %.4f (destroy=%s, repair=%s, improvement=%s)",
+                    LOG_PREFIX,
+                    iteration_index,
+                    prev_current_cost,
+                    current_cost_value,
+                    destroy_display,
+                    repair_display,
+                    improvement_display,
+                )
+
             step_info = {
                 "iteration": self.iteration,
                 "destroy_operator": destroy_name,
@@ -706,6 +828,12 @@ class ALNSEnvironment(gym.Env):
             return obs, reward, done, truncated, info
             
         except Exception as e:
+            LOGGER.exception(
+                "%s Iteration %d failed: %s",
+                LOG_PREFIX,
+                iteration_index,
+                e,
+            )
             # Return a penalty and mark episode as done on error
             obs_shape = getattr(self.observation_space, "shape", (30,)) or (30,)
             obs = np.zeros(obs_shape, dtype=np.float32)
@@ -732,7 +860,7 @@ class ALNSEnvironment(gym.Env):
         try:
             return self.state_encoder.encode(result, env=self)
         except Exception as exc:  # pragma: no cover - safety net
-            print(f"Warning: Failed to extract observation: {exc}")
+            LOGGER.exception("%s Failed to extract observation: %s", LOG_PREFIX, exc)
             shape = getattr(self.observation_space, "shape", (30,))
             return np.zeros(shape, dtype=np.float32)
 
@@ -742,7 +870,7 @@ class ALNSEnvironment(gym.Env):
         try:
             return float(self.reward_function.compute(result, env=self))
         except Exception as exc:  # pragma: no cover - safety net
-            print(f"Warning: Failed to compute reward: {exc}")
+            LOGGER.exception("%s Failed to compute reward: %s", LOG_PREFIX, exc)
             return 0.0
     
     def render(self, mode: str = "human") -> Optional[Any]:
@@ -757,17 +885,24 @@ class ALNSEnvironment(gym.Env):
         """
         if mode == "human" and self.episode_history:
             latest = self.episode_history[-1]
-            print(f"Iteration {latest['iteration']}: "
-                  f"Cost={latest['current_cost']:.2f}, "
-                  f"Best={latest['best_cost']:.2f}, "
-                  f"Accepted={latest['accepted']}, "
-                  f"Temp={latest['temperature']:.1f}")
+            LOGGER.info(
+                "%s Render iteration %d: cost=%.2f best=%.2f accepted=%s temp=%.1f",
+                LOG_PREFIX,
+                latest["iteration"],
+                float(latest.get("current_cost", 0.0)),
+                float(latest.get("best_cost", 0.0)),
+                latest.get("accepted"),
+                float(latest.get("temperature", 0.0)),
+            )
         return None
     
     def close(self) -> None:
         """Clean up environment resources."""
         if self.operator_logging_enabled:
-            self.operator_logger.flush()
+            log_path = self.operator_logger.flush()
+            if log_path:
+                LOGGER.debug("%s Operator usage log flushed to %s", LOG_PREFIX, log_path)
+        LOGGER.debug("%s Environment closed", LOG_PREFIX)
     
     def get_episode_statistics(self) -> Dict[str, Any]:
         """
@@ -985,7 +1120,7 @@ class ALNSEnvironment(gym.Env):
 
 def test_environment():
     """Test the ALNS environment manually."""
-    print("Testing ALNSEnvironment...")
+    LOGGER.info("%s Testing ALNSEnvironment...", LOG_PREFIX)
     
     # Create environment
     env = ALNSEnvironment(
@@ -994,13 +1129,13 @@ def test_environment():
         seed=42
     )
     
-    print(f"Action space: {env.action_space}")
-    print(f"Observation space: {env.observation_space}")
+    LOGGER.info("%s Action space: %s", LOG_PREFIX, env.action_space)
+    LOGGER.info("%s Observation space: %s", LOG_PREFIX, env.observation_space)
     
     # Test reset
     obs, info = env.reset()
-    print(f"\nInitial observation shape: {obs.shape}")
-    print(f"Initial info: {info}")
+    LOGGER.info("%s Initial observation shape: %s", LOG_PREFIX, obs.shape)
+    LOGGER.info("%s Initial info: %s", LOG_PREFIX, info)
     
     # Test some steps
     total_reward = 0.0
@@ -1012,33 +1147,34 @@ def test_environment():
         destroy_idx, repair_idx, improvement_idx = env._encode_action(action)
         step_info = info.get("step_info", {})
         
-        print(
-            "Step {step}: action={action_id} (destroy={d}, repair={r}, improvement={impr}), "
-            "reward={reward:.2f}, cost={cost:.2f}, accepted={accepted}".format(
-                step=step_num + 1,
-                action_id=action,
-                d=destroy_idx,
-                r=repair_idx,
-                impr=improvement_idx if improvement_idx is not None else "none",
-                reward=reward,
-                cost=step_info.get("current_cost", float("nan")),
-                accepted=step_info.get("accepted", "N/A"),
-            )
+        LOGGER.info(
+            "%s Step %d: action=%s (destroy=%s, repair=%s, improvement=%s) reward=%.2f cost=%.2f accepted=%s",
+            LOG_PREFIX,
+            step_num + 1,
+            action,
+            destroy_idx,
+            repair_idx,
+            improvement_idx if improvement_idx is not None else "none",
+            reward,
+            float(step_info.get("current_cost", float("nan"))),
+            step_info.get("accepted", "N/A"),
         )
         
         if done:
-            print("Episode finished!")
+            LOGGER.info("%s Episode finished!", LOG_PREFIX)
             break
     
-    print(f"\nTotal reward: {total_reward:.2f}")
+    LOGGER.info("%s Total reward: %.2f", LOG_PREFIX, total_reward)
     
     # Get episode statistics
     stats = env.get_episode_statistics()
-    print(f"Episode stats: {stats}")
+    LOGGER.info("%s Episode stats: %s", LOG_PREFIX, stats)
     
     env.close()
-    print("Environment test completed!")
+    LOGGER.info("%s Environment test completed!", LOG_PREFIX)
 
 
 if __name__ == "__main__":
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO)
     test_environment()
