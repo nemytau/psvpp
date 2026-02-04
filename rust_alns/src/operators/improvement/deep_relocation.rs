@@ -1,6 +1,6 @@
 use crate::operators::traits::ImprovementOperator;
 use crate::structs::{context::Context, solution::Solution};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use rand::RngCore;
 
 /// Relocates every assigned visit greedily while strict improvements exist.
@@ -39,6 +39,10 @@ impl DeepRelocation {
 
 				let mut candidate = working_solution.clone();
 				candidate.unassign_visits(&[visit_id]);
+				candidate.ensure_schedule_is_updated();
+				if !candidate.visit_insertion_is_possible(context, visit_id, target_voyage_id) {
+					continue;
+				}
 				if candidate
 					.greedy_insert_visit(visit_id, target_voyage_id, context)
 					.is_err()
@@ -70,6 +74,7 @@ impl ImprovementOperator for DeepRelocation {
 	fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
 		info!(target: "operator::improvement", "[DeepRelocation] Invoked");
 		solution.ensure_consistency_updated(context);
+		let original_solution = solution.clone();
 
 		loop {
 			let baseline_cost = solution.cost_with_context(context);
@@ -98,6 +103,26 @@ impl ImprovementOperator for DeepRelocation {
 			);
 
 			solution.unassign_visits(&[visit_id]);
+			solution.ensure_schedule_is_updated();
+			if !solution.visit_insertion_is_possible(context, visit_id, target_voyage) {
+				warn!(
+					target: "operator::improvement",
+					"[DeepRelocation] Insertion of visit {} into voyage {} deemed infeasible",
+					visit_id,
+					target_voyage
+				);
+				if let Err(revert_err) =
+					solution.greedy_insert_visit(visit_id, origin_voyage, context)
+				{
+					warn!(
+						target: "operator::improvement",
+						"[DeepRelocation] Rollback failed during infeasible insertion check: {}",
+						revert_err
+					);
+				}
+				solution.ensure_consistency_updated(context);
+				break;
+			}
 			if let Err(err) = solution.greedy_insert_visit(visit_id, target_voyage, context) {
 				warn!(
 					target: "operator::improvement",
@@ -124,6 +149,16 @@ impl ImprovementOperator for DeepRelocation {
 				"[DeepRelocation] Cost reduced to {:.2}",
 				updated_cost
 			);
+		}
+
+		solution.ensure_consistency_updated(context);
+		if !solution.is_fully_feasible(context) {
+			error!(
+				target: "operator::improvement",
+				"[DeepRelocation] Operator produced infeasible solution; reverting"
+			);
+			*solution = original_solution;
+			solution.ensure_consistency_updated(context);
 		}
 	}
 }
