@@ -13,7 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from rl.dataset_manager import GeneratedDatasetManager
-from rl.train_alns_rl import run_episode_with_policy
+from rl.train_alns_rl import normalize_algorithm_mode, run_episode_with_policy
 
 
 def _available_sizes(root: Path) -> List[str]:
@@ -25,6 +25,7 @@ def _iterate_datasets(
     sizes: Iterable[str],
     iterations: int,
     seed: int,
+    algorithm_mode: str,
 ) -> Tuple[int, List[Tuple[str, str, str, str]]]:
     manager = GeneratedDatasetManager()
     total_runs = 0
@@ -48,6 +49,7 @@ def _iterate_datasets(
                         seed=seed,
                         max_iterations=iterations,
                         deterministic=False,
+                        algorithm_mode=algorithm_mode,
                     )
                 except Exception as exc:
                     failures.append((size, split, str(problem_path), str(exc)))
@@ -74,6 +76,12 @@ def main() -> None:
         default=123,
         help="Seed forwarded to the environment (default: %(default)s)",
     )
+    parser.add_argument(
+        "--algorithm-mode",
+        default="baseline",
+        choices=["baseline", "kisialiou", "reinforcement_learning", "rl"],
+        help="High-level ALNS variant (baseline, kisialiou, reinforcement_learning)",
+    )
     args = parser.parse_args()
 
     generated_root = REPO_ROOT / "data" / "generated"
@@ -85,7 +93,8 @@ def main() -> None:
             raise SystemExit(f"No generated datasets found under {generated_root}")
 
     print(f"Running ALNS baseline for sizes: {', '.join(sizes)}")
-    total_runs, failures = _iterate_datasets(sizes, args.iterations, args.seed)
+    algorithm_mode = normalize_algorithm_mode(args.algorithm_mode)
+    total_runs, failures = _iterate_datasets(sizes, args.iterations, args.seed, algorithm_mode)
 
     print(f"Completed {total_runs} dataset rollouts with {len(failures)} failures")
     if failures:

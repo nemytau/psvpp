@@ -11,7 +11,7 @@ from stable_baselines3 import PPO
 
 from rl.cli.common import ensure_dir, get_config_value, load_config
 from rl.experiment import find_manifest_for_model, load_manifest
-from rl.train_alns_rl import run_episode_with_policy
+from rl.train_alns_rl import normalize_algorithm_mode, run_episode_with_policy
 
 
 def _parse_args() -> argparse.Namespace:
@@ -23,6 +23,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=None, help="Episode seed")
     parser.add_argument("--output-dir", default=None, help="Folder to write solution summary")
     parser.add_argument("--stochastic", action="store_true", help="Use stochastic policy actions (default deterministic)")
+    parser.add_argument(
+        "--algorithm-mode",
+        default=None,
+        choices=["baseline", "kisialiou", "reinforcement_learning", "rl"],
+        help="High-level ALNS variant (baseline, kisialiou, reinforcement_learning)",
+    )
     return parser.parse_args()
 
 
@@ -51,6 +57,14 @@ def main() -> None:
         base_det = get_config_value(config, ("evaluation", "deterministic"), True)
     deterministic = bool(base_det) and not args.stochastic
 
+    manifest_training = manifest.get("training", {}) if manifest else {}
+    raw_algorithm_mode = (
+        args.algorithm_mode
+        or manifest_training.get("algorithm_mode")
+        or get_config_value(config, ("alns", "algorithm_mode"), "baseline")
+    )
+    algorithm_mode = normalize_algorithm_mode(raw_algorithm_mode)
+
     if args.output_dir:
         output_dir = Path(args.output_dir)
     elif manifest:
@@ -66,6 +80,7 @@ def main() -> None:
         seed=seed,
         max_iterations=max_iterations,
         deterministic=deterministic,
+        algorithm_mode=algorithm_mode,
     )
     stats.pop("initial_snapshot", None)
 
@@ -75,6 +90,7 @@ def main() -> None:
         "seed": seed,
         "max_iterations": max_iterations,
         "deterministic": deterministic,
+        "algorithm_mode": algorithm_mode,
         "best_cost": stats.get("best_cost"),
         "final_cost": stats.get("final_cost"),
         "iterations": stats.get("iterations"),

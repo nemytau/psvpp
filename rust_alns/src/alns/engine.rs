@@ -13,6 +13,14 @@ use std::collections::{HashMap, HashSet};
 use std::f64::{INFINITY, NEG_INFINITY};
 use std::path::{Path, PathBuf};
 
+/// High-level algorithm variants for the ALNS engine
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ALNSAlgorithmMode {
+    Baseline,
+    Kisialiou,
+    ReinforcementLearning,
+}
+
 /// ALNS operator selection modes
 #[derive(Clone)]
 pub enum ALNSRunMode {
@@ -43,6 +51,7 @@ pub struct ALNSMetrics {
     pub improvement_operator_name: Option<String>,
     pub improvement_operator_type: Option<String>,
     pub improvement_operator_type_id: Option<i32>,
+    pub improvement_sequence: Vec<usize>,
     pub temperature: f64,
     pub stagnation_count: usize,
     pub iteration: usize,
@@ -81,6 +90,7 @@ pub struct ALNSEngineSnapshot {
     pub weight_update_interval: usize,
     pub stagnation_count: usize,
     pub initial_cost: f64,
+    pub algorithm_mode: ALNSAlgorithmMode,
 }
 
 /// Unified ALNS Engine - canonical implementation for all interfaces
@@ -102,6 +112,7 @@ pub struct ALNSEngine {
     pub weight_update_interval: usize,
     pub stagnation_count: usize,
     pub initial_cost: f64,
+    pub algorithm_mode: ALNSAlgorithmMode,
 }
 
 impl ALNSEngine {
@@ -113,6 +124,7 @@ impl ALNSEngine {
         theta: f64,
         weight_update_interval: usize,
         max_iterations: usize,
+        algorithm_mode: ALNSAlgorithmMode,
     ) -> Result<Self, String> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         // The sample directory is in the parent project directory, not in rust_alns
@@ -280,6 +292,7 @@ impl ALNSEngine {
             weight_update_interval,
             stagnation_count: 0,
             initial_cost,
+            algorithm_mode,
         })
     }
 
@@ -298,6 +311,7 @@ impl ALNSEngine {
             weight_update_interval: self.weight_update_interval,
             stagnation_count: self.stagnation_count,
             initial_cost: self.initial_cost,
+            algorithm_mode: self.algorithm_mode,
         }
     }
 
@@ -315,6 +329,7 @@ impl ALNSEngine {
         self.weight_update_interval = snapshot.weight_update_interval;
         self.stagnation_count = snapshot.stagnation_count;
         self.initial_cost = snapshot.initial_cost;
+        self.algorithm_mode = snapshot.algorithm_mode;
     }
 
     /// Setup standard ALNS operators
@@ -388,29 +403,25 @@ impl ALNSEngine {
         iteration: usize,
         improvement_operator_idx: Option<usize>,
     ) -> Result<ALNSMetrics, String> {
-        // Select operator indices based on mode
-        let (destroy_operator_idx, repair_operator_idx) = match mode {
-            ALNSRunMode::Random => {
-                let destroy_idx = self
-                    .rng
-                    .gen_range(0..self.operator_registry.destroy_operators.len());
-                let repair_idx = self
-                    .rng
-                    .gen_range(0..self.operator_registry.repair_operators.len());
-                (destroy_idx, repair_idx)
+        let (destroy_operator_idx, repair_operator_idx) = self.resolve_operator_pair(mode);
+
+        let improvement_sequence: Vec<usize> = match self.algorithm_mode {
+            ALNSAlgorithmMode::Baseline | ALNSAlgorithmMode::ReinforcementLearning => {
+                improvement_operator_idx.iter().copied().collect()
             }
-            ALNSRunMode::Weighted => {
-                let destroy_idx = self.alns_context.pick_destroy_operator_idx();
-                let repair_idx = self.alns_context.pick_repair_operator_idx();
-                (destroy_idx, repair_idx)
+            ALNSAlgorithmMode::Kisialiou => {
+                let mut sequence = self.compute_kisialiou_improvement_sequence();
+                if let Some(extra_idx) = improvement_operator_idx {
+                    sequence.push(extra_idx);
+                }
+                sequence
             }
-            ALNSRunMode::Explicit(destroy_idx, repair_idx) => (destroy_idx, repair_idx),
         };
 
         self.run_iteration_internal(
             destroy_operator_idx,
             repair_operator_idx,
-            improvement_operator_idx,
+            &improvement_sequence,
             iteration,
         )
     }
@@ -435,7 +446,7 @@ impl ALNSEngine {
         &mut self,
         destroy_operator_idx: usize,
         repair_operator_idx: usize,
-        improvement_operator_idx: Option<usize>,
+        improvement_sequence: &[usize],
         iteration: usize,
     ) -> Result<ALNSMetrics, String> {
         let start_time = std::time::Instant::now();
@@ -452,7 +463,7 @@ impl ALNSEngine {
                 repair_operator_idx
             ));
         }
-        if let Some(idx) = improvement_operator_idx {
+        for &idx in improvement_sequence {
             if idx >= self.operator_registry.improvement_operators.len() {
                 return Err(format!("Invalid improvement operator index: {}", idx));
             }
@@ -465,14 +476,17 @@ impl ALNSEngine {
             .operator_registry
             .get_repair_operator(repair_operator_idx);
 
-        let improvement_operator_name = improvement_operator_idx.map(|idx| {
+        let improvement_operator_name = improvement_sequence.last().map(|idx| {
+            let index = *idx;
             self.improvement_operator_labels
-                .get(idx)
+                .get(index)
                 .cloned()
-                .unwrap_or_else(|| format!("improvement_{}", idx))
+                .unwrap_or_else(|| format!("improvement_{}", index))
         });
-        let improvement_operator_type = improvement_operator_idx.map(|_| "improvement".to_string());
-        let improvement_operator_type_id = improvement_operator_idx.map(|_| 2);
+        let improvement_operator_type = improvement_operator_name.as_ref().map(|_| "improvement".to_string());
+        let improvement_operator_type_id = improvement_operator_name
+            .as_ref()
+            .map(|_| 2);
 
         let destroy_operator_name = self
             .destroy_operator_labels
@@ -497,7 +511,7 @@ impl ALNSEngine {
         repair_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
 
-        if let Some(idx) = improvement_operator_idx {
+        for &idx in improvement_sequence {
             let improvement_op = self.operator_registry.get_improvement_operator(idx);
             improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
             candidate_solution.ensure_consistency_updated(&self.context);
@@ -574,14 +588,25 @@ impl ALNSEngine {
         let elapsed_ms = start_time.elapsed().as_millis();
 
         // Log iteration progress
+        let improvement_marker = if improvement_sequence.is_empty() {
+            "-".to_string()
+        } else {
+            improvement_sequence
+                .iter()
+                .map(|idx| idx.to_string())
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+
         log::info!(
-            "Iter {:3}: cost={:.4}, best={:.4}, temp={:6.1}, destroy={}, repair={}, accepted={}, elapsed={}ms",
+            "Iter {:3}: cost={:.4}, best={:.4}, temp={:6.1}, destroy={}, repair={}, impr={}, accepted={}, elapsed={}ms",
             iteration + 1,
             candidate_cost,
             self.best_solution.total_cost,
             self.temperature,
             destroy_operator_idx,
             repair_operator_idx,
+            improvement_marker,
             accepted,
             elapsed_ms
         );
@@ -647,10 +672,11 @@ impl ALNSEngine {
             repair_operator_type: Some("repair".to_string()),
             destroy_operator_type_id: Some(destroy_operator_type_id),
             repair_operator_type_id: Some(repair_operator_type_id),
-            improvement_idx: improvement_operator_idx,
+            improvement_idx: improvement_sequence.last().copied(),
             improvement_operator_name,
             improvement_operator_type,
             improvement_operator_type_id,
+            improvement_sequence: improvement_sequence.to_vec(),
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -676,6 +702,46 @@ impl ALNSEngine {
             repair_weights: self.alns_context.repair_operator_weights.clone(),
             elapsed_ms,
         })
+    }
+
+    fn resolve_operator_pair(&mut self, mode: ALNSRunMode) -> (usize, usize) {
+        match mode {
+            ALNSRunMode::Random => {
+                let destroy_idx = self
+                    .rng
+                    .gen_range(0..self.operator_registry.destroy_operators.len());
+                let repair_idx = self
+                    .rng
+                    .gen_range(0..self.operator_registry.repair_operators.len());
+                (destroy_idx, repair_idx)
+            }
+            ALNSRunMode::Weighted => {
+                let destroy_idx = self.alns_context.pick_destroy_operator_idx();
+                let repair_idx = self.alns_context.pick_repair_operator_idx();
+                (destroy_idx, repair_idx)
+            }
+            ALNSRunMode::Explicit(destroy_idx, repair_idx) => (destroy_idx, repair_idx),
+        }
+    }
+
+    fn compute_kisialiou_improvement_sequence(&self) -> Vec<usize> {
+        const ORDERED_NAMES: [&str; 4] = [
+            "voyage_number_reduction",
+            "fleet_and_cost_reduction",
+            "deep_relocation",
+            "deep_swap",
+        ];
+
+        ORDERED_NAMES
+            .iter()
+            .filter_map(|name| self.find_improvement_operator_index(name))
+            .collect()
+    }
+
+    fn find_improvement_operator_index(&self, label: &str) -> Option<usize> {
+        self.improvement_operator_labels
+            .iter()
+            .position(|candidate| candidate == label)
     }
 
     pub fn run_improvement_only(
@@ -829,6 +895,7 @@ impl ALNSEngine {
             improvement_operator_name: Some(improvement_operator_name),
             improvement_operator_type,
             improvement_operator_type_id,
+            improvement_sequence: vec![improvement_operator_idx],
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -876,6 +943,7 @@ impl ALNSEngine {
             improvement_operator_name: None,
             improvement_operator_type: None,
             improvement_operator_type_id: None,
+            improvement_sequence: Vec::new(),
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,

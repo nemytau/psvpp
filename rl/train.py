@@ -18,6 +18,7 @@ from rl.train_alns_rl import (
     compare_with_baseline,
     evaluate_trained_model,
     prepare_dataset_splits,
+    normalize_algorithm_mode,
     test_environment_manually,
     train_ppo_agent,
 )
@@ -38,6 +39,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--state-module", default=None, help="Registry key for state encoder implementation")
     parser.add_argument("--reward-module", default=None, help="Registry key for reward function implementation")
     parser.add_argument("--skip-baseline", action="store_true", help="Skip baseline evaluations after training")
+    parser.add_argument(
+        "--algorithm-mode",
+        default=None,
+        choices=["baseline", "kisialiou", "reinforcement_learning", "rl"],
+        help="High-level ALNS variant (baseline, kisialiou, reinforcement_learning)",
+    )
     return parser.parse_args()
 
 
@@ -67,6 +74,8 @@ def _resolve_parameters(args: argparse.Namespace, config: Dict[str, Any]) -> Dic
     action_module = args.action_module or get_config_value(config, ("modules", "action"), DEFAULT_ACTION_KEY) or DEFAULT_ACTION_KEY
     state_module = args.state_module or get_config_value(config, ("modules", "state"), DEFAULT_STATE_KEY) or DEFAULT_STATE_KEY
     reward_module = args.reward_module or get_config_value(config, ("modules", "reward"), DEFAULT_REWARD_KEY) or DEFAULT_REWARD_KEY
+    raw_algorithm_mode = args.algorithm_mode or get_config_value(config, ("alns", "algorithm_mode"), "baseline")
+    algorithm_mode = normalize_algorithm_mode(raw_algorithm_mode)
 
     params: Dict[str, Any] = {
         "timestamp": timestamp,
@@ -86,6 +95,7 @@ def _resolve_parameters(args: argparse.Namespace, config: Dict[str, Any]) -> Dic
         "algo": algo,
         "learning_rate": learning_rate,
         "enable_operator_logging": enable_operator_logging,
+        "algorithm_mode": algorithm_mode,
     }
 
     return params
@@ -154,7 +164,7 @@ def main() -> None:
 
     if not args.skip_env_check:
         first_instance = train_paths[0]
-        if not test_environment_manually(first_instance):
+        if not test_environment_manually(first_instance, algorithm_mode=params["algorithm_mode"]):
             raise RuntimeError("Environment smoke-test failed")
 
     # Train the PPO agent
@@ -172,6 +182,7 @@ def main() -> None:
         state_module=params["state_module"],
         reward_module=params["reward_module"],
         enable_operator_logging=params["enable_operator_logging"],
+        algorithm_mode=params["algorithm_mode"],
     )
 
     model_zip = manager.paths.model_zip
@@ -196,6 +207,7 @@ def main() -> None:
         action_module=params["action_module"],
         state_module=params["state_module"],
         reward_module=params["reward_module"],
+        algorithm_mode=params["algorithm_mode"],
     )
 
     baseline_stats: Optional[Dict[str, Any]] = None
@@ -205,6 +217,7 @@ def main() -> None:
             max_iterations=params["max_iterations"],
             output_dir=str(params["baseline_dir"]),
             enable_operator_logging=params["enable_operator_logging"],
+            algorithm_mode=params["algorithm_mode"],
         )
         baseline_stats = {
             "mean_reward": baseline_mean,
@@ -224,6 +237,7 @@ def main() -> None:
             action_module=params["action_module"],
             state_module=params["state_module"],
             reward_module=params["reward_module"],
+            algorithm_mode=params["algorithm_mode"],
         )
     else:
         comparison_results = []

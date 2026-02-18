@@ -3,7 +3,7 @@ use std::path::Path;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rust_alns_py::alns::engine::ALNSEngine;
+use rust_alns_py::alns::engine::{ALNSEngine, ALNSAlgorithmMode};
 use rust_alns_py::operators::improvement::fleet_and_cost_reduction::FleetAndCostReduction;
 use rust_alns_py::operators::traits::ImprovementOperator;
 use rust_alns_py::structs::solution::Solution;
@@ -25,8 +25,16 @@ fn used_vessel_ids(solution: &Solution) -> HashSet<usize> {
 
 #[test]
 fn fleet_reduction_merges_vessels_and_exports_snapshots() {
-    let mut engine = ALNSEngine::new_from_instance("SMALL_1", 7, 100.0, 0.9, 10, 1)
-        .expect("failed to construct deterministic engine");
+    let mut engine = ALNSEngine::new_from_instance(
+        "SMALL_1",
+        7,
+        100.0,
+        0.9,
+        10,
+        1,
+        ALNSAlgorithmMode::Baseline,
+    )
+    .expect("failed to construct deterministic engine");
     let context = engine.context.clone();
 
     let mut manipulated_solution = engine.current_solution.clone();

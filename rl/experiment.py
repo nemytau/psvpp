@@ -363,6 +363,7 @@ class ExperimentManager:
                 "max_iterations": params.get("max_iterations"),
                 "sampling_strategy": params.get("sampling_strategy"),
                 "seed": params.get("seed"),
+                "algorithm_mode": params.get("algorithm_mode"),
                 "modules": modules,
             },
             "evaluation": {

@@ -20,6 +20,7 @@ from rl.experiment import (
 from rl.train_alns_rl import (
     compare_with_baseline,
     evaluate_trained_model,
+    normalize_algorithm_mode,
     prepare_dataset_splits,
 )
 
@@ -34,6 +35,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--deterministic", action="store_true", help="Use deterministic actions (default true)")
     parser.add_argument("--stochastic", action="store_true", help="Force stochastic evaluation (overrides deterministic)")
     parser.add_argument("--include-baseline", action="store_true", help="Compute random-policy baseline metrics")
+    parser.add_argument(
+        "--algorithm-mode",
+        default=None,
+        choices=["baseline", "kisialiou", "reinforcement_learning", "rl"],
+        help="High-level ALNS variant (baseline, kisialiou, reinforcement_learning)",
+    )
     return parser.parse_args()
 
 
@@ -65,6 +72,15 @@ def main() -> None:
         deterministic = True
     else:
         deterministic = default_deterministic
+
+    manifest_training = manifest.get("training", {}) if manifest else {}
+    manifest_algorithm_mode = manifest_training.get("algorithm_mode") if manifest_training else None
+    raw_algorithm_mode = (
+        args.algorithm_mode
+        or manifest_algorithm_mode
+        or get_config_value(config, ("alns", "algorithm_mode"), "baseline")
+    )
+    algorithm_mode = normalize_algorithm_mode(raw_algorithm_mode)
 
     manifest_seeds = manifest_eval.get("seeds") if manifest_eval else None
     seeds = list(manifest_seeds) if manifest_seeds else list(get_config_value(config, ("evaluation", "seeds"), [42]))
@@ -99,6 +115,7 @@ def main() -> None:
         deterministic=deterministic,
         output_dir=str(output_dir / "evaluation"),
         max_iterations=max_iterations,
+        algorithm_mode=algorithm_mode,
     )
 
     summary: Dict[str, Any] = {
@@ -110,6 +127,7 @@ def main() -> None:
         "mean_reward": mean_reward,
         "std_reward": std_reward,
         "details": details,
+        "algorithm_mode": algorithm_mode,
     }
     if manifest_path:
         summary["manifest"] = str(Path(manifest_path).resolve())
@@ -120,6 +138,7 @@ def main() -> None:
             problem_paths=test_paths,
             max_iterations=max_iterations,
             output_dir=str(output_dir / "baseline_random"),
+            algorithm_mode=algorithm_mode,
         )
         summary["baseline"] = {
             "mean_reward": baseline_mean,

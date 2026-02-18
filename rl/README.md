@@ -123,7 +123,7 @@ The `rl` package now exposes structured CLI entrypoints that wrap the workflow a
 
 ```bash
 # Train, evaluate, and run baselines in a single command
-python -m rl.train --config configs/ppo_default.yaml --exp-name ppo_v1
+python -m rl.train --config configs/ppo_default.yaml --exp-name ppo_v1 --algorithm-mode kisialiou
 
 # Evaluate a saved model on the test split
 python -m rl.test --model runs/ppo_v1/model.zip --include-baseline
@@ -136,6 +136,31 @@ python -m rl.solve --model runs/ppo_v1/model.zip --instance data/processed/alns/
 ```
 
 All commands accept `--config` to override defaults (dataset size, seeds, directories, module keys).
+
+### Algorithm Modes
+
+The Rust engine now supports multiple high-level ALNS execution modes. Every CLI exposes an `--algorithm-mode` flag:
+
+| Mode | Description |
+|------|-------------|
+| `baseline` (default) | Classic destroy/repair loop with optional single improvement step. |
+| `kisialiou` | Sequential destroy, repair, and ordered improvement sequence as proposed by Kisialiou et al. |
+| `reinforcement_learning` / `rl` | Delegates improvement selection to the RL policy for fully learned search control. |
+
+Examples:
+
+```bash
+# Train RL policy while driving the engine in Kisialiou mode
+python -m rl.train --algorithm-mode kisialiou
+
+# Run evaluation / comparison with the learned RL-centric iteration flow
+python -m rl.evaluate --model runs/ppo_v1/model.zip --algorithm-mode reinforcement_learning
+
+# Smoke-test the random baseline in each mode
+python scripts/alns_baseline_smoke.py --algorithm-mode kisialiou
+```
+
+If omitted, the default mode is `baseline`. Passing `rl` is accepted as shorthand for `reinforcement_learning`.
 
 ### Experiment Manifests
 

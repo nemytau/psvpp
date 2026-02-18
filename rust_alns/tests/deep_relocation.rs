@@ -1,6 +1,6 @@
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rust_alns_py::alns::engine::ALNSEngine;
+use rust_alns_py::alns::engine::{ALNSEngine, ALNSAlgorithmMode};
 use rust_alns_py::operators::improvement::deep_relocation::DeepRelocation;
 use rust_alns_py::operators::traits::ImprovementOperator;
 use rust_alns_py::structs::solution::Solution;
@@ -54,7 +54,15 @@ fn introduce_worse_relocation(solution: &Solution, context: &rust_alns_py::struc
 
 #[test]
 fn deep_relocation_improves_cost() {
-    let mut engine = ALNSEngine::new_from_instance("SMALL_1", 7, 100.0, 0.9, 10, 1)
+    let mut engine = ALNSEngine::new_from_instance(
+        "SMALL_1",
+        7,
+        100.0,
+        0.9,
+        10,
+        1,
+        ALNSAlgorithmMode::Baseline,
+    )
         .expect("failed to construct deterministic engine");
     let context = engine.context.clone();
 

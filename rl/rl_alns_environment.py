@@ -64,6 +64,7 @@ class ALNSEnvironment(gym.Env):
         action_module: str = DEFAULT_ACTION_KEY,
         state_module: str = DEFAULT_STATE_KEY,
         reward_module: str = DEFAULT_REWARD_KEY,
+        algorithm_mode: str = "baseline",
         enable_operator_logging: bool = True,
         operator_logging_mode: str = "train",
         operator_logging_format: str = "csv",
@@ -85,6 +86,7 @@ class ALNSEnvironment(gym.Env):
             operator_logging_mode: Mode label embedded in output filenames (e.g. "train")
             operator_logging_format: Log file format, either "csv" or "jsonl"
             operator_logging_dir: Target directory for operator usage logs (defaults to logs/)
+            algorithm_mode: High-level ALNS variant to execute (baseline, kisialiou, reinforcement_learning)
             force_baseline_improvement: Automatically execute a configured improvement after each destroy/repair pair (baseline mode)
             baseline_improvement_idx: Optional improvement operator index to use when ``force_baseline_improvement`` is enabled
         """
@@ -114,9 +116,27 @@ class ALNSEnvironment(gym.Env):
         self.state_module_name = state_module or DEFAULT_STATE_KEY
         self.reward_module_name = reward_module or DEFAULT_REWARD_KEY
         self.operator_logging_enabled = bool(enable_operator_logging)
+        self.algorithm_mode = (algorithm_mode or "baseline").strip().lower()
+        if self.algorithm_mode not in {"baseline", "kisialiou", "reinforcement_learning", "rl"}:
+            LOGGER.warning(
+                "%s Unknown algorithm_mode '%s'; defaulting to 'baseline'",
+                LOG_PREFIX,
+                algorithm_mode,
+            )
+            self.algorithm_mode = "baseline"
+        if self.algorithm_mode == "rl":
+            self.algorithm_mode = "reinforcement_learning"
         self.force_baseline_improvement = bool(force_baseline_improvement)
         self.baseline_improvement_idx = baseline_improvement_idx if baseline_improvement_idx is None else int(baseline_improvement_idx)
         
+        if self.force_baseline_improvement and self.algorithm_mode != "baseline":
+            LOGGER.warning(
+                "%s force_baseline_improvement is only compatible with baseline mode; disabling the flag.",
+                LOG_PREFIX,
+            )
+            self.force_baseline_improvement = False
+            self.baseline_improvement_idx = None
+
         # Initialize ALNS interface
         self.alns = rust_alns_py.RustALNSInterface() # type: ignore
         
@@ -369,7 +389,8 @@ class ALNSEnvironment(gym.Env):
                 seed=episode_seed,
                 temperature=self.temperature,
                 theta=self.theta,
-                weight_update_interval=self.weight_update_interval
+                weight_update_interval=self.weight_update_interval,
+                algorithm_mode=self.algorithm_mode,
             )
 
             if snapshot_override is not None:

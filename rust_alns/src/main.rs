@@ -495,6 +495,7 @@ fn test_alns_engine_iterations() -> Result<(), Box<dyn std::error::Error>> {
         0.9,   // theta
         10,    // weight_update_interval
         20,    // max_iterations
+        crate::alns::engine::ALNSAlgorithmMode::Baseline,
     )?;
 
     println!("Initial cost: {:.4}", engine.initial_cost);

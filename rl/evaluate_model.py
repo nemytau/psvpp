@@ -16,8 +16,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from stable_baselines3 import PPO
 
+from rl.experiment import find_manifest_for_model, load_manifest
 from rl.train_alns_rl import (
     compare_model_against_baseline,
+    normalize_algorithm_mode,
     run_episode_with_policy,
     _to_relative_path,
 )
@@ -67,6 +69,12 @@ def _parse_args() -> argparse.Namespace:
         "--reward-module",
         default=None,
         help="Registry key for the reward function implementation",
+    )
+    parser.add_argument(
+        "--algorithm-mode",
+        default=None,
+        choices=["baseline", "kisialiou", "reinforcement_learning", "rl"],
+        help="High-level ALNS variant (baseline, kisialiou, reinforcement_learning)",
     )
     return parser.parse_args()
 
@@ -146,6 +154,18 @@ def _write_summary(
 
 def main() -> None:
     args = _parse_args()
+    manifest_path = find_manifest_for_model(args.model_path)
+    manifest: Optional[Dict[str, Any]] = None
+    if manifest_path:
+        manifest = load_manifest(manifest_path)
+
+    manifest_training = manifest.get("training", {}) if manifest else {}
+    raw_algorithm_mode = (
+        args.algorithm_mode
+        or manifest_training.get("algorithm_mode")
+        or "baseline"
+    )
+    algorithm_mode = normalize_algorithm_mode(raw_algorithm_mode)
     dataset_rel = _prepare_dataset_path(args.dataset)
     model = PPO.load(args.model_path)
 
@@ -160,6 +180,7 @@ def main() -> None:
         action_module=args.action_module,
         state_module=args.state_module,
         reward_module=args.reward_module,
+        algorithm_mode=algorithm_mode,
     )
     shared_snapshot = rl_stats.pop("initial_snapshot", None)
 
@@ -175,6 +196,7 @@ def main() -> None:
             action_module=rl_stats.get("modules", {}).get("action", args.action_module),
             state_module=rl_stats.get("modules", {}).get("state", args.state_module),
             reward_module=rl_stats.get("modules", {}).get("reward", args.reward_module),
+            algorithm_mode=algorithm_mode,
         )
 
     dataset_label = Path(dataset_rel).name
@@ -204,6 +226,7 @@ def main() -> None:
         "dataset": dataset_rel,
         "seed": args.seed,
         "deterministic": deterministic,
+        "algorithm_mode": algorithm_mode,
         "rl": rl_stats,
     }
     if baseline_stats:
@@ -224,6 +247,7 @@ def main() -> None:
             action_module=args.action_module,
             state_module=args.state_module,
             reward_module=args.reward_module,
+            algorithm_mode=algorithm_mode,
         )
 
 if __name__ == "__main__":

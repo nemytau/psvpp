@@ -1,6 +1,6 @@
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rust_alns_py::alns::engine::ALNSEngine;
+use rust_alns_py::alns::engine::{ALNSEngine, ALNSAlgorithmMode};
 use rust_alns_py::operators::improvement::deep_swap::DeepSwap;
 use rust_alns_py::operators::traits::ImprovementOperator;
 use rust_alns_py::structs::solution::Solution;
@@ -69,8 +69,16 @@ fn introduce_worse_swap(solution: &Solution, context: &rust_alns_py::structs::co
 
 #[test]
 fn deep_swap_improves_cost() {
-    let mut engine = ALNSEngine::new_from_instance("SMALL_1", 7, 100.0, 0.9, 10, 1)
-        .expect("failed to construct deterministic engine");
+    let mut engine = ALNSEngine::new_from_instance(
+        "SMALL_1",
+        7,
+        100.0,
+        0.9,
+        10,
+        1,
+        ALNSAlgorithmMode::Baseline,
+    )
+    .expect("Failed to initialize engine");
     let context = engine.context.clone();
 
     let worse_solution = introduce_worse_swap(&engine.current_solution, &context);

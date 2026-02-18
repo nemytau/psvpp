@@ -34,6 +34,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "state": None,
         "reward": None,
     },
+    "alns": {
+        "algorithm_mode": "baseline",
+    },
 }
 
 

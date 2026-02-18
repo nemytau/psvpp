@@ -62,6 +62,11 @@ from rl.registries import (
 )
 
 
+def normalize_algorithm_mode(value: Optional[str]) -> str:
+    mode = str(value or "baseline").strip().lower()
+    return "reinforcement_learning" if mode == "rl" else mode
+
+
 def _slugify_path(path: str) -> str:
     return Path(path).name.replace(" ", "_")
 
@@ -238,10 +243,14 @@ class ALNSTrainingCallback(BaseCallback):
         plt.close()
 
 
-def test_environment_manually(problem_instance: Optional[str] = "SMALL_1") -> bool:
+def test_environment_manually(
+    problem_instance: Optional[str] = "SMALL_1",
+    algorithm_mode: str = "baseline",
+) -> bool:
     """Quick smoke test to ensure the ALNS environment is functional."""
 
     dataset_label = problem_instance or "SMALL_1"
+    algorithm_mode = normalize_algorithm_mode(algorithm_mode)
     LOGGER.info("%s Testing ALNSEnvironment manually (instance=%s)", LOG_PREFIX, dataset_label)
     path_obj = Path(dataset_label)
     absolute_path = path_obj if path_obj.is_absolute() else PROJECT_ROOT / path_obj
@@ -259,6 +268,7 @@ def test_environment_manually(problem_instance: Optional[str] = "SMALL_1") -> bo
             seed=42,
             problem_instance_paths=[dataset_label],
             problem_sampling_strategy="round_robin",
+            algorithm_mode=algorithm_mode,
         )
 
         LOGGER.info("%s Action space: %s", LOG_PREFIX, env.action_space)
@@ -315,10 +325,12 @@ def train_ppo_agent(
     state_module: Optional[str] = None,
     reward_module: Optional[str] = None,
     enable_operator_logging: bool = True,
+    algorithm_mode: str = "baseline",
 ) -> Tuple[PPO, DummyVecEnv]:
     """Train a PPO agent on the ALNS environment using provided datasets."""
 
     LOGGER.info("%s Training PPO agent for %d timesteps", LOG_PREFIX, total_timesteps)
+    algorithm_mode = normalize_algorithm_mode(algorithm_mode)
 
     train_instances = list(train_instance_paths) if train_instance_paths else ["SMALL_1"]
     if not train_instances:
@@ -357,6 +369,7 @@ def train_ppo_agent(
         env_kwargs["operator_logging_mode"] = "train"
         if operator_logging_dir_str:
             env_kwargs["operator_logging_dir"] = operator_logging_dir_str
+        env_kwargs["algorithm_mode"] = algorithm_mode
 
         return ALNSEnvironment(**env_kwargs)
 
@@ -393,10 +406,12 @@ def evaluate_trained_model(
     action_module: Optional[str] = None,
     state_module: Optional[str] = None,
     reward_module: Optional[str] = None,
+    algorithm_mode: str = "baseline",
 ) -> Tuple[float, float, List[Dict[str, Any]]]:
     """Evaluate a trained PPO model across a set of problem instances."""
 
     eval_paths = list(problem_paths) if problem_paths else ["SMALL_1"]
+    algorithm_mode = normalize_algorithm_mode(algorithm_mode)
     episodes = n_eval_episodes or len(eval_paths)
 
     LOGGER.info(
@@ -429,6 +444,7 @@ def evaluate_trained_model(
         action_module=resolved_action_module or DEFAULT_ACTION_KEY,
         state_module=resolved_state_module or DEFAULT_STATE_KEY,
         reward_module=resolved_reward_module or DEFAULT_REWARD_KEY,
+        algorithm_mode=algorithm_mode,
     )
 
     mean_reward_raw, std_reward_raw = evaluate_policy(
@@ -456,6 +472,7 @@ def evaluate_trained_model(
         action_module=resolved_action_module or DEFAULT_ACTION_KEY,
         state_module=resolved_state_module or DEFAULT_STATE_KEY,
         reward_module=resolved_reward_module or DEFAULT_REWARD_KEY,
+        algorithm_mode=algorithm_mode,
     )
 
     plots_dir: Optional[Path] = None
@@ -524,10 +541,12 @@ def compare_with_baseline(
     max_iterations: int = 100,
     output_dir: Optional[str] = None,
     enable_operator_logging: bool = True,
+    algorithm_mode: str = "baseline",
 ) -> Tuple[float, float, List[Dict[str, Any]]]:
     """Evaluate a random baseline policy across the same problem instances."""
 
     baseline_paths = list(problem_paths) if problem_paths else ["SMALL_1"]
+    algorithm_mode = normalize_algorithm_mode(algorithm_mode)
     operator_logs_dir_baseline = (
         Path(output_dir) / "operator_usage_baseline"
         if output_dir and enable_operator_logging
@@ -543,6 +562,7 @@ def compare_with_baseline(
         enable_operator_logging=enable_operator_logging,
         operator_logging_mode="baseline",
         operator_logging_dir=str(operator_logs_dir_baseline) if operator_logs_dir_baseline else None,
+        algorithm_mode=algorithm_mode,
     )
 
     plots_dir: Optional[Path] = None
@@ -686,8 +706,10 @@ def run_episode_with_policy(
     action_module: Optional[str] = None,
     state_module: Optional[str] = None,
     reward_module: Optional[str] = None,
+    algorithm_mode: str = "baseline",
 ) -> Dict[str, Any]:
     resolved_state_module = _resolve_state_module(policy_model, state_module)
+    algorithm_mode = normalize_algorithm_mode(algorithm_mode)
 
     env_kwargs: Dict[str, Any] = {
         "problem_instance": problem_path,
@@ -709,6 +731,7 @@ def run_episode_with_policy(
         env_kwargs["state_module"] = resolved_state_module
     if reward_module:
         env_kwargs["reward_module"] = reward_module
+    env_kwargs["algorithm_mode"] = algorithm_mode
 
     env = ALNSEnvironment(**env_kwargs)
 
@@ -783,9 +806,11 @@ def compare_model_against_baseline(
     action_module: Optional[str] = None,
     state_module: Optional[str] = None,
     reward_module: Optional[str] = None,
+    algorithm_mode: str = "baseline",
 ) -> List[Dict[str, Any]]:
     """Run side-by-side comparisons for the PPO model and random baseline."""
 
+    algorithm_mode = normalize_algorithm_mode(algorithm_mode)
     comparison_dir = Path(output_dir)
     comparison_dir.mkdir(parents=True, exist_ok=True)
 
@@ -818,6 +843,7 @@ def compare_model_against_baseline(
                 action_module=action_module,
                 state_module=state_module,
                 reward_module=reward_module,
+                algorithm_mode=algorithm_mode,
             )
 
             snapshot_for_baseline = rl_result.pop("initial_snapshot", None)
@@ -839,6 +865,7 @@ def compare_model_against_baseline(
                 action_module=baseline_action_module,
                 state_module=baseline_state_module,
                 reward_module=baseline_reward_module,
+                algorithm_mode=algorithm_mode,
             )
 
             rl_cost_history = list(rl_result.get("cost_history", []))
@@ -1208,6 +1235,7 @@ def main() -> None:
         max_iterations=max_iterations,
         output_dir=f"{log_dir}/model_vs_baseline",
         deterministic=True,
+        algorithm_mode="baseline",
     )
 
     improvement_vs_baseline = mean_reward - baseline_reward

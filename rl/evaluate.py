@@ -16,6 +16,7 @@ from rl.experiment import (
 )
 from rl.registries import DEFAULT_ACTION_KEY, DEFAULT_REWARD_KEY, DEFAULT_STATE_KEY
 from rl.train_alns_rl import compare_model_against_baseline, prepare_dataset_splits
+from rl.train_alns_rl import normalize_algorithm_mode
 
 
 def _parse_args() -> argparse.Namespace:
@@ -31,6 +32,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--action-module", default=None, help="Registry key for action space implementation")
     parser.add_argument("--state-module", default=None, help="Registry key for state encoder implementation")
     parser.add_argument("--reward-module", default=None, help="Registry key for reward function implementation")
+    parser.add_argument(
+        "--algorithm-mode",
+        default=None,
+        choices=["baseline", "kisialiou", "reinforcement_learning", "rl"],
+        help="High-level ALNS variant (baseline, kisialiou, reinforcement_learning)",
+    )
     return parser.parse_args()
 
 
@@ -66,6 +73,14 @@ def main() -> None:
         deterministic = True
     else:
         deterministic = default_det
+
+    manifest_training = manifest.get("training", {}) if manifest else {}
+    raw_algorithm_mode = (
+        args.algorithm_mode
+        or manifest_training.get("algorithm_mode")
+        or get_config_value(config, ("alns", "algorithm_mode"), "baseline")
+    )
+    algorithm_mode = normalize_algorithm_mode(raw_algorithm_mode)
 
     if args.output_dir:
         output_dir = Path(args.output_dir)
@@ -107,6 +122,7 @@ def main() -> None:
         action_module=action_module,
         state_module=state_module,
         reward_module=reward_module,
+        algorithm_mode=algorithm_mode,
     )
     print("[DONE] Comparison outputs saved to", output_dir)
 

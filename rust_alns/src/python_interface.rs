@@ -122,6 +122,11 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         None => dict.set_item("improvement_operator_type_id", py.None())?,
     }
 
+    dict.set_item(
+        "improvement_sequence",
+        PyList::new(py, metrics.improvement_sequence.clone()),
+    )?;
+
     dict.set_item("destroy_removed_requests", metrics.destroy_removed_requests)?;
     dict.set_item("repair_inserted_requests", metrics.repair_inserted_requests)?;
     dict.set_item(
@@ -207,6 +212,14 @@ impl RustALNSInterface {
         Self { engine: None }
     }
 
+    #[pyo3(signature = (
+        problem_instance,
+        seed,
+        temperature=None,
+        theta=None,
+        weight_update_interval=None,
+        algorithm_mode=None
+    ))]
     fn initialize_alns(
         &mut self,
         py: Python,
@@ -215,6 +228,7 @@ impl RustALNSInterface {
         temperature: Option<f64>,
         theta: Option<f64>,
         weight_update_interval: Option<usize>,
+        algorithm_mode: Option<&str>,
     ) -> PyResult<PyObject> {
         // Initialize logging for Python interface (only if not already initialized)
         if !PYTHON_LOGGING_INITIALIZED.load(Ordering::Relaxed) {
@@ -229,6 +243,22 @@ impl RustALNSInterface {
         let weight_update_interval = weight_update_interval.unwrap_or(10);
         let max_iterations = 1000; // Default max iterations
 
+        let algorithm_mode = algorithm_mode
+            .map(|mode| mode.to_ascii_lowercase())
+            .as_deref()
+            .map(|mode| match mode {
+                "baseline" => Ok(crate::alns::engine::ALNSAlgorithmMode::Baseline),
+                "kisialiou" => Ok(crate::alns::engine::ALNSAlgorithmMode::Kisialiou),
+                "reinforcement_learning" | "rl" => {
+                    Ok(crate::alns::engine::ALNSAlgorithmMode::ReinforcementLearning)
+                }
+                other => Err(PyValueError::new_err(format!(
+                    "Invalid algorithm_mode '{}'. Use 'baseline', 'kisialiou', or 'reinforcement_learning'",
+                    other
+                ))),
+            })
+            .transpose()?;
+
         let engine = ALNSEngine::new_from_instance(
             problem_instance,
             seed,
@@ -236,6 +266,7 @@ impl RustALNSInterface {
             theta,
             weight_update_interval,
             max_iterations,
+            algorithm_mode.unwrap_or(crate::alns::engine::ALNSAlgorithmMode::Baseline),
         )
         .map_err(|e| PyRuntimeError::new_err(e))?;
         self.engine = Some(engine);
