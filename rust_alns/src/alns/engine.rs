@@ -725,11 +725,13 @@ impl ALNSEngine {
     }
 
     fn compute_kisialiou_improvement_sequence(&self) -> Vec<usize> {
-        const ORDERED_NAMES: [&str; 4] = [
+        const ORDERED_NAMES: [&str; 6] = [
             "voyage_number_reduction",
             "fleet_and_cost_reduction",
             "deep_relocation",
+            "fleet_and_cost_reduction",
             "deep_swap",
+            "fleet_and_cost_reduction"
         ];
 
         ORDERED_NAMES
