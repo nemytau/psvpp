@@ -3,12 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -20,11 +21,10 @@ from rl.dataset_manager import GeneratedDatasetManager
 from rl.rl_alns_environment import ALNSEnvironment
 
 
-SIZES = ["small", "medium"]
-MODES = ["baseline", "kisialiou", "reinforcement_learning"]
-ITERATIONS = 1000
-BASE_SEED = 4242
-DATASETS_PER_SIZE = 1
+DEFAULT_SIZES = ["small", "medium"]
+DEFAULT_MODES = ["baseline", "kisialiou", "reinforcement_learning"]
+DEFAULT_ITERATIONS = 1000
+DEFAULT_DATASETS_PER_SIZE = 1
 RESULTS_PATH = REPO_ROOT / "output" / "alns_mode_benchmark.json"
 LOG_PATH = REPO_ROOT / "output" / "alns_mode_benchmark.log"
 
@@ -55,10 +55,13 @@ def run_episode(
         "seed": seed,
         "problem_instance_paths": [problem_path],
         "problem_sampling_strategy": "round_robin",
-        "enable_operator_logging": False,
+        "enable_operator_logging": True,
+        "operator_logging_format": "csv",
+        "operator_logging_mode": "episode",
+        "operator_logging_future_window": 5,
         "algorithm_mode": algorithm_mode,
-        "force_baseline_improvement": True,
-        "baseline_improvement_idx": 0,
+        "force_baseline_improvement": False,
+        "baseline_improvement_idx": None,
     }
 
     env = ALNSEnvironment(**env_kwargs)
@@ -79,8 +82,6 @@ def run_episode(
             if num_pairs and num_pairs > 0:
                 action = int(rng.integers(0, num_pairs))
         obs, reward, done, truncated, info = env.step(action)
-        if info.get("baseline_improvement_triggered"):
-            env.log_improvement_usage()
         steps += 1
 
     stats = env.get_episode_statistics()
@@ -90,26 +91,86 @@ def run_episode(
     return stats
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Benchmark ALNS algorithm modes over generated datasets")
+    parser.add_argument(
+        "--sizes",
+        nargs="*",
+        default=DEFAULT_SIZES,
+        help=f"Dataset sizes to include (default: {', '.join(DEFAULT_SIZES)})",
+    )
+    parser.add_argument(
+        "--modes",
+        nargs="*",
+        default=DEFAULT_MODES,
+        help=f"Algorithm modes to evaluate (default: {', '.join(DEFAULT_MODES)})",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=DEFAULT_ITERATIONS,
+        help="ALNS iterations per dataset (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--datasets-per-size",
+        type=int,
+        default=DEFAULT_DATASETS_PER_SIZE,
+        help="Number of test datasets per size (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--base-seed",
+        type=int,
+        default=4242,
+        help="Base seed offset applied per dataset index (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--results-path",
+        type=Path,
+        default=RESULTS_PATH,
+        help="Destination JSON file for per-run results",
+    )
+    parser.add_argument(
+        "--log-path",
+        type=Path,
+        default=LOG_PATH,
+        help="Destination log file capturing benchmark progress",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     LOG_LINES.clear()
     manager = GeneratedDatasetManager()
     results: List[Dict[str, Any]] = []
 
-    for size in SIZES:
+    sizes: List[str] = list(args.sizes or [])
+    algorithm_modes: List[str] = list(args.modes or [])
+
+    if not sizes:
+        log("No dataset sizes specified; exiting")
+        return
+    if not algorithm_modes:
+        log("No algorithm modes specified; exiting")
+        return
+
+    datasets_per_size = max(1, int(args.datasets_per_size))
+
+    for size in sizes:
         log(f"Preparing datasets for size={size}")
         splits = manager.prepare_size(size)
-        test_paths = splits.get("test", [])[:DATASETS_PER_SIZE]
-        if len(test_paths) < DATASETS_PER_SIZE:
+        test_paths = splits.get("test", [])[:datasets_per_size]
+        if len(test_paths) < datasets_per_size:
             raise RuntimeError(
-                f"Expected at least {DATASETS_PER_SIZE} test dataset(s) for size '{size}', found {len(test_paths)}"
+                f"Expected at least {datasets_per_size} test dataset(s) for size '{size}', found {len(test_paths)}"
             )
 
         for idx, dataset_path in enumerate(test_paths):
             dataset_path = Path(dataset_path)
             dataset_label = dataset_path.name
-            seed = BASE_SEED + idx
+            seed = int(args.base_seed) + idx
 
-            for mode in MODES:
+            for mode in algorithm_modes:
                 normalized_mode = normalize_algorithm_mode(mode)
                 log(
                     f"Running mode={normalized_mode:<24} size={size:<6} dataset={dataset_label:<20} seed={seed}"
@@ -118,7 +179,7 @@ def main() -> None:
                 episode = run_episode(
                     problem_path=str(dataset_path),
                     seed=seed,
-                    max_iterations=ITERATIONS,
+                    max_iterations=args.iterations,
                     algorithm_mode=normalized_mode,
                 )
                 wall_time = time.perf_counter() - start_time
@@ -152,18 +213,18 @@ def main() -> None:
                     }
                 )
 
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with RESULTS_PATH.open("w", encoding="utf-8") as fh:
+    args.results_path.parent.mkdir(parents=True, exist_ok=True)
+    with args.results_path.open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
-    log(f"Wrote {len(results)} runs to {RESULTS_PATH}")
+    log(f"Wrote {len(results)} runs to {args.results_path}")
 
     summary = build_summary(results)
-    print_summary(summary)
+    print_summary(summary, sizes, algorithm_modes)
 
-    with LOG_PATH.open("w", encoding="utf-8") as fh:
+    with args.log_path.open("w", encoding="utf-8") as fh:
         for line in LOG_LINES:
             fh.write(f"{line}\n")
-    log(f"Log written to {LOG_PATH}")
+    log(f"Log written to {args.log_path}")
 
 
 def build_summary(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, float]]]:
@@ -198,33 +259,41 @@ def build_summary(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str
     return aggregated
 
 
-def print_summary(summary: Dict[str, Dict[str, Dict[str, float]]]) -> None:
+def print_summary(
+    summary: Dict[str, Dict[str, Dict[str, float]]],
+    sizes: Iterable[str],
+    modes: Iterable[str],
+) -> None:
     header = f"{'Size':<8} {'Mode':<24} {'Runs':>4} {'Best Cost':>12} {'Δ%':>7} {'Runtime(s)':>11}"
     separator = "=" * len(header)
+    sizes = list(sizes)
+    modes = list(modes)
 
     log(separator)
     log(header)
     log(separator)
 
-    for size in SIZES:
-        modes = summary.get(size, {})
-        for mode in MODES:
-            stats = modes.get(normalize_algorithm_mode(mode)) or modes.get(mode)
+    normalized_modes = [normalize_algorithm_mode(mode) for mode in modes]
+
+    for size in sizes:
+        summary_modes = summary.get(size, {})
+        for mode in normalized_modes:
+            stats = summary_modes.get(mode)
             if not stats:
                 continue
             log(
-                f"{size:<8} {normalize_algorithm_mode(mode):<24} {int(stats['runs']):>4} "
+                f"{size:<8} {mode:<24} {int(stats['runs']):>4} "
                 f"{stats['mean_best_cost']:>12.2f} {stats['mean_improvement_pct']:>7.2f} "
                 f"{stats['mean_runtime_seconds']:>11.1f}"
             )
     log(separator)
 
-    for size in SIZES:
-        modes = summary.get(size, {})
-        if not modes:
+    for size in sizes:
+        summary_modes = summary.get(size, {})
+        if not summary_modes:
             continue
         best_mode, best_stats = min(
-            modes.items(),
+            summary_modes.items(),
             key=lambda item: item[1].get("mean_best_cost", float("inf")),
         )
         log(f"Best mode for {size}: {best_mode} (mean best cost {best_stats['mean_best_cost']:.2f})")

@@ -47,6 +47,10 @@ class OperatorUsageLogger:
         if self._fieldnames is None:
             # Preserve insertion order from first row for consistent CSV header.
             self._fieldnames = list(row.keys())
+        else:
+            for key in row.keys():
+                if key not in self._fieldnames:
+                    self._fieldnames.append(key)
         self._buffer.append(row)
 
     def flush(self) -> Optional[Path]:

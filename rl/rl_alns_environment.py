@@ -6,8 +6,9 @@ library, allowing RL agents to learn optimal operator selection strategies.
 """
 
 import logging
+from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -69,6 +70,7 @@ class ALNSEnvironment(gym.Env):
         operator_logging_mode: str = "train",
         operator_logging_format: str = "csv",
         operator_logging_dir: Optional[str] = None,
+        operator_logging_future_window: int = 5,
         force_baseline_improvement: bool = False,
         baseline_improvement_idx: Optional[int] = None,
     ):
@@ -86,6 +88,8 @@ class ALNSEnvironment(gym.Env):
             operator_logging_mode: Mode label embedded in output filenames (e.g. "train")
             operator_logging_format: Log file format, either "csv" or "jsonl"
             operator_logging_dir: Target directory for operator usage logs (defaults to logs/)
+            operator_logging_future_window: Number of future iterations considered when
+                computing delayed best-cost deltas per operator record
             algorithm_mode: High-level ALNS variant to execute (baseline, kisialiou, reinforcement_learning)
             force_baseline_improvement: Automatically execute a configured improvement after each destroy/repair pair (baseline mode)
             baseline_improvement_idx: Optional improvement operator index to use when ``force_baseline_improvement`` is enabled
@@ -191,12 +195,18 @@ class ALNSEnvironment(gym.Env):
             output_dir=logging_dir,
             enabled=self.operator_logging_enabled,
         )
+        self.operator_logging_future_window = max(0, int(operator_logging_future_window))
+        self._operator_log_pending: Deque[Dict[str, Any]] = deque()
         self._episode_counter = 0
         self._current_episode_id: Optional[int] = None
         self._latest_policy_entropy: Optional[float] = None
         self._initial_snapshot = None
         self._instance_stats_cache: Dict[str, Dict[str, float]] = {}
         self.current_instance_stats: Dict[str, float] = {}
+        self._last_prev_current_cost: float = 0.0
+        self._last_prev_best_cost: float = 0.0
+        self._last_step_current_cost: float = 0.0
+        self._last_step_best_cost: float = 0.0
         
         # Initialize state variables
         self.iteration = 0
@@ -345,8 +355,10 @@ class ALNSEnvironment(gym.Env):
 
         if self.operator_logging_enabled:
             # Flush any buffered logs from previous episode before starting anew
+            self._update_operator_log_future_metrics(self.last_best_cost or 0.0, finalize=True)
             self.operator_logger.flush()
             self.operator_logger.start_episode()
+        self._operator_log_pending.clear()
 
         self._episode_counter += 1
         self._current_episode_id = self._episode_counter
@@ -378,6 +390,10 @@ class ALNSEnvironment(gym.Env):
         self.last_fraction_removed = 0.0
         self._last_step_result = None
         self._last_step_result: Optional[Dict[str, Any]] = None
+        self._last_prev_current_cost = 0.0
+        self._last_prev_best_cost = 0.0
+        self._last_step_current_cost = 0.0
+        self._last_step_best_cost = 0.0
 
         snapshot_override = options.get("initial_snapshot") if options else None
         shared_snapshot = snapshot_override is not None
@@ -584,6 +600,10 @@ class ALNSEnvironment(gym.Env):
             self.last_current_cost = current_cost
             self.last_best_cost = best_cost
             self.stagnation_count = int(result.get("stagnation_count", self.stagnation_count))
+            self._last_prev_current_cost = prev_current_cost
+            self._last_prev_best_cost = prev_best_cost
+            self._last_step_current_cost = current_cost
+            self._last_step_best_cost = best_cost
 
             # TODO: emit real `fraction_removed` from Rust ALNS and remove 0.0 fallback
             fraction_removed = result.get("fraction_removed")
@@ -798,7 +818,14 @@ class ALNSEnvironment(gym.Env):
                 improvement_idx=improvement_idx_result,
                 log_destroy=True,
                 log_repair=True,
-                log_improvement=improvement_only,
+                log_improvement=(
+                    improvement_only
+                    or self.algorithm_mode == "kisialiou"
+                ),
+                prev_current_cost=prev_current_cost,
+                prev_best_cost=prev_best_cost,
+                current_cost=current_cost,
+                current_best_cost=best_cost,
             )
             
             # Check if episode is done
@@ -842,6 +869,7 @@ class ALNSEnvironment(gym.Env):
                     "final_temperature": result["temperature"]
                 }
                 if self.operator_logging_enabled:
+                    self._update_operator_log_future_metrics(best_cost, finalize=True)
                     log_path = self.operator_logger.flush()
                     if log_path:
                         info["operator_usage_log"] = str(log_path)
@@ -872,6 +900,10 @@ class ALNSEnvironment(gym.Env):
             self.last_acceptance_type = "error"
 
             self._latest_policy_entropy = None
+
+            if self.operator_logging_enabled:
+                final_best = self.last_best_cost if self.last_best_cost is not None else prev_best_cost
+                self._update_operator_log_future_metrics(final_best, finalize=True)
             
             return obs, reward, done, truncated, info
     
@@ -920,6 +952,8 @@ class ALNSEnvironment(gym.Env):
     def close(self) -> None:
         """Clean up environment resources."""
         if self.operator_logging_enabled:
+            final_best = self.last_best_cost if self.last_best_cost is not None else 0.0
+            self._update_operator_log_future_metrics(final_best, finalize=True)
             log_path = self.operator_logger.flush()
             if log_path:
                 LOGGER.debug("%s Operator usage log flushed to %s", LOG_PREFIX, log_path)
@@ -1019,7 +1053,48 @@ class ALNSEnvironment(gym.Env):
             log_destroy=False,
             log_repair=False,
             log_improvement=True,
+            prev_current_cost=self._last_prev_current_cost,
+            prev_best_cost=self._last_prev_best_cost,
+            current_cost=self._last_step_current_cost,
+            current_best_cost=self._last_step_best_cost,
         )
+
+    def _update_operator_log_future_metrics(self, latest_best_cost: float, finalize: bool = False) -> None:
+        if not self.operator_logging_enabled:
+            self._operator_log_pending.clear()
+            return
+        if not self._operator_log_pending:
+            return
+
+        matured: List[Dict[str, Any]] = []
+        latest_best = float(latest_best_cost) if latest_best_cost is not None else float("inf")
+        for entry in list(self._operator_log_pending):
+            entry["best_seen"] = min(entry["best_seen"], latest_best)
+            if finalize or self.iteration >= entry["deadline"]:
+                record = entry["record"]
+                record["best_cost_delta_future"] = entry["best_seen"] - entry["initial_best"]
+                matured.append(record)
+                self._operator_log_pending.remove(entry)
+
+        for record in matured:
+            self.operator_logger.append(record)
+
+    def _queue_operator_log_record(self, record: Dict[str, Any], current_best_cost: float) -> None:
+        if not self.operator_logging_enabled:
+            return
+        if self.operator_logging_future_window <= 0:
+            record["best_cost_delta_future"] = 0.0
+            self.operator_logger.append(record)
+            return
+
+        iteration_index = int(record.get("iteration", 0))
+        entry = {
+            "record": record,
+            "initial_best": float(record.get("cost_best", current_best_cost)),
+            "best_seen": float(current_best_cost),
+            "deadline": iteration_index + self.operator_logging_future_window,
+        }
+        self._operator_log_pending.append(entry)
 
     def _log_operator_usage(
         self,
@@ -1032,10 +1107,16 @@ class ALNSEnvironment(gym.Env):
         log_destroy: bool = True,
         log_repair: bool = True,
         log_improvement: bool = False,
+        prev_current_cost: float,
+        prev_best_cost: float,
+        current_cost: float,
+        current_best_cost: float,
     ) -> None:
         if not self.operator_logging_enabled or self._current_episode_id is None:
             self._latest_policy_entropy = None
             return
+
+        self._update_operator_log_future_metrics(current_best_cost)
 
         destroy_idx_result = result.get("destroy_operator_idx")
         if destroy_idx_result is None:
@@ -1064,6 +1145,9 @@ class ALNSEnvironment(gym.Env):
             except (TypeError, ValueError):
                 improvement_idx_result = None
 
+        cost_delta = float(current_cost) - float(prev_current_cost)
+        best_cost_delta = float(current_best_cost) - float(prev_best_cost)
+
         base_record = {
             "episode_id": self._current_episode_id,
             "iteration": self.iteration,
@@ -1080,6 +1164,10 @@ class ALNSEnvironment(gym.Env):
             "destroy_idx": destroy_idx_result if destroy_idx_result is not None else -1,
             "repair_idx": repair_idx_result if repair_idx_result is not None else -1,
             "improvement_idx": improvement_idx_result if improvement_idx_result is not None else -1,
+            "cost_delta": cost_delta,
+            "best_cost_delta": best_cost_delta,
+            "best_cost_delta_future": None,
+            "lookahead_window": self.operator_logging_future_window,
         }
 
         if (
@@ -1098,7 +1186,7 @@ class ALNSEnvironment(gym.Env):
                 "num_removed_requests": result.get("destroy_removed_requests"),
                 "num_inserted_requests": None,
             }
-            self.operator_logger.append(destroy_record)
+            self._queue_operator_log_record(destroy_record, current_best_cost)
 
         if (
             log_repair
@@ -1116,25 +1204,43 @@ class ALNSEnvironment(gym.Env):
                 "num_removed_requests": None,
                 "num_inserted_requests": result.get("repair_inserted_requests"),
             }
-            self.operator_logger.append(repair_record)
+            self._queue_operator_log_record(repair_record, current_best_cost)
 
-        if log_improvement and improvement_idx_result is not None:
-            improvement_name = result.get("improvement_operator_name")
-            if (
-                improvement_name is None
-                and 0 <= improvement_idx_result < self.num_improvement
-            ):
-                improvement_name = self.improvement_operators[improvement_idx_result]
+        if log_improvement:
+            improvement_indices: List[int] = []
+            sequence_raw = result.get("improvement_sequence")
+            if isinstance(sequence_raw, (list, tuple)):
+                for candidate in sequence_raw:
+                    try:
+                        idx = int(candidate)
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 <= idx < self.num_improvement:
+                        improvement_indices.append(idx)
 
-            improvement_record = {
-                **base_record,
-                "operator_name": improvement_name or "none",
-                "operator_type": result.get("improvement_operator_type", "improvement"),
-                "operator_index": improvement_idx_result,
-                "num_removed_requests": None,
-                "num_inserted_requests": None,
-            }
-            self.operator_logger.append(improvement_record)
+            if not improvement_indices and improvement_idx_result is not None:
+                if 0 <= improvement_idx_result < self.num_improvement:
+                    improvement_indices.append(improvement_idx_result)
+
+            for seq_pos, idx in enumerate(improvement_indices):
+                improvement_name = None
+                if 0 <= idx < self.num_improvement:
+                    improvement_name = self.improvement_operators[idx]
+                if seq_pos == len(improvement_indices) - 1:
+                    reported_name = result.get("improvement_operator_name")
+                    if isinstance(reported_name, str) and reported_name.strip():
+                        improvement_name = reported_name
+
+                improvement_record = {
+                    **base_record,
+                    "operator_name": improvement_name or f"improvement_{idx}",
+                    "operator_type": result.get("improvement_operator_type", "improvement"),
+                    "operator_index": idx,
+                    "improvement_idx": idx,
+                    "num_removed_requests": None,
+                    "num_inserted_requests": None,
+                }
+                self._queue_operator_log_record(improvement_record, current_best_cost)
 
         self._latest_policy_entropy = None
 

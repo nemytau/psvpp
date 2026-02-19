@@ -227,6 +227,7 @@ No early truncation for sub-optimal performance.
 | `temperature` | `500.0` | Initial simulated annealing temperature |
 | `theta` | `0.9` | Temperature cooling factor |
 | `weight_update_interval` | `10` | Operator weight update frequency |
+| `operator_logging_future_window` | `5` | Iterations to look ahead when computing `best_cost_delta_future` in operator usage logs |
 
 ## Evaluation & Analysis
 
@@ -236,6 +237,7 @@ The training script tracks:
 - **Episode Rewards**: Total reward per episode
 - **Solution Quality**: Cost improvements and best solutions found
 - **Operator Usage**: Which destroy/repair combinations are selected
+   - CSV/JSON entries now include per-step `cost_delta`, `best_cost_delta`, and a delayed `best_cost_delta_future` computed over the configured lookahead window, alongside stagnation counters and elapsed time
 - **Convergence**: Learning progress and stability
 
 ### Baseline Comparison
