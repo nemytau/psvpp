@@ -4,7 +4,7 @@ The PyO3 interface now supports configurable parameters for fine-tuning the ALNS
 
 ## Updated Interface
 
-### `initialize_alns(problem_instance, seed, temperature=None, theta=None, weight_update_interval=None)`
+### `initialize_alns(problem_instance, seed, temperature=None, theta=None, weight_update_interval=None, aggressive_search_factor=None)`
 
 **Parameters:**
 - `problem_instance` (str): Problem instance name (e.g., "SMALL_1")
@@ -12,6 +12,7 @@ The PyO3 interface now supports configurable parameters for fine-tuning the ALNS
 - `temperature` (float, optional): Initial simulated annealing temperature (default: 500.0)
 - `theta` (float, optional): Cooling factor for temperature decay (default: 0.9) 
 - `weight_update_interval` (int, optional): Iterations between operator weight updates (default: 10)
+- `aggressive_search_factor` (float, optional): Fraction of iterations after which strict acceptance starts (default: 0.85)
 
 **Backward Compatibility:**
 The old interface `initialize_alns(problem_instance, seed)` still works with default values.
@@ -33,6 +34,12 @@ The old interface `initialize_alns(problem_instance, seed)` still works with def
 - **Higher values** (e.g., 20): Infrequent updates, more stable operator selection
 - **Effect**: Controls how often successful operators get higher selection weights
 
+### Aggressive Search Factor
+- **Rule**: Strict phase starts at `iteration >= aggressive_search_factor * max_iterations`
+- **Strict behavior**: Only global-best improvements are accepted; otherwise the current solution is reset to the best known solution
+- **Higher values** (e.g., 0.9): Strict mode starts later
+- **Lower values** (e.g., 0.5): Strict mode starts earlier
+
 ## Examples
 
 ```python
@@ -52,11 +59,15 @@ interface.initialize_alns("SMALL_1", seed=42, temperature=50.0, theta=0.8)
 # Frequent weight updates
 interface.initialize_alns("SMALL_1", seed=42, weight_update_interval=5)
 
+# Enable earlier strict acceptance phase
+interface.initialize_alns("SMALL_1", seed=42, aggressive_search_factor=0.6)
+
 # Combined custom settings
 interface.initialize_alns("SMALL_1", seed=42, 
                          temperature=200.0, 
                          theta=0.95, 
-                         weight_update_interval=7)
+                         weight_update_interval=7,
+                         aggressive_search_factor=0.85)
 ```
 
 ## Files Modified

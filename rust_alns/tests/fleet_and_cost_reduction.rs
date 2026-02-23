@@ -31,6 +31,7 @@ fn fleet_reduction_merges_vessels_and_exports_snapshots() {
         100.0,
         0.9,
         10,
+        0.85,
         1,
         ALNSAlgorithmMode::Baseline,
     )

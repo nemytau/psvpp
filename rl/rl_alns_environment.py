@@ -1231,6 +1231,8 @@ class ALNSEnvironment(gym.Env):
             "best_cost_delta": best_cost_delta,
             "best_cost_delta_future": None,
             "lookahead_window": self.operator_logging_future_window,
+            "sequence_position": None,
+            "sequence_call_id": None,
         }
 
         if (
@@ -1270,6 +1272,83 @@ class ALNSEnvironment(gym.Env):
             self._queue_operator_log_record(repair_record, current_best_cost)
 
         if log_improvement:
+            sequence_call_prefix = f"{self._current_episode_id}:{self.iteration}"
+
+            improvement_step_metrics_raw = result.get("improvement_step_metrics")
+            improvement_step_metrics: List[Dict[str, Any]] = []
+            if isinstance(improvement_step_metrics_raw, (list, tuple)):
+                for item in improvement_step_metrics_raw:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        idx = int(item.get("operator_idx"))
+                    except (TypeError, ValueError):
+                        continue
+                    if not (0 <= idx < self.num_improvement):
+                        continue
+
+                    name_raw = item.get("operator_name")
+                    operator_name = (
+                        str(name_raw)
+                        if isinstance(name_raw, str) and name_raw.strip()
+                        else self.improvement_operators[idx]
+                    )
+
+                    try:
+                        seq_pos = int(item.get("sequence_position"))
+                    except (TypeError, ValueError):
+                        seq_pos = len(improvement_step_metrics)
+
+                    cost_before: Optional[float]
+                    cost_after: Optional[float]
+                    try:
+                        cost_before = float(item.get("cost_before"))
+                    except (TypeError, ValueError):
+                        cost_before = None
+                    try:
+                        cost_after = float(item.get("cost_after"))
+                    except (TypeError, ValueError):
+                        cost_after = None
+
+                    if cost_before is not None and cost_after is not None:
+                        individual_cost_delta = cost_after - cost_before
+                    else:
+                        try:
+                            individual_cost_delta = float(item.get("cost_delta"))
+                        except (TypeError, ValueError):
+                            individual_cost_delta = float(current_cost) - float(prev_current_cost)
+
+                    improvement_step_metrics.append(
+                        {
+                            "operator_index": idx,
+                            "operator_name": operator_name,
+                            "sequence_position": seq_pos,
+                            "cost_delta": individual_cost_delta,
+                            "best_cost_delta": min(0.0, individual_cost_delta),
+                        }
+                    )
+
+            if improvement_step_metrics:
+                for step in improvement_step_metrics:
+                    seq_pos = int(step["sequence_position"])
+                    improvement_record = {
+                        **base_record,
+                        "operator_name": step["operator_name"],
+                        "operator_type": "improvement",
+                        "operator_index": int(step["operator_index"]),
+                        "improvement_idx": int(step["operator_index"]),
+                        "num_removed_requests": None,
+                        "num_inserted_requests": None,
+                        "cost_delta": float(step["cost_delta"]),
+                        "best_cost_delta": float(step["best_cost_delta"]),
+                        "sequence_position": seq_pos,
+                        "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
+                    }
+                    self._queue_operator_log_record(improvement_record, current_best_cost)
+
+                self._latest_policy_entropy = None
+                return
+
             improvement_indices: List[int] = []
             sequence_raw = result.get("improvement_sequence")
             if isinstance(sequence_raw, (list, tuple)):
@@ -1329,6 +1408,8 @@ class ALNSEnvironment(gym.Env):
                     "num_inserted_requests": None,
                     "cost_delta": individual_cost_delta,
                     "best_cost_delta": individual_best_cost_delta,
+                    "sequence_position": seq_pos,
+                    "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
                 }
                 self._queue_operator_log_record(improvement_record, current_best_cost)
 

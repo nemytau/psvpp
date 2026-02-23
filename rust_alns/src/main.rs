@@ -494,6 +494,7 @@ fn test_alns_engine_iterations() -> Result<(), Box<dyn std::error::Error>> {
         500.0, // temperature
         0.9,   // theta
         10,    // weight_update_interval
+        0.85,  // aggressive_search_factor
         20,    // max_iterations
         crate::alns::engine::ALNSAlgorithmMode::Baseline,
     )?;

@@ -53,6 +53,7 @@ pub struct ALNSMetrics {
     pub improvement_operator_type_id: Option<i32>,
     pub improvement_sequence: Vec<usize>,
     pub improvement_costs: Vec<f64>,  // Cost after each improvement operator
+    pub improvement_step_metrics: Vec<ALNSImprovementStepMetric>,
     pub temperature: f64,
     pub stagnation_count: usize,
     pub iteration: usize,
@@ -75,6 +76,16 @@ pub struct ALNSMetrics {
     pub destroy_weights: Vec<f64>,
     pub repair_weights: Vec<f64>,
     pub elapsed_ms: u128,
+}
+
+#[derive(Clone)]
+pub struct ALNSImprovementStepMetric {
+    pub operator_idx: usize,
+    pub operator_name: String,
+    pub sequence_position: usize,
+    pub cost_before: f64,
+    pub cost_after: f64,
+    pub cost_delta: f64,
 }
 
 #[derive(Clone)]
@@ -389,6 +400,7 @@ impl ALNSEngine {
             improvement_operator_type_id: None,
             improvement_sequence: Vec::new(),
             improvement_costs: Vec::new(),
+            improvement_step_metrics: Vec::new(),
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -637,14 +649,36 @@ impl ALNSEngine {
         repair_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
 
-        // Track cost after each improvement operator
+        // Capture cost after destroy+repair and track each improvement operator separately
+        candidate_solution.update_total_cost(&self.context);
+        let mut previous_improvement_cost = candidate_solution.total_cost;
+
         let mut improvement_costs = Vec::with_capacity(improvement_sequence.len());
+        let mut improvement_step_metrics = Vec::with_capacity(improvement_sequence.len());
         for &idx in improvement_sequence {
             let improvement_op = self.operator_registry.get_improvement_operator(idx);
+            let cost_before = previous_improvement_cost;
             improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
             candidate_solution.ensure_consistency_updated(&self.context);
             candidate_solution.update_total_cost(&self.context);
-            improvement_costs.push(candidate_solution.total_cost);
+            let cost_after = candidate_solution.total_cost;
+            improvement_costs.push(cost_after);
+
+            let operator_name = self
+                .improvement_operator_labels
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| format!("improvement_{}", idx));
+            let sequence_position = improvement_step_metrics.len();
+            improvement_step_metrics.push(ALNSImprovementStepMetric {
+                operator_idx: idx,
+                operator_name,
+                sequence_position,
+                cost_before,
+                cost_after,
+                cost_delta: cost_after - cost_before,
+            });
+            previous_improvement_cost = cost_after;
         }
 
         // Final cost update (redundant if improvements were applied, but safe)
@@ -813,6 +847,7 @@ impl ALNSEngine {
             improvement_operator_type_id,
             improvement_sequence: improvement_sequence.to_vec(),
             improvement_costs: improvement_costs.clone(),
+            improvement_step_metrics,
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -1034,11 +1069,19 @@ impl ALNSEngine {
             destroy_operator_type_id: None,
             repair_operator_type_id: None,
             improvement_idx: Some(improvement_operator_idx),
-            improvement_operator_name: Some(improvement_operator_name),
+            improvement_operator_name: Some(improvement_operator_name.clone()),
             improvement_operator_type,
             improvement_operator_type_id,
             improvement_sequence: vec![improvement_operator_idx],
             improvement_costs: vec![candidate_cost],
+            improvement_step_metrics: vec![ALNSImprovementStepMetric {
+                operator_idx: improvement_operator_idx,
+                operator_name: improvement_operator_name.clone(),
+                sequence_position: 0,
+                cost_before: current_cost,
+                cost_after: candidate_cost,
+                cost_delta: candidate_cost - current_cost,
+            }],
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,

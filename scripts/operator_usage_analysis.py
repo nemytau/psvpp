@@ -144,6 +144,18 @@ def extract_step_frame(df: pd.DataFrame) -> pd.DataFrame:
     return step_df
 
 
+def extract_dataset_size(instance_path: str) -> str:
+    """Extract dataset size category (small/medium/large) from instance path."""
+    instance_lower = str(instance_path).lower()
+    if "/small" in instance_lower or "small_" in instance_lower:
+        return "small"
+    elif "/medium" in instance_lower or "medium_" in instance_lower:
+        return "medium"
+    elif "/large" in instance_lower or "large_" in instance_lower:
+        return "large"
+    return "unknown"
+
+
 def summarize_operator_usage(df: pd.DataFrame) -> pd.DataFrame:
     grouped = df.groupby(["mode_label", "operator_type", "operator_name"], dropna=False)
     operator_summary = grouped.agg(
@@ -362,37 +374,113 @@ def generate_plots(
         plt.close()
         plot_paths.append(str(contrib_path))
 
-    if not step_df.empty:
-        fig, ax = plt.subplots(figsize=(10, 5))
-        for mode in sorted(step_df["mode_label"].unique()):
-            mode_df = step_df[step_df["mode_label"] == mode].sort_values("iteration")
-            ax.plot(mode_df["iteration"], mode_df["cost_best"], label=mode)
-        ax.set_title("Best Cost vs Iteration")
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Best cost")
-        ax.legend(loc="best")
-        ax.grid(alpha=0.25)
-        plt.tight_layout()
-        best_iter_path = output_dir / "plot_best_cost_vs_iteration.png"
-        plt.savefig(best_iter_path, dpi=150)
-        plt.close()
-        plot_paths.append(str(best_iter_path))
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        for mode in sorted(step_df["mode_label"].unique()):
-            mode_df = step_df[step_df["mode_label"] == mode].sort_values("iteration").copy()
-            mode_df["elapsed_seconds_cum"] = mode_df["elapsed_ms"].fillna(0.0).cumsum() / 1000.0
-            ax.plot(mode_df["elapsed_seconds_cum"], mode_df["cost_best"], label=mode)
-        ax.set_title("Best Cost vs Elapsed Time")
-        ax.set_xlabel("Elapsed time (s)")
-        ax.set_ylabel("Best cost")
-        ax.legend(loc="best")
-        ax.grid(alpha=0.25)
-        plt.tight_layout()
-        best_time_path = output_dir / "plot_best_cost_vs_time.png"
-        plt.savefig(best_time_path, dpi=150)
-        plt.close()
-        plot_paths.append(str(best_time_path))
+    if not step_df.empty and "instance_id" in step_df.columns:
+        step_df["dataset_size"] = step_df["instance_id"].apply(extract_dataset_size)
+        
+        sizes = sorted([s for s in step_df["dataset_size"].unique() if s != "unknown"])
+        
+        for size in sizes:
+            size_df = step_df[step_df["dataset_size"] == size].copy()
+            if size_df.empty:
+                continue
+            
+            episodes = size_df.groupby(["mode_label", "episode_id"])
+            initial_costs = episodes["cost_best"].first().reset_index()
+            initial_costs.columns = ["mode_label", "episode_id", "initial_cost"]
+            size_df = size_df.merge(initial_costs, on=["mode_label", "episode_id"], how="left")
+            size_df["improvement_pct"] = (
+                (size_df["initial_cost"] - size_df["cost_best"]) / size_df["initial_cost"].clip(lower=1e-9)
+            ) * 100.0
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+            
+            for mode in sorted(size_df["mode_label"].unique()):
+                mode_data = size_df[size_df["mode_label"] == mode]
+                for episode in mode_data["episode_id"].unique():
+                    episode_data = mode_data[mode_data["episode_id"] == episode].sort_values("iteration")
+                    ax1.plot(
+                        episode_data["iteration"],
+                        episode_data["cost_best"],
+                        alpha=0.6,
+                        linewidth=1.5,
+                        label=f"{mode}" if episode == mode_data["episode_id"].min() else None
+                    )
+            
+            ax1.set_title(f"Best Cost vs Iteration ({size.capitalize()} Datasets)")
+            ax1.set_xlabel("Iteration")
+            ax1.set_ylabel("Best cost")
+            ax1.legend(loc="best")
+            ax1.grid(alpha=0.25)
+            
+            for mode in sorted(size_df["mode_label"].unique()):
+                mode_data = size_df[size_df["mode_label"] == mode]
+                for episode in mode_data["episode_id"].unique():
+                    episode_data = mode_data[mode_data["episode_id"] == episode].sort_values("iteration")
+                    ax2.plot(
+                        episode_data["iteration"],
+                        episode_data["improvement_pct"],
+                        alpha=0.6,
+                        linewidth=1.5,
+                        label=f"{mode}" if episode == mode_data["episode_id"].min() else None
+                    )
+            
+            ax2.set_title(f"Improvement from Initial (%) vs Iteration ({size.capitalize()} Datasets)")
+            ax2.set_xlabel("Iteration")
+            ax2.set_ylabel("Improvement (%)")
+            ax2.legend(loc="best")
+            ax2.grid(alpha=0.25)
+            
+            plt.tight_layout()
+            best_iter_path = output_dir / f"plot_best_cost_vs_iteration_{size}.png"
+            plt.savefig(best_iter_path, dpi=150)
+            plt.close()
+            plot_paths.append(str(best_iter_path))
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+            
+            for mode in sorted(size_df["mode_label"].unique()):
+                mode_data = size_df[size_df["mode_label"] == mode]
+                for episode in mode_data["episode_id"].unique():
+                    episode_data = mode_data[mode_data["episode_id"] == episode].sort_values("iteration").copy()
+                    episode_data["elapsed_seconds_cum"] = episode_data["elapsed_ms"].fillna(0.0).cumsum() / 1000.0
+                    ax1.plot(
+                        episode_data["elapsed_seconds_cum"],
+                        episode_data["cost_best"],
+                        alpha=0.6,
+                        linewidth=1.5,
+                        label=f"{mode}" if episode == mode_data["episode_id"].min() else None
+                    )
+            
+            ax1.set_title(f"Best Cost vs Elapsed Time ({size.capitalize()} Datasets)")
+            ax1.set_xlabel("Elapsed time (s)")
+            ax1.set_ylabel("Best cost")
+            ax1.legend(loc="best")
+            ax1.grid(alpha=0.25)
+            
+            for mode in sorted(size_df["mode_label"].unique()):
+                mode_data = size_df[size_df["mode_label"] == mode]
+                for episode in mode_data["episode_id"].unique():
+                    episode_data = mode_data[mode_data["episode_id"] == episode].sort_values("iteration").copy()
+                    episode_data["elapsed_seconds_cum"] = episode_data["elapsed_ms"].fillna(0.0).cumsum() / 1000.0
+                    ax2.plot(
+                        episode_data["elapsed_seconds_cum"],
+                        episode_data["improvement_pct"],
+                        alpha=0.6,
+                        linewidth=1.5,
+                        label=f"{mode}" if episode == mode_data["episode_id"].min() else None
+                    )
+            
+            ax2.set_title(f"Improvement from Initial (%) vs Elapsed Time ({size.capitalize()} Datasets)")
+            ax2.set_xlabel("Elapsed time (s)")
+            ax2.set_ylabel("Improvement (%)")
+            ax2.legend(loc="best")
+            ax2.grid(alpha=0.25)
+            
+            plt.tight_layout()
+            best_time_path = output_dir / f"plot_best_cost_vs_time_{size}.png"
+            plt.savefig(best_time_path, dpi=150)
+            plt.close()
+            plot_paths.append(str(best_time_path))
 
     if not step_df.empty:
         window = max(1, int(rolling_window))

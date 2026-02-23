@@ -9,7 +9,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -48,6 +48,7 @@ def run_episode(
     seed: int,
     max_iterations: int,
     algorithm_mode: str,
+    operator_logging_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     env_kwargs: Dict[str, Any] = {
         "problem_instance": problem_path,
@@ -57,12 +58,14 @@ def run_episode(
         "problem_sampling_strategy": "round_robin",
         "enable_operator_logging": True,
         "operator_logging_format": "csv",
-        "operator_logging_mode": "episode",
+        "operator_logging_mode": algorithm_mode,
         "operator_logging_future_window": 5,
         "algorithm_mode": algorithm_mode,
         "force_baseline_improvement": False,
         "baseline_improvement_idx": None,
     }
+    if operator_logging_dir:
+        env_kwargs["operator_logging_dir"] = operator_logging_dir
 
     env = ALNSEnvironment(**env_kwargs)
 
@@ -135,6 +138,12 @@ def parse_args() -> argparse.Namespace:
         default=LOG_PATH,
         help="Destination log file capturing benchmark progress",
     )
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default=None,
+        help="Directory for operator usage logs (default: logs/)",
+    )
     return parser.parse_args()
 
 
@@ -181,6 +190,7 @@ def main() -> None:
                     seed=seed,
                     max_iterations=args.iterations,
                     algorithm_mode=normalized_mode,
+                    operator_logging_dir=args.log_dir,
                 )
                 wall_time = time.perf_counter() - start_time
 

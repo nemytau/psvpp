@@ -75,7 +75,7 @@ class OperatorUsageLogger:
         if self._file_path is not None:
             return self._file_path
 
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
         suffix = ".jsonl" if self.fmt.lower() in {"jsonl", "jsonlines"} else ".csv"
         filename = f"operator_usage_{self.mode}_{timestamp}{suffix}"
 

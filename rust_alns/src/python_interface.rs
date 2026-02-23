@@ -132,6 +132,19 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         PyList::new(py, metrics.improvement_costs.clone()),
     )?;
 
+    let improvement_step_metrics = PyList::empty(py);
+    for step in &metrics.improvement_step_metrics {
+        let step_dict = PyDict::new(py);
+        step_dict.set_item("operator_idx", step.operator_idx)?;
+        step_dict.set_item("operator_name", &step.operator_name)?;
+        step_dict.set_item("sequence_position", step.sequence_position)?;
+        step_dict.set_item("cost_before", step.cost_before)?;
+        step_dict.set_item("cost_after", step.cost_after)?;
+        step_dict.set_item("cost_delta", step.cost_delta)?;
+        improvement_step_metrics.append(step_dict)?;
+    }
+    dict.set_item("improvement_step_metrics", improvement_step_metrics)?;
+
     dict.set_item("destroy_removed_requests", metrics.destroy_removed_requests)?;
     dict.set_item("repair_inserted_requests", metrics.repair_inserted_requests)?;
     dict.set_item(

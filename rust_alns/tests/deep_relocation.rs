@@ -60,6 +60,7 @@ fn deep_relocation_improves_cost() {
         100.0,
         0.9,
         10,
+        0.85,
         1,
         ALNSAlgorithmMode::Baseline,
     )
