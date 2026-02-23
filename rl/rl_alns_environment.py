@@ -1151,9 +1151,12 @@ class ALNSEnvironment(gym.Env):
             return
 
         iteration_index = int(record.get("iteration", 0))
+        best_cost_value = record.get("cost_best")
+        if best_cost_value is None:
+            best_cost_value = current_best_cost
         entry = {
             "record": record,
-            "initial_best": float(record.get("cost_best", current_best_cost)),
+            "initial_best": float(best_cost_value),
             "best_seen": float(current_best_cost),
             "deadline": iteration_index + self.operator_logging_future_window,
         }
@@ -1331,19 +1334,52 @@ class ALNSEnvironment(gym.Env):
             if improvement_step_metrics:
                 for step in improvement_step_metrics:
                     seq_pos = int(step["sequence_position"])
-                    improvement_record = {
-                        **base_record,
-                        "operator_name": step["operator_name"],
-                        "operator_type": "improvement",
-                        "operator_index": int(step["operator_index"]),
-                        "improvement_idx": int(step["operator_index"]),
-                        "num_removed_requests": None,
-                        "num_inserted_requests": None,
-                        "cost_delta": float(step["cost_delta"]),
-                        "best_cost_delta": float(step["best_cost_delta"]),
-                        "sequence_position": seq_pos,
-                        "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
-                    }
+                    
+                    # Only include full iteration context for the first operator in sequence
+                    if seq_pos == 0:
+                        improvement_record = {
+                            **base_record,
+                            "operator_name": step["operator_name"],
+                            "operator_type": "improvement",
+                            "operator_index": int(step["operator_index"]),
+                            "improvement_idx": int(step["operator_index"]),
+                            "num_removed_requests": None,
+                            "num_inserted_requests": None,
+                            "cost_delta": float(step["cost_delta"]),
+                            "best_cost_delta": float(step["best_cost_delta"]),
+                            "sequence_position": seq_pos,
+                            "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
+                        }
+                    else:
+                        # Subsequent steps: minimal record with only step-specific data
+                        improvement_record = {
+                            "episode_id": base_record["episode_id"],
+                            "iteration": base_record["iteration"],
+                            "instance_id": base_record["instance_id"],
+                            "reward": None,
+                            "cost_current": None,
+                            "cost_best": None,
+                            "iterations_since_last_best": None,
+                            "policy_entropy": None,
+                            "accepted": None,
+                            "is_new_best": None,
+                            "elapsed_ms": None,
+                            "temperature": None,
+                            "destroy_idx": None,
+                            "repair_idx": None,
+                            "improvement_idx": None,
+                            "cost_delta": float(step["cost_delta"]),
+                            "best_cost_delta": float(step["best_cost_delta"]),
+                            "best_cost_delta_future": None,
+                            "lookahead_window": None,
+                            "sequence_position": seq_pos,
+                            "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
+                            "operator_name": step["operator_name"],
+                            "operator_type": "improvement",
+                            "operator_index": int(step["operator_index"]),
+                            "num_removed_requests": None,
+                            "num_inserted_requests": None,
+                        }
                     self._queue_operator_log_record(improvement_record, current_best_cost)
 
                 self._latest_policy_entropy = None
