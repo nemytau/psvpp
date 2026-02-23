@@ -25,6 +25,7 @@ DEFAULT_SIZES = ["small", "medium"]
 DEFAULT_MODES = ["baseline", "kisialiou", "reinforcement_learning"]
 DEFAULT_ITERATIONS = 1000
 DEFAULT_DATASETS_PER_SIZE = 1
+BASELINE_ITERATION_MULTIPLIER = 10  # Baseline runs faster per iteration
 RESULTS_PATH = REPO_ROOT / "output" / "alns_mode_benchmark.json"
 LOG_PATH = REPO_ROOT / "output" / "alns_mode_benchmark.log"
 
@@ -40,6 +41,14 @@ def log(message: str) -> None:
 def normalize_algorithm_mode(value: Any) -> str:
     mode = str(value or "baseline").strip().lower()
     return "reinforcement_learning" if mode == "rl" else mode
+
+
+def get_iterations_for_mode(base_iterations: int, mode: str) -> int:
+    """Return iteration count for mode. Baseline gets 10x since it's much faster per iteration."""
+    normalized = normalize_algorithm_mode(mode)
+    if normalized == "baseline":
+        return base_iterations * BASELINE_ITERATION_MULTIPLIER
+    return base_iterations
 
 
 def run_episode(
@@ -181,14 +190,16 @@ def main() -> None:
 
             for mode in algorithm_modes:
                 normalized_mode = normalize_algorithm_mode(mode)
+                mode_iterations = get_iterations_for_mode(args.iterations, mode)
+                iter_note = f" [×{BASELINE_ITERATION_MULTIPLIER} iterations]" if normalized_mode == "baseline" else ""
                 log(
-                    f"Running mode={normalized_mode:<24} size={size:<6} dataset={dataset_label:<20} seed={seed}"
+                    f"Running mode={normalized_mode:<24} size={size:<6} dataset={dataset_label:<20} seed={seed}{iter_note}"
                 )
                 start_time = time.perf_counter()
                 episode = run_episode(
                     problem_path=str(dataset_path),
                     seed=seed,
-                    max_iterations=args.iterations,
+                    max_iterations=mode_iterations,
                     algorithm_mode=normalized_mode,
                     operator_logging_dir=args.log_dir,
                 )
