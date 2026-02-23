@@ -75,8 +75,13 @@ impl ImprovementOperator for DeepRelocation {
 		info!(target: "operator::improvement", "[DeepRelocation] Invoked");
 		solution.ensure_consistency_updated(context);
 		let original_solution = solution.clone();
+		let mut original_feasibility_probe = original_solution.clone();
+		let original_was_feasible = original_feasibility_probe.is_fully_feasible(context);
 
 		loop {
+			// Save state before attempting move to enable clean rollback
+			let iteration_start_solution = solution.clone();
+			
 			let baseline_cost = solution.cost_with_context(context);
 			debug!(
 				target: "operator::improvement",
@@ -105,40 +110,22 @@ impl ImprovementOperator for DeepRelocation {
 			solution.unassign_visits(&[visit_id]);
 			solution.ensure_schedule_is_updated();
 			if !solution.visit_insertion_is_possible(context, visit_id, target_voyage) {
-				warn!(
+				debug!(
 					target: "operator::improvement",
-					"[DeepRelocation] Insertion of visit {} into voyage {} deemed infeasible",
+					"[DeepRelocation] Insertion of visit {} into voyage {} deemed infeasible; restoring iteration state",
 					visit_id,
 					target_voyage
 				);
-				if let Err(revert_err) =
-					solution.greedy_insert_visit(visit_id, origin_voyage, context)
-				{
-					warn!(
-						target: "operator::improvement",
-						"[DeepRelocation] Rollback failed during infeasible insertion check: {}",
-						revert_err
-					);
-				}
-				solution.ensure_consistency_updated(context);
+				*solution = iteration_start_solution;
 				break;
 			}
 			if let Err(err) = solution.greedy_insert_visit(visit_id, target_voyage, context) {
-				warn!(
+				debug!(
 					target: "operator::improvement",
-					"[DeepRelocation] Failed to apply relocation: {}",
+					"[DeepRelocation] Failed to apply relocation: {}; restoring iteration state",
 					err
 				);
-				// Roll back: attempt to return visit to origin voyage.
-				if let Err(revert_err) = solution.greedy_insert_visit(visit_id, origin_voyage, context)
-				{
-					warn!(
-						target: "operator::improvement",
-						"[DeepRelocation] Rollback failed, solution may be inconsistent: {}",
-						revert_err
-					);
-				}
-				solution.ensure_consistency_updated(context);
+				*solution = iteration_start_solution;
 				break;
 			}
 
@@ -153,12 +140,27 @@ impl ImprovementOperator for DeepRelocation {
 
 		solution.ensure_consistency_updated(context);
 		if !solution.is_fully_feasible(context) {
-			error!(
-				target: "operator::improvement",
-				"[DeepRelocation] Operator produced infeasible solution; reverting"
-			);
+			if original_was_feasible {
+				warn!(
+					target: "operator::improvement",
+					"[DeepRelocation] Operator produced infeasible candidate; reverting to previous solution"
+				);
+			} else {
+				debug!(
+					target: "operator::improvement",
+					"[DeepRelocation] Candidate remained infeasible (input already infeasible); reverting"
+				);
+			}
 			*solution = original_solution;
 			solution.ensure_consistency_updated(context);
+
+			let mut reverted_solution = solution.clone();
+			if original_was_feasible && !reverted_solution.is_fully_feasible(context) {
+				error!(
+					target: "operator::improvement",
+					"[DeepRelocation] Revert failed: restored solution is still infeasible"
+				);
+			}
 		}
 	}
 }

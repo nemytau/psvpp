@@ -87,8 +87,13 @@ impl ImprovementOperator for DeepSwap {
 		info!(target: "operator::improvement", "[DeepSwap] Invoked");
 		solution.ensure_consistency_updated(context);
 		let original_solution = solution.clone();
+		let mut original_feasibility_probe = original_solution.clone();
+		let original_was_feasible = original_feasibility_probe.is_fully_feasible(context);
 
 		loop {
+			// Save state before attempting move to enable clean rollback
+			let iteration_start_solution = solution.clone();
+			
 			let baseline_cost = solution.cost_with_context(context);
 			debug!(
 				target: "operator::improvement",
@@ -120,62 +125,35 @@ impl ImprovementOperator for DeepSwap {
 			if !solution.visit_insertion_is_possible(context, visit_a, origin_voyage_b)
 				|| !solution.visit_insertion_is_possible(context, visit_b, origin_voyage_a)
 			{
-				warn!(
+				debug!(
 					target: "operator::improvement",
-					"[DeepSwap] Swap feasibility check failed for visits {} and {}",
+					"[DeepSwap] Swap feasibility check failed for visits {} and {}; restoring iteration state",
 					visit_a,
 					visit_b
 				);
-				if let Err(revert_err) = solution.greedy_insert_visit(visit_a, origin_voyage_a, context) {
-					warn!(
-						target: "operator::improvement",
-						"[DeepSwap] Rollback failed for visit {}: {}",
-						visit_a,
-						revert_err
-					);
-				}
-				if let Err(revert_err) = solution.greedy_insert_visit(visit_b, origin_voyage_b, context) {
-					warn!(
-						target: "operator::improvement",
-						"[DeepSwap] Rollback failed for visit {}: {}",
-						visit_b,
-						revert_err
-					);
-				}
-				solution.ensure_consistency_updated(context);
+				*solution = iteration_start_solution;
 				break;
 			}
 			if let Err(err) = solution.greedy_insert_visit(visit_a, origin_voyage_b, context) {
-				warn!(
+				debug!(
 					target: "operator::improvement",
-					"[DeepSwap] Failed to insert visit {} into voyage {}: {}",
+					"[DeepSwap] Failed to insert visit {} into voyage {}: {}; restoring iteration state",
 					visit_a,
 					origin_voyage_b,
 					err
 				);
-				let _ = solution.greedy_insert_visit(visit_a, origin_voyage_a, context);
-				let _ = solution.greedy_insert_visit(visit_b, origin_voyage_b, context);
-				solution.ensure_consistency_updated(context);
+				*solution = iteration_start_solution;
 				break;
 			}
 			if let Err(err) = solution.greedy_insert_visit(visit_b, origin_voyage_a, context) {
-				warn!(
+				debug!(
 					target: "operator::improvement",
-					"[DeepSwap] Failed to insert visit {} into voyage {}: {}",
+					"[DeepSwap] Failed to insert visit {} into voyage {}: {}; restoring iteration state",
 					visit_b,
 					origin_voyage_a,
 					err
 				);
-				if let Err(revert_err) = solution.greedy_insert_visit(visit_b, origin_voyage_b, context) {
-					warn!(
-						target: "operator::improvement",
-						"[DeepSwap] Rollback failed for visit {}: {}",
-						visit_b,
-						revert_err
-					);
-				}
-				let _ = solution.greedy_insert_visit(visit_a, origin_voyage_a, context);
-				solution.ensure_consistency_updated(context);
+				*solution = iteration_start_solution;
 				break;
 			}
 
@@ -190,12 +168,27 @@ impl ImprovementOperator for DeepSwap {
 
 		solution.ensure_consistency_updated(context);
 		if !solution.is_fully_feasible(context) {
-			error!(
-				target: "operator::improvement",
-				"[DeepSwap] Operator produced infeasible solution; reverting"
-			);
+			if original_was_feasible {
+				warn!(
+					target: "operator::improvement",
+					"[DeepSwap] Operator produced infeasible candidate; reverting to previous solution"
+				);
+			} else {
+				debug!(
+					target: "operator::improvement",
+					"[DeepSwap] Candidate remained infeasible (input already infeasible); reverting"
+				);
+			}
 			*solution = original_solution;
 			solution.ensure_consistency_updated(context);
+
+			let mut reverted_solution = solution.clone();
+			if original_was_feasible && !reverted_solution.is_fully_feasible(context) {
+				error!(
+					target: "operator::improvement",
+					"[DeepSwap] Revert failed: restored solution is still infeasible"
+				);
+			}
 		}
 	}
 }
