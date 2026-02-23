@@ -1,5 +1,6 @@
 use crate::alns::engine::{
-    compute_solution_structure_metrics, ALNSEngine, ALNSEngineSnapshot, ALNSMetrics,
+    compute_solution_structure_metrics, ALNSEngine, ALNSEngineSnapshot,
+    ALNSRunWithRestartsResult, ALNSMetrics,
 };
 use crate::utils::serialization::dump_schedule_to_json;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -126,6 +127,10 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         "improvement_sequence",
         PyList::new(py, metrics.improvement_sequence.clone()),
     )?;
+    dict.set_item(
+        "improvement_costs",
+        PyList::new(py, metrics.improvement_costs.clone()),
+    )?;
 
     dict.set_item("destroy_removed_requests", metrics.destroy_removed_requests)?;
     dict.set_item("repair_inserted_requests", metrics.repair_inserted_requests)?;
@@ -138,6 +143,35 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         PyList::new(py, metrics.repair_weights.clone()),
     )?;
     dict.set_item("elapsed_ms", metrics.elapsed_ms)?;
+    Ok(dict.into())
+}
+
+fn run_with_restarts_result_to_pydict(
+    py: Python<'_>,
+    result: &ALNSRunWithRestartsResult,
+) -> PyResult<PyObject> {
+    let dict = PyDict::new(py);
+    let summaries = PyList::empty(py);
+
+    for summary in &result.restart_summaries {
+        let entry = PyDict::new(py);
+        entry.set_item("restart_index", summary.restart_index)?;
+        entry.set_item("seed", summary.seed)?;
+        entry.set_item("initial_cost", summary.initial_cost)?;
+        entry.set_item("best_cost", summary.best_cost)?;
+        entry.set_item("final_cost", summary.final_cost)?;
+        entry.set_item("iterations_completed", summary.iterations_completed)?;
+        entry.set_item("elapsed_ms", summary.elapsed_ms)?;
+        entry.set_item("best_improvement_pct", summary.best_improvement_pct)?;
+        summaries.append(entry)?;
+    }
+
+    dict.set_item(
+        "global_metrics",
+        metrics_to_pydict(py, &result.global_metrics)?,
+    )?;
+    dict.set_item("restart_summaries", summaries)?;
+
     Ok(dict.into())
 }
 
@@ -218,6 +252,7 @@ impl RustALNSInterface {
         temperature=None,
         theta=None,
         weight_update_interval=None,
+        aggressive_search_factor=None,
         algorithm_mode=None
     ))]
     fn initialize_alns(
@@ -228,6 +263,7 @@ impl RustALNSInterface {
         temperature: Option<f64>,
         theta: Option<f64>,
         weight_update_interval: Option<usize>,
+        aggressive_search_factor: Option<f64>,
         algorithm_mode: Option<&str>,
     ) -> PyResult<PyObject> {
         // Initialize logging for Python interface (only if not already initialized)
@@ -241,6 +277,7 @@ impl RustALNSInterface {
         let temperature = temperature.unwrap_or(500.0);
         let theta = theta.unwrap_or(0.9);
         let weight_update_interval = weight_update_interval.unwrap_or(10);
+        let aggressive_search_factor = aggressive_search_factor.unwrap_or(0.85);
         let max_iterations = 1000; // Default max iterations
 
         let algorithm_mode = algorithm_mode
@@ -265,6 +302,7 @@ impl RustALNSInterface {
             temperature,
             theta,
             weight_update_interval,
+            aggressive_search_factor,
             max_iterations,
             algorithm_mode.unwrap_or(crate::alns::engine::ALNSAlgorithmMode::Baseline),
         )
@@ -450,6 +488,17 @@ impl RustALNSInterface {
         }
 
         metrics_to_pydict(py, &metrics)
+    }
+
+    #[pyo3(signature = (restarts=1))]
+    fn run_with_restarts(&mut self, py: Python, restarts: usize) -> PyResult<PyObject> {
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
+
+        let result = engine.run_with_restarts(restarts);
+        run_with_restarts_result_to_pydict(py, &result)
     }
 
     fn extract_solution_metrics(&self, py: Python) -> PyResult<PyObject> {

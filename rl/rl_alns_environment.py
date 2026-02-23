@@ -60,6 +60,8 @@ class ALNSEnvironment(gym.Env):
         temperature: float = 500.0,
         theta: float = 0.9,
         weight_update_interval: int = 10,
+        aggressive_search_factor: float = 0.85,
+        num_episodes: int = 1,
         problem_instance_paths: Optional[Sequence[str]] = None,
         problem_sampling_strategy: str = "round_robin",
         action_module: str = DEFAULT_ACTION_KEY,
@@ -84,6 +86,7 @@ class ALNSEnvironment(gym.Env):
             temperature: Initial simulated annealing temperature
             theta: Temperature cooling factor
             weight_update_interval: Iterations between operator weight updates
+            num_episodes: Number of restarts (each with different seed for diverse initial solutions)
             enable_operator_logging: Whether to persist per-iteration operator usage details
             operator_logging_mode: Mode label embedded in output filenames (e.g. "train")
             operator_logging_format: Log file format, either "csv" or "jsonl"
@@ -116,6 +119,9 @@ class ALNSEnvironment(gym.Env):
         self.temperature = temperature
         self.theta = theta
         self.weight_update_interval = weight_update_interval
+        self.aggressive_search_factor = float(aggressive_search_factor)
+        self.num_episodes = max(1, int(num_episodes))
+        self.current_restart = 0
         self.action_module_name = action_module or DEFAULT_ACTION_KEY
         self.state_module_name = state_module or DEFAULT_STATE_KEY
         self.reward_module_name = reward_module or DEFAULT_REWARD_KEY
@@ -341,13 +347,26 @@ class ALNSEnvironment(gym.Env):
         
         Args:
             seed: Optional seed for this episode
-            options: Optional reset options
+            options: Optional reset options (can include 'restart_index' to set restart number)
             
         Returns:
             Tuple of (initial_observation, info_dict)
         """
-        # Use provided seed or fall back to instance seed
-        episode_seed = seed if seed is not None else self.seed
+        # Check if we should increment restart counter
+        if options and "restart_index" in options:
+            self.current_restart = int(options["restart_index"])
+        elif self.current_restart > 0 or self._episode_counter > 0:
+            # Only increment if we've had at least one episode
+            # (first reset initializes to 0, subsequent ones increment)
+            pass  # Keep current restart number if explicitly set, otherwise it gets incremented in step()
+        
+        # Use provided seed or compute from base seed + restart number
+        if seed is not None:
+            episode_seed = seed
+        else:
+            # Derive unique seed for each restart to get different initial solutions
+            episode_seed = self.seed + (self.current_restart * 10000)
+        
         selected_problem = self._choose_problem_instance(episode_seed, options)
         self.current_problem_instance = selected_problem
         self.problem_instance = selected_problem
@@ -365,9 +384,11 @@ class ALNSEnvironment(gym.Env):
         self._initial_snapshot = None
 
         LOGGER.info(
-            "%s Restarting ALNS episode %d for problem '%s' (seed=%d)",
+            "%s Starting ALNS episode %d (restart %d/%d) for problem '%s' (seed=%d)",
             LOG_PREFIX,
             self._current_episode_id,
+            self.current_restart + 1,
+            self.num_episodes,
             self.current_problem_instance,
             episode_seed,
         )
@@ -406,6 +427,7 @@ class ALNSEnvironment(gym.Env):
                 temperature=self.temperature,
                 theta=self.theta,
                 weight_update_interval=self.weight_update_interval,
+                aggressive_search_factor=self.aggressive_search_factor,
                 algorithm_mode=self.algorithm_mode,
             )
 
@@ -443,6 +465,38 @@ class ALNSEnvironment(gym.Env):
         if self._initial_snapshot is None:
             raise RuntimeError("No initial snapshot available; reset() must be called first")
         return self._initial_snapshot.duplicate()
+
+    def run_with_restarts(
+        self,
+        restarts: Optional[int] = None,
+        *,
+        problem_instance: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run the Rust ALNS engine in full-pass restart mode.
+
+        This is a convenience wrapper around ``RustALNSInterface.run_with_restarts``
+        for evaluation/benchmark scenarios where the full search is executed inside
+        Rust rather than step-by-step via Gym actions.
+        """
+        restart_count = int(restarts) if restarts is not None else int(self.num_episodes)
+        restart_count = max(1, restart_count)
+
+        selected_problem = problem_instance or self.current_problem_instance or self.problem_instance
+        run_seed = int(seed) if seed is not None else int(self.seed)
+
+        self.alns.initialize_alns(
+            problem_instance=selected_problem,
+            seed=run_seed,
+            temperature=self.temperature,
+            theta=self.theta,
+            weight_update_interval=self.weight_update_interval,
+            aggressive_search_factor=self.aggressive_search_factor,
+            algorithm_mode=self.algorithm_mode,
+        )
+
+        return self.alns.run_with_restarts(restarts=restart_count)
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
@@ -866,8 +920,17 @@ class ALNSEnvironment(gym.Env):
                     "total_improvement_pct": self.total_improvement_pct,
                     "total_improvement": self.total_improvement_abs,
                     "iterations_completed": self.iteration,
-                    "final_temperature": result["temperature"]
+                    "final_temperature": result["temperature"],
+                    "restart_index": self.current_restart,
+                    "total_restarts": self.num_episodes,
                 }
+                # Increment restart counter for next episode
+                if self.current_restart < self.num_episodes - 1:
+                    self.current_restart += 1
+                    info["has_more_restarts"] = True
+                else:
+                    info["has_more_restarts"] = False
+                    
                 if self.operator_logging_enabled:
                     self._update_operator_log_future_metrics(best_cost, finalize=True)
                     log_path = self.operator_logger.flush()
@@ -1222,6 +1285,19 @@ class ALNSEnvironment(gym.Env):
                 if 0 <= improvement_idx_result < self.num_improvement:
                     improvement_indices.append(improvement_idx_result)
 
+            # Get per-improvement costs from Rust if available
+            improvement_costs_raw = result.get("improvement_costs", [])
+            improvement_costs: List[float] = []
+            if isinstance(improvement_costs_raw, (list, tuple)):
+                for cost_val in improvement_costs_raw:
+                    try:
+                        improvement_costs.append(float(cost_val))
+                    except (TypeError, ValueError):
+                        pass
+
+            # Cost before improvements (after destroy+repair)
+            cost_after_repair = prev_current_cost
+
             for seq_pos, idx in enumerate(improvement_indices):
                 improvement_name = None
                 if 0 <= idx < self.num_improvement:
@@ -1231,6 +1307,18 @@ class ALNSEnvironment(gym.Env):
                     if isinstance(reported_name, str) and reported_name.strip():
                         improvement_name = reported_name
 
+                # Calculate individual cost delta for this improvement
+                if seq_pos < len(improvement_costs):
+                    # Use the cost before this improvement and after
+                    cost_before = cost_after_repair if seq_pos == 0 else improvement_costs[seq_pos - 1]
+                    cost_after = improvement_costs[seq_pos]
+                    individual_cost_delta = cost_after - cost_before
+                    individual_best_cost_delta = min(0.0, individual_cost_delta)  # Improvement only if negative
+                else:
+                    # Fallback: use the combined cost_delta (old behavior)
+                    individual_cost_delta = float(current_cost) - float(prev_current_cost)
+                    individual_best_cost_delta = float(current_best_cost) - float(prev_best_cost)
+
                 improvement_record = {
                     **base_record,
                     "operator_name": improvement_name or f"improvement_{idx}",
@@ -1239,6 +1327,8 @@ class ALNSEnvironment(gym.Env):
                     "improvement_idx": idx,
                     "num_removed_requests": None,
                     "num_inserted_requests": None,
+                    "cost_delta": individual_cost_delta,
+                    "best_cost_delta": individual_best_cost_delta,
                 }
                 self._queue_operator_log_record(improvement_record, current_best_cost)
 

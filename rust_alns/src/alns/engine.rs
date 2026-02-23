@@ -52,6 +52,7 @@ pub struct ALNSMetrics {
     pub improvement_operator_type: Option<String>,
     pub improvement_operator_type_id: Option<i32>,
     pub improvement_sequence: Vec<usize>,
+    pub improvement_costs: Vec<f64>,  // Cost after each improvement operator
     pub temperature: f64,
     pub stagnation_count: usize,
     pub iteration: usize,
@@ -77,6 +78,24 @@ pub struct ALNSMetrics {
 }
 
 #[derive(Clone)]
+pub struct ALNSRestartSummary {
+    pub restart_index: usize,
+    pub seed: u64,
+    pub initial_cost: f64,
+    pub best_cost: f64,
+    pub final_cost: f64,
+    pub iterations_completed: usize,
+    pub elapsed_ms: u128,
+    pub best_improvement_pct: f64,
+}
+
+#[derive(Clone)]
+pub struct ALNSRunWithRestartsResult {
+    pub global_metrics: ALNSMetrics,
+    pub restart_summaries: Vec<ALNSRestartSummary>,
+}
+
+#[derive(Clone)]
 pub struct ALNSEngineSnapshot {
     pub current_solution: Solution,
     pub best_solution: Solution,
@@ -88,8 +107,11 @@ pub struct ALNSEngineSnapshot {
     pub temperature: f64,
     pub theta: f64,
     pub weight_update_interval: usize,
+    pub aggressive_search_factor: f64,
     pub stagnation_count: usize,
     pub initial_cost: f64,
+    pub base_seed: u64,
+    pub initial_temperature: f64,
     pub algorithm_mode: ALNSAlgorithmMode,
 }
 
@@ -110,8 +132,11 @@ pub struct ALNSEngine {
     pub temperature: f64,
     pub theta: f64,
     pub weight_update_interval: usize,
+    pub aggressive_search_factor: f64,
     pub stagnation_count: usize,
     pub initial_cost: f64,
+    pub base_seed: u64,
+    pub initial_temperature: f64,
     pub algorithm_mode: ALNSAlgorithmMode,
 }
 
@@ -123,6 +148,7 @@ impl ALNSEngine {
         temperature: f64,
         theta: f64,
         weight_update_interval: usize,
+        aggressive_search_factor: f64,
         max_iterations: usize,
         algorithm_mode: ALNSAlgorithmMode,
     ) -> Result<Self, String> {
@@ -273,6 +299,7 @@ impl ALNSEngine {
         };
 
         let initial_cost = initial_solution.total_cost;
+        let aggressive_search_factor = aggressive_search_factor.clamp(0.0, 1.0);
 
         Ok(Self {
             context,
@@ -290,8 +317,11 @@ impl ALNSEngine {
             temperature,
             theta,
             weight_update_interval,
+            aggressive_search_factor,
             stagnation_count: 0,
             initial_cost,
+            base_seed: seed,
+            initial_temperature: temperature,
             algorithm_mode,
         })
     }
@@ -309,8 +339,11 @@ impl ALNSEngine {
             temperature: self.temperature,
             theta: self.theta,
             weight_update_interval: self.weight_update_interval,
+            aggressive_search_factor: self.aggressive_search_factor,
             stagnation_count: self.stagnation_count,
             initial_cost: self.initial_cost,
+            base_seed: self.base_seed,
+            initial_temperature: self.initial_temperature,
             algorithm_mode: self.algorithm_mode,
         }
     }
@@ -327,9 +360,102 @@ impl ALNSEngine {
         self.temperature = snapshot.temperature;
         self.theta = snapshot.theta;
         self.weight_update_interval = snapshot.weight_update_interval;
+        self.aggressive_search_factor = snapshot.aggressive_search_factor;
         self.stagnation_count = snapshot.stagnation_count;
         self.initial_cost = snapshot.initial_cost;
+        self.base_seed = snapshot.base_seed;
+        self.initial_temperature = snapshot.initial_temperature;
         self.algorithm_mode = snapshot.algorithm_mode;
+    }
+
+    fn create_default_metrics(&self) -> ALNSMetrics {
+        ALNSMetrics {
+            total_cost: self.current_solution.total_cost,
+            best_cost: self.best_solution.total_cost,
+            accepted: false,
+            is_new_best: false,
+            is_better_than_current: false,
+            destroy_idx: None,
+            repair_idx: None,
+            destroy_operator_name: None,
+            repair_operator_name: None,
+            destroy_operator_type: None,
+            repair_operator_type: None,
+            destroy_operator_type_id: None,
+            repair_operator_type_id: None,
+            improvement_idx: None,
+            improvement_operator_name: None,
+            improvement_operator_type: None,
+            improvement_operator_type_id: None,
+            improvement_sequence: Vec::new(),
+            improvement_costs: Vec::new(),
+            destroy_removed_requests: None,
+            repair_inserted_requests: None,
+            temperature: self.temperature,
+            stagnation_count: self.stagnation_count,
+            iteration: 0,
+            initial_cost: self.initial_cost,
+            is_complete: self.current_solution.is_complete_solution(),
+            is_feasible: self
+                .current_solution
+                .clone()
+                .is_fully_feasible(&self.context),
+            num_voyages: 0,
+            num_empty_voyages: 0,
+            num_vessels_used: 0,
+            avg_voyage_utilization: 0.0,
+            avg_vessel_load_utilization: 0.0,
+            min_vessel_load_utilization: 0.0,
+            max_vessel_load_utilization: 0.0,
+            avg_vessel_time_utilization: 0.0,
+            min_vessel_time_utilization: 0.0,
+            max_vessel_time_utilization: 0.0,
+            destroy_success_rates: vec![],
+            repair_success_rates: vec![],
+            recent_rewards: vec![],
+            destroy_weights: vec![],
+            repair_weights: vec![],
+            elapsed_ms: 0,
+        }
+    }
+
+    fn reset_for_restart(&mut self, seed: u64) {
+        self.rng = StdRng::seed_from_u64(seed);
+
+        let mut initial_solution =
+            crate::operators::initial_solution::construct_initial_solution(&self.context, &mut self.rng);
+        initial_solution.update_total_cost(&self.context);
+
+        let n_destroy = self.operator_registry.destroy_operators.len();
+        let n_repair = self.operator_registry.repair_operators.len();
+        self.alns_context = ALNSContext {
+            iteration: 0,
+            temperature: self.initial_temperature,
+            best_cost: initial_solution.total_cost,
+            rng: StdRng::seed_from_u64(seed),
+            destroy_operator_weights: vec![1.0; n_destroy],
+            repair_operator_weights: vec![1.0; n_repair],
+            destroy_operator_scores: vec![0.0; n_destroy],
+            repair_operator_scores: vec![0.0; n_repair],
+            destroy_operator_counts: vec![0; n_destroy],
+            repair_operator_counts: vec![0; n_repair],
+            cost_history: Vec::new(),
+            reaction_factor: 0.2,
+            reward_values: vec![33.0, 9.0, 3.0],
+        };
+
+        self.initial_cost = initial_solution.total_cost;
+        self.initial_solution = initial_solution.clone();
+        self.current_solution = initial_solution.clone();
+        self.best_solution = initial_solution;
+        self.iteration = 0;
+        self.temperature = self.initial_temperature;
+        self.stagnation_count = 0;
+    }
+
+    fn is_in_aggressive_phase(&self, iteration: usize) -> bool {
+        let threshold = (self.aggressive_search_factor * self.max_iterations as f64).floor() as usize;
+        iteration >= threshold
     }
 
     /// Setup standard ALNS operators
@@ -511,12 +637,17 @@ impl ALNSEngine {
         repair_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
 
+        // Track cost after each improvement operator
+        let mut improvement_costs = Vec::with_capacity(improvement_sequence.len());
         for &idx in improvement_sequence {
             let improvement_op = self.operator_registry.get_improvement_operator(idx);
             improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
             candidate_solution.ensure_consistency_updated(&self.context);
+            candidate_solution.update_total_cost(&self.context);
+            improvement_costs.push(candidate_solution.total_cost);
         }
 
+        // Final cost update (redundant if improvements were applied, but safe)
         candidate_solution.update_total_cost(&self.context);
 
         let candidate_cost = candidate_solution.total_cost;
@@ -530,6 +661,7 @@ impl ALNSEngine {
             self.temperature,
             &mut self.rng,
         );
+        let in_aggressive_phase = self.is_in_aggressive_phase(iteration);
         let mut accepted = false;
         let mut is_new_best = false;
         let mut is_better_than_current = false;
@@ -541,6 +673,9 @@ impl ALNSEngine {
             is_new_best = true;
             is_better_than_current = true;
             self.stagnation_count = 0;
+        } else if in_aggressive_phase {
+            self.current_solution = self.best_solution.clone();
+            self.stagnation_count += 1;
         } else if candidate_cost < current_cost {
             self.current_solution = candidate_solution;
             accepted = true;
@@ -677,6 +812,7 @@ impl ALNSEngine {
             improvement_operator_type,
             improvement_operator_type_id,
             improvement_sequence: improvement_sequence.to_vec(),
+            improvement_costs: improvement_costs.clone(),
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -787,6 +923,7 @@ impl ALNSEngine {
             self.temperature,
             &mut self.rng,
         );
+        let in_aggressive_phase = self.is_in_aggressive_phase(iteration);
 
         let mut accepted = false;
         let mut is_new_best = false;
@@ -799,6 +936,9 @@ impl ALNSEngine {
             is_new_best = true;
             is_better_than_current = true;
             self.stagnation_count = 0;
+        } else if in_aggressive_phase {
+            self.current_solution = self.best_solution.clone();
+            self.stagnation_count += 1;
         } else if candidate_cost < current_cost {
             self.current_solution = candidate_solution;
             accepted = true;
@@ -898,6 +1038,7 @@ impl ALNSEngine {
             improvement_operator_type,
             improvement_operator_type_id,
             improvement_sequence: vec![improvement_operator_idx],
+            improvement_costs: vec![candidate_cost],
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -927,53 +1068,7 @@ impl ALNSEngine {
 
     /// Run the full ALNS algorithm for max_iterations
     pub fn run(&mut self) -> ALNSMetrics {
-        let mut last_metrics = ALNSMetrics {
-            total_cost: self.current_solution.total_cost,
-            best_cost: self.best_solution.total_cost,
-            accepted: false,
-            is_new_best: false,
-            is_better_than_current: false,
-            destroy_idx: None,
-            repair_idx: None,
-            destroy_operator_name: None,
-            repair_operator_name: None,
-            destroy_operator_type: None,
-            repair_operator_type: None,
-            destroy_operator_type_id: None,
-            repair_operator_type_id: None,
-            improvement_idx: None,
-            improvement_operator_name: None,
-            improvement_operator_type: None,
-            improvement_operator_type_id: None,
-            improvement_sequence: Vec::new(),
-            destroy_removed_requests: None,
-            repair_inserted_requests: None,
-            temperature: self.temperature,
-            stagnation_count: self.stagnation_count,
-            iteration: 0,
-            initial_cost: self.initial_cost,
-            is_complete: self.current_solution.is_complete_solution(),
-            is_feasible: self
-                .current_solution
-                .clone()
-                .is_fully_feasible(&self.context),
-            num_voyages: 0,
-            num_empty_voyages: 0,
-            num_vessels_used: 0,
-            avg_voyage_utilization: 0.0,
-            avg_vessel_load_utilization: 0.0,
-            min_vessel_load_utilization: 0.0,
-            max_vessel_load_utilization: 0.0,
-            avg_vessel_time_utilization: 0.0,
-            min_vessel_time_utilization: 0.0,
-            max_vessel_time_utilization: 0.0,
-            destroy_success_rates: vec![],
-            repair_success_rates: vec![],
-            recent_rewards: vec![],
-            destroy_weights: vec![],
-            repair_weights: vec![],
-            elapsed_ms: 0,
-        };
+        let mut last_metrics = self.create_default_metrics();
 
         for iter in 0..self.max_iterations {
             let destroy_idx = self.alns_context.pick_destroy_operator_idx();
@@ -989,6 +1084,90 @@ impl ALNSEngine {
         }
 
         last_metrics
+    }
+
+    /// Run the full ALNS algorithm for multiple restarts.
+    ///
+    /// Each restart runs a full `max_iterations` pass from a fresh initial solution,
+    /// using deterministic seed schedule `base_seed + restart_index`.
+    /// Only the best-found solution across all restarts is retained as global best.
+    pub fn run_with_restarts(&mut self, restarts: usize) -> ALNSRunWithRestartsResult {
+        let restart_count = restarts.max(1);
+        let mut restart_summaries = Vec::with_capacity(restart_count);
+
+        let mut global_best_solution: Option<Solution> = None;
+        let mut global_best_cost = INFINITY;
+        let mut global_metrics = self.create_default_metrics();
+
+        for restart_idx in 0..restart_count {
+            let restart_seed = self.base_seed.wrapping_add(restart_idx as u64);
+            self.reset_for_restart(restart_seed);
+
+            let restart_start = std::time::Instant::now();
+            let restart_initial_cost = self.initial_cost;
+            let mut last_metrics = self.create_default_metrics();
+            let mut iterations_completed = 0usize;
+
+            for iter in 0..self.max_iterations {
+                let destroy_idx = self.alns_context.pick_destroy_operator_idx();
+                let repair_idx = self.alns_context.pick_repair_operator_idx();
+
+                match self.run_iteration(ALNSRunMode::Explicit(destroy_idx, repair_idx), iter, None) {
+                    Ok(metrics) => {
+                        last_metrics = metrics;
+                        iterations_completed = iter + 1;
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "Error in restart {} iteration {}: {}",
+                            restart_idx,
+                            iter,
+                            e
+                        );
+                        break;
+                    }
+                }
+            }
+
+            let restart_best_cost = self.best_solution.total_cost;
+            let restart_final_cost = self.current_solution.total_cost;
+            let restart_elapsed_ms = restart_start.elapsed().as_millis();
+            let best_improvement_pct = if restart_initial_cost.abs() > f64::EPSILON {
+                (restart_initial_cost - restart_best_cost) / restart_initial_cost * 100.0
+            } else {
+                0.0
+            };
+
+            restart_summaries.push(ALNSRestartSummary {
+                restart_index: restart_idx,
+                seed: restart_seed,
+                initial_cost: restart_initial_cost,
+                best_cost: restart_best_cost,
+                final_cost: restart_final_cost,
+                iterations_completed,
+                elapsed_ms: restart_elapsed_ms,
+                best_improvement_pct,
+            });
+
+            if restart_best_cost < global_best_cost {
+                global_best_cost = restart_best_cost;
+                global_best_solution = Some(self.best_solution.clone());
+                global_metrics = last_metrics;
+            }
+        }
+
+        if let Some(best_solution) = global_best_solution {
+            self.best_solution = best_solution.clone();
+            self.current_solution = best_solution;
+            self.alns_context.best_cost = self.best_solution.total_cost;
+            global_metrics.best_cost = self.best_solution.total_cost;
+            global_metrics.total_cost = self.best_solution.total_cost;
+        }
+
+        ALNSRunWithRestartsResult {
+            global_metrics,
+            restart_summaries,
+        }
     }
 
     /// Export current solution to JSON file
