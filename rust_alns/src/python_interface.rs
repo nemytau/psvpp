@@ -132,6 +132,19 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         PyList::new(py, metrics.improvement_costs.clone()),
     )?;
 
+    match metrics.cost_before_destroy {
+        Some(value) => dict.set_item("cost_before_destroy", value)?,
+        None => dict.set_item("cost_before_destroy", py.None())?,
+    }
+    match metrics.cost_after_destroy {
+        Some(value) => dict.set_item("cost_after_destroy", value)?,
+        None => dict.set_item("cost_after_destroy", py.None())?,
+    }
+    match metrics.cost_after_repair {
+        Some(value) => dict.set_item("cost_after_repair", value)?,
+        None => dict.set_item("cost_after_repair", py.None())?,
+    }
+
     let improvement_step_metrics = PyList::empty(py);
     for step in &metrics.improvement_step_metrics {
         let step_dict = PyDict::new(py);

@@ -54,6 +54,9 @@ pub struct ALNSMetrics {
     pub improvement_sequence: Vec<usize>,
     pub improvement_costs: Vec<f64>,  // Cost after each improvement operator
     pub improvement_step_metrics: Vec<ALNSImprovementStepMetric>,
+    pub cost_before_destroy: Option<f64>,
+    pub cost_after_destroy: Option<f64>,
+    pub cost_after_repair: Option<f64>,
     pub temperature: f64,
     pub stagnation_count: usize,
     pub iteration: usize,
@@ -401,6 +404,9 @@ impl ALNSEngine {
             improvement_sequence: Vec::new(),
             improvement_costs: Vec::new(),
             improvement_step_metrics: Vec::new(),
+            cost_before_destroy: None,
+            cost_after_destroy: None,
+            cost_after_repair: None,
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -641,16 +647,23 @@ impl ALNSEngine {
 
         let mut candidate_solution = self.current_solution.clone();
 
+        // Track per-step cost baselines for logging/analysis.
+        let cost_before_destroy = candidate_solution.total_cost;
+
         // Apply destroy and repair operators
         // TODO: expose destroy_removed_requests + fraction_removed to Python result
         destroy_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
         candidate_solution.add_idle_vessel_and_add_empty_voyages(&self.context);
+        candidate_solution.update_total_cost(&self.context);
+        let cost_after_destroy = candidate_solution.total_cost;
+
         repair_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
+        candidate_solution.update_total_cost(&self.context);
+        let cost_after_repair = candidate_solution.total_cost;
 
         // Capture cost after destroy+repair and track each improvement operator separately
-        candidate_solution.update_total_cost(&self.context);
         let mut previous_improvement_cost = candidate_solution.total_cost;
 
         let mut improvement_costs = Vec::with_capacity(improvement_sequence.len());
@@ -848,6 +861,9 @@ impl ALNSEngine {
             improvement_sequence: improvement_sequence.to_vec(),
             improvement_costs: improvement_costs.clone(),
             improvement_step_metrics,
+            cost_before_destroy: Some(cost_before_destroy),
+            cost_after_destroy: Some(cost_after_destroy),
+            cost_after_repair: Some(cost_after_repair),
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,
@@ -1082,6 +1098,9 @@ impl ALNSEngine {
                 cost_after: candidate_cost,
                 cost_delta: candidate_cost - current_cost,
             }],
+            cost_before_destroy: None,
+            cost_after_destroy: None,
+            cost_after_repair: None,
             destroy_removed_requests: None,
             repair_inserted_requests: None,
             temperature: self.temperature,

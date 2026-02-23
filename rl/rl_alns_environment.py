@@ -445,6 +445,40 @@ class ALNSEnvironment(gym.Env):
             self.last_acceptance_type = "unknown"
             self.current_instance_stats = self._resolve_instance_stats(self.current_problem_instance)
             
+            # Log initial solution
+            if self.operator_logging_enabled:
+                initial_record = {
+                    "episode_id": self._current_episode_id,
+                    "iteration": 0,
+                    "instance_id": self.current_problem_instance,
+                    "reward": None,
+                    "cost_current": float(self.initial_cost),
+                    "cost_best": float(self.initial_cost),
+                    "iterations_since_last_best": 0,
+                    "policy_entropy": None,
+                    "accepted": None,
+                    "is_new_best": None,
+                    "elapsed_ms": 0.0,
+                    "temperature": None,
+                    "destroy_idx": None,
+                    "repair_idx": None,
+                    "improvement_idx": None,
+                    "cost_before": float(self.initial_cost),
+                    "cost_after": float(self.initial_cost),
+                    "cost_delta": 0.0,
+                    "best_cost_delta": 0.0,
+                    "best_cost_delta_future": None,
+                    "lookahead_window": None,
+                    "sequence_position": None,
+                    "sequence_call_id": None,
+                    "operator_name": "initial_solution",
+                    "operator_type": "initial",
+                    "operator_index": None,
+                    "num_removed_requests": None,
+                    "num_inserted_requests": None,
+                }
+                self._queue_operator_log_record(initial_record, self.initial_cost)
+            
             # Get initial observation
             obs = self._get_observation(init_result)
             
@@ -1214,6 +1248,36 @@ class ALNSEnvironment(gym.Env):
         cost_delta = float(current_cost) - float(prev_current_cost)
         best_cost_delta = float(current_best_cost) - float(prev_best_cost)
 
+        def _to_float_or_none(value: Any) -> Optional[float]:
+            try:
+                if value is None:
+                    return None
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        cost_before_destroy = _to_float_or_none(result.get("cost_before_destroy"))
+        cost_after_destroy = _to_float_or_none(result.get("cost_after_destroy"))
+        cost_after_repair = _to_float_or_none(result.get("cost_after_repair"))
+
+        if cost_before_destroy is None:
+            cost_before_destroy = float(prev_current_cost)
+        if cost_after_destroy is None:
+            cost_after_destroy = float(prev_current_cost)
+        if cost_after_repair is None:
+            cost_after_repair = float(current_cost)
+
+        running_best_cost_for_steps = float(prev_best_cost)
+
+        def _consume_step_best_delta(step_cost_after: Optional[float]) -> Optional[float]:
+            nonlocal running_best_cost_for_steps
+            if step_cost_after is None:
+                return None
+            new_best = min(running_best_cost_for_steps, float(step_cost_after))
+            delta = new_best - running_best_cost_for_steps
+            running_best_cost_for_steps = new_best
+            return float(delta)
+
         base_record = {
             "episode_id": self._current_episode_id,
             "iteration": self.iteration,
@@ -1230,6 +1294,8 @@ class ALNSEnvironment(gym.Env):
             "destroy_idx": destroy_idx_result if destroy_idx_result is not None else -1,
             "repair_idx": repair_idx_result if repair_idx_result is not None else -1,
             "improvement_idx": improvement_idx_result if improvement_idx_result is not None else -1,
+            "cost_before": float(prev_current_cost),
+            "cost_after": float(current_cost),
             "cost_delta": cost_delta,
             "best_cost_delta": best_cost_delta,
             "best_cost_delta_future": None,
@@ -1253,6 +1319,10 @@ class ALNSEnvironment(gym.Env):
                 "operator_index": destroy_idx_result,
                 "num_removed_requests": result.get("destroy_removed_requests"),
                 "num_inserted_requests": None,
+                "cost_before": float(cost_before_destroy),
+                "cost_after": None,
+                "cost_delta": None,
+                "best_cost_delta": None,
             }
             self._queue_operator_log_record(destroy_record, current_best_cost)
 
@@ -1271,6 +1341,10 @@ class ALNSEnvironment(gym.Env):
                 "operator_index": repair_idx_result,
                 "num_removed_requests": None,
                 "num_inserted_requests": result.get("repair_inserted_requests"),
+                "cost_before": float(cost_after_destroy),
+                "cost_after": float(cost_after_repair),
+                "cost_delta": float(cost_after_repair - cost_after_destroy),
+                "best_cost_delta": _consume_step_best_delta(float(cost_after_repair)),
             }
             self._queue_operator_log_record(repair_record, current_best_cost)
 
@@ -1326,8 +1400,10 @@ class ALNSEnvironment(gym.Env):
                             "operator_index": idx,
                             "operator_name": operator_name,
                             "sequence_position": seq_pos,
+                            "cost_before": cost_before,
+                            "cost_after": cost_after,
                             "cost_delta": individual_cost_delta,
-                            "best_cost_delta": min(0.0, individual_cost_delta),
+                            "best_cost_delta": _consume_step_best_delta(cost_after),
                         }
                     )
 
@@ -1342,6 +1418,8 @@ class ALNSEnvironment(gym.Env):
                         "improvement_idx": int(step["operator_index"]),
                         "num_removed_requests": None,
                         "num_inserted_requests": None,
+                        "cost_before": _to_float_or_none(step.get("cost_before")),
+                        "cost_after": _to_float_or_none(step.get("cost_after")),
                         "cost_delta": float(step["cost_delta"]),
                         "best_cost_delta": float(step["best_cost_delta"]),
                         "sequence_position": seq_pos,
@@ -1378,7 +1456,7 @@ class ALNSEnvironment(gym.Env):
                         pass
 
             # Cost before improvements (after destroy+repair)
-            cost_after_repair = prev_current_cost
+            cost_before_improvements = float(cost_after_repair)
 
             for seq_pos, idx in enumerate(improvement_indices):
                 improvement_name = None
@@ -1392,14 +1470,16 @@ class ALNSEnvironment(gym.Env):
                 # Calculate individual cost delta for this improvement
                 if seq_pos < len(improvement_costs):
                     # Use the cost before this improvement and after
-                    cost_before = cost_after_repair if seq_pos == 0 else improvement_costs[seq_pos - 1]
+                    cost_before = cost_before_improvements if seq_pos == 0 else improvement_costs[seq_pos - 1]
                     cost_after = improvement_costs[seq_pos]
                     individual_cost_delta = cost_after - cost_before
-                    individual_best_cost_delta = min(0.0, individual_cost_delta)  # Improvement only if negative
+                    individual_best_cost_delta = _consume_step_best_delta(cost_after)
                 else:
                     # Fallback: use the combined cost_delta (old behavior)
+                    cost_before = None
+                    cost_after = None
                     individual_cost_delta = float(current_cost) - float(prev_current_cost)
-                    individual_best_cost_delta = float(current_best_cost) - float(prev_best_cost)
+                    individual_best_cost_delta = None
 
                 improvement_record = {
                     **base_record,
@@ -1409,6 +1489,8 @@ class ALNSEnvironment(gym.Env):
                     "improvement_idx": idx,
                     "num_removed_requests": None,
                     "num_inserted_requests": None,
+                    "cost_before": cost_before,
+                    "cost_after": cost_after,
                     "cost_delta": individual_cost_delta,
                     "best_cost_delta": individual_best_cost_delta,
                     "sequence_position": seq_pos,
