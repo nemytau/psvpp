@@ -1,0 +1,70 @@
+{
+  "average_improvement_by_method_per_time": {
+    "baseline": {
+      "total_improvement_pct": 141.92156117980414,
+      "total_runtime_seconds": 32.392999999999994,
+      "improvement_pct_per_second": 4.38124166269886,
+      "num_samples": 69
+    },
+    "kisialiou": {
+      "total_improvement_pct": 1945.8196530067014,
+      "total_runtime_seconds": 103.37299999999998,
+      "improvement_pct_per_second": 18.823287057613708,
+      "num_samples": 70
+    }
+  },
+  "average_best_cost_delta_per_operator": [
+    {
+      "operator_type": "improvement",
+      "operator_name": "deep_relocation",
+      "mean_best_cost_delta": -6.956537350971044,
+      "num_rows": 14000
+    },
+    {
+      "operator_type": "improvement",
+      "operator_name": "deep_swap",
+      "mean_best_cost_delta": -14.510027047807855,
+      "num_rows": 14000
+    },
+    {
+      "operator_type": "improvement",
+      "operator_name": "fleet_and_cost_reduction",
+      "mean_best_cost_delta": -46.47356472286082,
+      "num_rows": 42000
+    },
+    {
+      "operator_type": "improvement",
+      "operator_name": "voyage_number_reduction",
+      "mean_best_cost_delta": -476.1762341040698,
+      "num_rows": 14000
+    },
+    {
+      "operator_type": "initial",
+      "operator_name": "initial_solution",
+      "mean_best_cost_delta": 0.0,
+      "num_rows": 140
+    },
+    {
+      "operator_type": "repair",
+      "operator_name": "deep_greedy_insertion",
+      "mean_best_cost_delta": -2.381266882325158,
+      "num_rows": 51310
+    },
+    {
+      "operator_type": "repair",
+      "operator_name": "k_regret_2",
+      "mean_best_cost_delta": -4.519834003509849,
+      "num_rows": 51526
+    },
+    {
+      "operator_type": "repair",
+      "operator_name": "k_regret_3",
+      "mean_best_cost_delta": -6.8393903630990005,
+      "num_rows": 51164
+    }
+  ],
+  "average_diff_best_found_baseline_minus_kisialiou_pct": {
+    "mean_diff_pct": 26.48154529080133,
+    "num_pairs": 70
+  }
+}

@@ -1,0 +1,67 @@
+[
+  {
+    "size": "small",
+    "dataset": "small_test_1_01",
+    "mode": "kisialiou",
+    "seed": 7242,
+    "iterations": 200,
+    "initial_cost": 491367.7287729365,
+    "best_cost": 328309.238650545,
+    "final_cost": 328309.238650545,
+    "improvement_abs": 163058.4901223915,
+    "improvement_pct": 33.18461522281648,
+    "runtime_seconds": 2.123
+  },
+  {
+    "size": "small",
+    "dataset": "small_test_1_02",
+    "mode": "kisialiou",
+    "seed": 7243,
+    "iterations": 200,
+    "initial_cost": 487300.8595579177,
+    "best_cost": 174481.71643491427,
+    "final_cost": 174481.71643491427,
+    "improvement_abs": 312819.1431230034,
+    "improvement_pct": 64.19425227503083,
+    "runtime_seconds": 0.742
+  },
+  {
+    "size": "small",
+    "dataset": "small_test_1_03",
+    "mode": "kisialiou",
+    "seed": 7244,
+    "iterations": 200,
+    "initial_cost": 338464.1367677355,
+    "best_cost": 327199.9026721543,
+    "final_cost": 327199.9026721543,
+    "improvement_abs": 11264.234095581167,
+    "improvement_pct": 3.32804361583249,
+    "runtime_seconds": 1.557
+  },
+  {
+    "size": "small",
+    "dataset": "small_test_1_04",
+    "mode": "kisialiou",
+    "seed": 7245,
+    "iterations": 200,
+    "initial_cost": 328197.12765087205,
+    "best_cost": 166863.32016947557,
+    "final_cost": 166863.32016947557,
+    "improvement_abs": 161333.80748139648,
+    "improvement_pct": 49.157592766326516,
+    "runtime_seconds": 0.597
+  },
+  {
+    "size": "small",
+    "dataset": "small_test_1_05",
+    "mode": "kisialiou",
+    "seed": 7246,
+    "iterations": 200,
+    "initial_cost": 488579.64432516275,
+    "best_cost": 324296.1810941003,
+    "final_cost": 324296.1810941003,
+    "improvement_abs": 164283.46323106246,
+    "improvement_pct": 33.62470482329948,
+    "runtime_seconds": 2.076
+  }
+]

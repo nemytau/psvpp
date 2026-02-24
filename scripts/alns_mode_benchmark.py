@@ -104,7 +104,7 @@ def run_episode(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark ALNS algorithm modes over generated datasets")
+    parser = argparse.ArgumentParser(description="Benchmark a single ALNS algorithm mode over generated datasets")
     parser.add_argument(
         "--sizes",
         nargs="*",
@@ -112,10 +112,10 @@ def parse_args() -> argparse.Namespace:
         help=f"Dataset sizes to include (default: {', '.join(DEFAULT_SIZES)})",
     )
     parser.add_argument(
-        "--modes",
-        nargs="*",
-        default=DEFAULT_MODES,
-        help=f"Algorithm modes to evaluate (default: {', '.join(DEFAULT_MODES)})",
+        "--mode",
+        type=str,
+        default="baseline",
+        help="Algorithm mode to evaluate (default: baseline). One mode per invocation.",
     )
     parser.add_argument(
         "--iterations",
@@ -163,13 +163,10 @@ def main() -> None:
     results: List[Dict[str, Any]] = []
 
     sizes: List[str] = list(args.sizes or [])
-    algorithm_modes: List[str] = list(args.modes or [])
+    mode: str = normalize_algorithm_mode(args.mode)
 
     if not sizes:
         log("No dataset sizes specified; exiting")
-        return
-    if not algorithm_modes:
-        log("No algorithm modes specified; exiting")
         return
 
     datasets_per_size = max(1, int(args.datasets_per_size))
@@ -188,51 +185,49 @@ def main() -> None:
             dataset_label = dataset_path.name
             seed = int(args.base_seed) + idx
 
-            for mode in algorithm_modes:
-                normalized_mode = normalize_algorithm_mode(mode)
-                mode_iterations = get_iterations_for_mode(args.iterations, mode)
-                iter_note = f" [×{BASELINE_ITERATION_MULTIPLIER} iterations]" if normalized_mode == "baseline" else ""
-                log(
-                    f"Running mode={normalized_mode:<24} size={size:<6} dataset={dataset_label:<20} seed={seed}{iter_note}"
-                )
-                start_time = time.perf_counter()
-                episode = run_episode(
-                    problem_path=str(dataset_path),
-                    seed=seed,
-                    max_iterations=mode_iterations,
-                    algorithm_mode=normalized_mode,
-                    operator_logging_dir=args.log_dir,
-                )
-                wall_time = time.perf_counter() - start_time
+            mode_iterations = get_iterations_for_mode(args.iterations, mode)
+            iter_note = f" [×{BASELINE_ITERATION_MULTIPLIER} iterations]" if mode == "baseline" else ""
+            log(
+                f"Running mode={mode:<24} size={size:<6} dataset={dataset_label:<20} seed={seed}{iter_note}"
+            )
+            start_time = time.perf_counter()
+            episode = run_episode(
+                problem_path=str(dataset_path),
+                seed=seed,
+                max_iterations=mode_iterations,
+                algorithm_mode=mode,
+                operator_logging_dir=args.log_dir,
+            )
+            wall_time = time.perf_counter() - start_time
 
-                elapsed_sequence = episode.get("elapsed_seconds") or []
-                runtime_seconds = float(elapsed_sequence[-1]) if elapsed_sequence else wall_time
+            elapsed_sequence = episode.get("elapsed_seconds") or []
+            runtime_seconds = float(elapsed_sequence[-1]) if elapsed_sequence else wall_time
 
-                initial_cost = float(episode.get("initial_cost") or 0.0)
-                best_cost = float(episode.get("best_cost") or 0.0)
-                final_cost = float(episode.get("final_cost") or 0.0)
-                iterations = int(episode.get("iterations") or episode.get("total_iterations") or 0)
+            initial_cost = float(episode.get("initial_cost") or 0.0)
+            best_cost = float(episode.get("best_cost") or 0.0)
+            final_cost = float(episode.get("final_cost") or 0.0)
+            iterations = int(episode.get("iterations") or episode.get("total_iterations") or 0)
 
-                improvement_abs = max(0.0, initial_cost - best_cost) if initial_cost else 0.0
-                improvement_pct = (
-                    (improvement_abs / initial_cost) * 100.0 if initial_cost and initial_cost > 1e-9 else 0.0
-                )
+            improvement_abs = max(0.0, initial_cost - best_cost) if initial_cost else 0.0
+            improvement_pct = (
+                (improvement_abs / initial_cost) * 100.0 if initial_cost and initial_cost > 1e-9 else 0.0
+            )
 
-                results.append(
-                    {
-                        "size": size,
-                        "dataset": dataset_label,
-                        "mode": normalized_mode,
-                        "seed": seed,
-                        "iterations": iterations,
-                        "initial_cost": initial_cost,
-                        "best_cost": best_cost,
-                        "final_cost": final_cost,
-                        "improvement_abs": improvement_abs,
-                        "improvement_pct": improvement_pct,
-                        "runtime_seconds": runtime_seconds,
-                    }
-                )
+            results.append(
+                {
+                    "size": size,
+                    "dataset": dataset_label,
+                    "mode": mode,
+                    "seed": seed,
+                    "iterations": iterations,
+                    "initial_cost": initial_cost,
+                    "best_cost": best_cost,
+                    "final_cost": final_cost,
+                    "improvement_abs": improvement_abs,
+                    "improvement_pct": improvement_pct,
+                    "runtime_seconds": runtime_seconds,
+                }
+            )
 
     args.results_path.parent.mkdir(parents=True, exist_ok=True)
     with args.results_path.open("w", encoding="utf-8") as fh:
@@ -240,7 +235,7 @@ def main() -> None:
     log(f"Wrote {len(results)} runs to {args.results_path}")
 
     summary = build_summary(results)
-    print_summary(summary, sizes, algorithm_modes)
+    print_summary(summary, sizes, [mode])
 
     with args.log_path.open("w", encoding="utf-8") as fh:
         for line in LOG_LINES:
