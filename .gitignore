@@ -157,3 +157,9 @@ models/
 
 # Rust ALNS generated artefacts
 rust_alns/output/
+
+# Benchmark experiment outputs (generated)
+output/benchmark_modes_matrix_*/
+
+# Local experiment notes (generated/scratch)
+docs/experiments/
