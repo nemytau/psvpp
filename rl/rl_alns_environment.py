@@ -73,8 +73,12 @@ class ALNSEnvironment(gym.Env):
         operator_logging_format: str = "csv",
         operator_logging_dir: Optional[str] = None,
         operator_logging_future_window: int = 5,
+        operator_logging_mode_label: Optional[str] = None,
+        operator_logging_size: Optional[str] = None,
+        operator_logging_dataset_name: Optional[str] = None,
         force_baseline_improvement: bool = False,
         baseline_improvement_idx: Optional[int] = None,
+        kisialiou_improvement_sequence: Optional[Sequence[str]] = None,
     ):
         """
         Initialize the ALNS environment.
@@ -96,6 +100,8 @@ class ALNSEnvironment(gym.Env):
             algorithm_mode: High-level ALNS variant to execute (baseline, kisialiou, reinforcement_learning)
             force_baseline_improvement: Automatically execute a configured improvement after each destroy/repair pair (baseline mode)
             baseline_improvement_idx: Optional improvement operator index to use when ``force_baseline_improvement`` is enabled
+            kisialiou_improvement_sequence: Optional override for Kisialiou improvement sequence,
+                provided as ordered improvement operator names
         """
         super().__init__()
         
@@ -138,6 +144,11 @@ class ALNSEnvironment(gym.Env):
             self.algorithm_mode = "reinforcement_learning"
         self.force_baseline_improvement = bool(force_baseline_improvement)
         self.baseline_improvement_idx = baseline_improvement_idx if baseline_improvement_idx is None else int(baseline_improvement_idx)
+        self.kisialiou_improvement_sequence = (
+            [str(name).strip() for name in kisialiou_improvement_sequence]
+            if kisialiou_improvement_sequence is not None
+            else None
+        )
         
         if self.force_baseline_improvement and self.algorithm_mode != "baseline":
             LOGGER.warning(
@@ -158,6 +169,19 @@ class ALNSEnvironment(gym.Env):
         self.num_destroy = len(self.destroy_operators)
         self.num_repair = len(self.repair_operators)
         self.num_improvement = len(self.improvement_operators)
+
+        if self.kisialiou_improvement_sequence is not None:
+            valid_names = set(self.improvement_operators)
+            invalid_names = [
+                name
+                for name in self.kisialiou_improvement_sequence
+                if name not in valid_names
+            ]
+            if invalid_names:
+                raise ValueError(
+                    "Unknown improvement operators in kisialiou_improvement_sequence: "
+                    + ", ".join(invalid_names)
+                )
 
         if self.force_baseline_improvement and self.num_improvement <= 0:
             LOGGER.warning(
@@ -200,6 +224,9 @@ class ALNSEnvironment(gym.Env):
             fmt=operator_logging_format,
             output_dir=logging_dir,
             enabled=self.operator_logging_enabled,
+            mode_label=operator_logging_mode_label,
+            size=operator_logging_size,
+            dataset_name=operator_logging_dataset_name,
         )
         self.operator_logging_future_window = max(0, int(operator_logging_future_window))
         self._operator_log_pending: Deque[Dict[str, Any]] = deque()
@@ -429,6 +456,7 @@ class ALNSEnvironment(gym.Env):
                 weight_update_interval=self.weight_update_interval,
                 aggressive_search_factor=self.aggressive_search_factor,
                 algorithm_mode=self.algorithm_mode,
+                kisialiou_improvement_sequence=self.kisialiou_improvement_sequence,
             )
 
             if snapshot_override is not None:
@@ -528,6 +556,7 @@ class ALNSEnvironment(gym.Env):
             weight_update_interval=self.weight_update_interval,
             aggressive_search_factor=self.aggressive_search_factor,
             algorithm_mode=self.algorithm_mode,
+            kisialiou_improvement_sequence=self.kisialiou_improvement_sequence,
         )
 
         return self.alns.run_with_restarts(restarts=restart_count)

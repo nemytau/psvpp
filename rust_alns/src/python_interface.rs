@@ -279,7 +279,8 @@ impl RustALNSInterface {
         theta=None,
         weight_update_interval=None,
         aggressive_search_factor=None,
-        algorithm_mode=None
+        algorithm_mode=None,
+        kisialiou_improvement_sequence=None
     ))]
     fn initialize_alns(
         &mut self,
@@ -291,6 +292,7 @@ impl RustALNSInterface {
         weight_update_interval: Option<usize>,
         aggressive_search_factor: Option<f64>,
         algorithm_mode: Option<&str>,
+        kisialiou_improvement_sequence: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
         // Initialize logging for Python interface (only if not already initialized)
         if !PYTHON_LOGGING_INITIALIZED.load(Ordering::Relaxed) {
@@ -322,7 +324,7 @@ impl RustALNSInterface {
             })
             .transpose()?;
 
-        let engine = ALNSEngine::new_from_instance(
+        let mut engine = ALNSEngine::new_from_instance(
             problem_instance,
             seed,
             temperature,
@@ -333,8 +335,35 @@ impl RustALNSInterface {
             algorithm_mode.unwrap_or(crate::alns::engine::ALNSAlgorithmMode::Baseline),
         )
         .map_err(|e| PyRuntimeError::new_err(e))?;
+
+        if let Some(sequence) = kisialiou_improvement_sequence {
+            engine
+                .set_kisialiou_improvement_sequence_override_by_names(&sequence)
+                .map_err(PyValueError::new_err)?;
+        }
+
         self.engine = Some(engine);
         self.extract_solution_metrics(py)
+    }
+
+    #[pyo3(signature = (sequence=None))]
+    fn set_kisialiou_improvement_sequence(
+        &mut self,
+        sequence: Option<Vec<String>>,
+    ) -> PyResult<()> {
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
+
+        match sequence {
+            Some(values) => engine
+                .set_kisialiou_improvement_sequence_override_by_names(&values)
+                .map_err(PyValueError::new_err)?,
+            None => engine.clear_kisialiou_improvement_sequence_override(),
+        }
+
+        Ok(())
     }
 
     fn create_snapshot(&self) -> PyResult<RustALNSSnapshot> {

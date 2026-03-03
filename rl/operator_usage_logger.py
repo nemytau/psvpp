@@ -32,6 +32,9 @@ class OperatorUsageLogger:
     output_dir: Path = Path("logs")
     fmt: str = "csv"
     enabled: bool = True
+    mode_label: Optional[str] = None  # e.g., "kisialiou_original" for traceable naming
+    size: Optional[str] = None  # e.g., "small", "medium", "large"
+    dataset_name: Optional[str] = None  # e.g., "small_test_1_01"
     _buffer: List[Dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     _fieldnames: Optional[List[str]] = field(default=None, init=False, repr=False)
     _file_path: Optional[Path] = field(default=None, init=False, repr=False)
@@ -77,7 +80,13 @@ class OperatorUsageLogger:
 
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
         suffix = ".jsonl" if self.fmt.lower() in {"jsonl", "jsonlines"} else ".csv"
-        filename = f"operator_usage_{self.mode}_{timestamp}{suffix}"
+        
+        # Build filename with mode_label, size, and dataset for traceability
+        if self.mode_label and self.size and self.dataset_name:
+            filename = f"operator_usage_{self.mode_label}__{self.size}__{self.dataset_name}_{timestamp}{suffix}"
+        else:
+            # Fallback to original naming for backward compatibility
+            filename = f"operator_usage_{self.mode}_{timestamp}{suffix}"
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._file_path = self.output_dir / filename

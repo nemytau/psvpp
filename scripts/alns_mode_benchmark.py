@@ -25,7 +25,6 @@ DEFAULT_SIZES = ["small", "medium"]
 DEFAULT_MODES = ["baseline", "kisialiou", "reinforcement_learning"]
 DEFAULT_ITERATIONS = 1000
 DEFAULT_DATASETS_PER_SIZE = 1
-BASELINE_ITERATION_MULTIPLIER = 10  # Baseline runs faster per iteration
 RESULTS_PATH = REPO_ROOT / "output" / "alns_mode_benchmark.json"
 LOG_PATH = REPO_ROOT / "output" / "alns_mode_benchmark.log"
 
@@ -44,10 +43,7 @@ def normalize_algorithm_mode(value: Any) -> str:
 
 
 def get_iterations_for_mode(base_iterations: int, mode: str) -> int:
-    """Return iteration count for mode. Baseline gets 10x since it's much faster per iteration."""
-    normalized = normalize_algorithm_mode(mode)
-    if normalized == "baseline":
-        return base_iterations * BASELINE_ITERATION_MULTIPLIER
+    """Return iteration count for mode. All modes use the same iteration count."""
     return base_iterations
 
 
@@ -57,8 +53,14 @@ def run_episode(
     seed: int,
     max_iterations: int,
     algorithm_mode: str,
+    kisialiou_improvement_sequence: Optional[List[str]] = None,
     operator_logging_dir: Optional[str] = None,
+    mode_label: Optional[str] = None,
+    size_label: Optional[str] = None,
 ) -> Dict[str, Any]:
+    # Extract dataset filename for operator logging
+    dataset_name = Path(problem_path).stem if problem_path else None
+    
     env_kwargs: Dict[str, Any] = {
         "problem_instance": problem_path,
         "max_iterations": max_iterations,
@@ -69,9 +71,13 @@ def run_episode(
         "operator_logging_format": "csv",
         "operator_logging_mode": algorithm_mode,
         "operator_logging_future_window": 5,
+        "operator_logging_mode_label": mode_label or algorithm_mode,
+        "operator_logging_size": size_label,
+        "operator_logging_dataset_name": dataset_name,
         "algorithm_mode": algorithm_mode,
         "force_baseline_improvement": False,
         "baseline_improvement_idx": None,
+        "kisialiou_improvement_sequence": kisialiou_improvement_sequence,
     }
     if operator_logging_dir:
         env_kwargs["operator_logging_dir"] = operator_logging_dir
@@ -118,6 +124,30 @@ def parse_args() -> argparse.Namespace:
         help="Algorithm mode to evaluate (default: baseline). One mode per invocation.",
     )
     parser.add_argument(
+        "--dataset-paths",
+        type=str,
+        default=None,
+        help="Comma-separated dataset paths to run (overrides --sizes selection)",
+    )
+    parser.add_argument(
+        "--size-label",
+        type=str,
+        default=None,
+        help="Optional size label when using --dataset-paths",
+    )
+    parser.add_argument(
+        "--mode-label",
+        type=str,
+        default=None,
+        help="Optional mode label to persist in output rows (defaults to --mode)",
+    )
+    parser.add_argument(
+        "--kisialiou-improvement-sequence",
+        type=str,
+        default=None,
+        help="Comma-separated ordered improvement operator names for kisialiou override",
+    )
+    parser.add_argument(
         "--iterations",
         type=int,
         default=DEFAULT_ITERATIONS,
@@ -159,11 +189,33 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     LOG_LINES.clear()
-    manager = GeneratedDatasetManager()
     results: List[Dict[str, Any]] = []
 
-    sizes: List[str] = list(args.sizes or [])
     mode: str = normalize_algorithm_mode(args.mode)
+    mode_label: str = str(args.mode_label or mode)
+    kisialiou_improvement_sequence: Optional[List[str]] = None
+    if args.kisialiou_improvement_sequence is not None:
+        kisialiou_improvement_sequence = [
+            item.strip()
+            for item in str(args.kisialiou_improvement_sequence).split(",")
+            if item.strip()
+        ]
+
+    size_label_override = args.size_label
+    dataset_entries: List[Tuple[str, Path]] = []
+
+    manager = None
+    sizes: List[str] = []
+    if args.dataset_paths:
+        dataset_paths = [Path(item.strip()) for item in args.dataset_paths.split(",") if item.strip()]
+        if not dataset_paths:
+            raise RuntimeError("--dataset-paths provided but no valid paths were parsed")
+        size_label = str(size_label_override or "unknown")
+        dataset_entries = [(size_label, path) for path in dataset_paths]
+        sizes = [size_label]
+    else:
+        manager = GeneratedDatasetManager()
+        sizes = list(args.sizes or [])
 
     if not sizes:
         log("No dataset sizes specified; exiting")
@@ -171,63 +223,70 @@ def main() -> None:
 
     datasets_per_size = max(1, int(args.datasets_per_size))
 
-    for size in sizes:
-        log(f"Preparing datasets for size={size}")
-        splits = manager.prepare_size(size)
-        test_paths = splits.get("test", [])[:datasets_per_size]
-        if len(test_paths) < datasets_per_size:
-            raise RuntimeError(
-                f"Expected at least {datasets_per_size} test dataset(s) for size '{size}', found {len(test_paths)}"
-            )
+    if not dataset_entries:
+        for size in sizes:
+            log(f"Preparing datasets for size={size}")
+            splits = manager.prepare_size(size) if manager is not None else {}
+            test_paths = splits.get("test", [])[:datasets_per_size]
+            if len(test_paths) < datasets_per_size:
+                raise RuntimeError(
+                    f"Expected at least {datasets_per_size} test dataset(s) for size '{size}', found {len(test_paths)}"
+                )
+            dataset_entries.extend((size, Path(path)) for path in test_paths)
 
-        for idx, dataset_path in enumerate(test_paths):
-            dataset_path = Path(dataset_path)
-            dataset_label = dataset_path.name
-            seed = int(args.base_seed) + idx
+    for idx, (size, dataset_path) in enumerate(dataset_entries):
+        dataset_path = Path(dataset_path)
+        dataset_label = dataset_path.name
+        seed = int(args.base_seed) + idx
 
-            mode_iterations = get_iterations_for_mode(args.iterations, mode)
-            iter_note = f" [×{BASELINE_ITERATION_MULTIPLIER} iterations]" if mode == "baseline" else ""
-            log(
-                f"Running mode={mode:<24} size={size:<6} dataset={dataset_label:<20} seed={seed}{iter_note}"
-            )
-            start_time = time.perf_counter()
-            episode = run_episode(
-                problem_path=str(dataset_path),
-                seed=seed,
-                max_iterations=mode_iterations,
-                algorithm_mode=mode,
-                operator_logging_dir=args.log_dir,
-            )
-            wall_time = time.perf_counter() - start_time
+        mode_iterations = get_iterations_for_mode(args.iterations, mode)
+        log(
+            f"Running mode={mode_label:<24} (algorithm_mode={mode}) size={size:<6} dataset={dataset_label:<20} seed={seed}"
+        )
+        start_time = time.perf_counter()
+        episode = run_episode(
+            problem_path=str(dataset_path),
+            seed=seed,
+            max_iterations=mode_iterations,
+            algorithm_mode=mode,
+            kisialiou_improvement_sequence=kisialiou_improvement_sequence,
+            operator_logging_dir=args.log_dir,
+            mode_label=mode_label,
+            size_label=size,
+        )
+        wall_time = time.perf_counter() - start_time
 
-            elapsed_sequence = episode.get("elapsed_seconds") or []
-            runtime_seconds = float(elapsed_sequence[-1]) if elapsed_sequence else wall_time
+        elapsed_sequence = episode.get("elapsed_seconds") or []
+        runtime_seconds = float(elapsed_sequence[-1]) if elapsed_sequence else wall_time
 
-            initial_cost = float(episode.get("initial_cost") or 0.0)
-            best_cost = float(episode.get("best_cost") or 0.0)
-            final_cost = float(episode.get("final_cost") or 0.0)
-            iterations = int(episode.get("iterations") or episode.get("total_iterations") or 0)
+        initial_cost = float(episode.get("initial_cost") or 0.0)
+        best_cost = float(episode.get("best_cost") or 0.0)
+        final_cost = float(episode.get("final_cost") or 0.0)
+        iterations = int(episode.get("iterations") or episode.get("total_iterations") or 0)
 
-            improvement_abs = max(0.0, initial_cost - best_cost) if initial_cost else 0.0
-            improvement_pct = (
-                (improvement_abs / initial_cost) * 100.0 if initial_cost and initial_cost > 1e-9 else 0.0
-            )
+        improvement_abs = max(0.0, initial_cost - best_cost) if initial_cost else 0.0
+        improvement_pct = (
+            (improvement_abs / initial_cost) * 100.0 if initial_cost and initial_cost > 1e-9 else 0.0
+        )
 
-            results.append(
-                {
-                    "size": size,
-                    "dataset": dataset_label,
-                    "mode": mode,
-                    "seed": seed,
-                    "iterations": iterations,
-                    "initial_cost": initial_cost,
-                    "best_cost": best_cost,
-                    "final_cost": final_cost,
-                    "improvement_abs": improvement_abs,
-                    "improvement_pct": improvement_pct,
-                    "runtime_seconds": runtime_seconds,
-                }
-            )
+        results.append(
+            {
+                "size": size,
+                "dataset": dataset_label,
+                "dataset_path": str(dataset_path),
+                "mode": mode_label,
+                "algorithm_mode": mode,
+                "seed": seed,
+                "iterations": iterations,
+                "initial_cost": initial_cost,
+                "best_cost": best_cost,
+                "final_cost": final_cost,
+                "improvement_abs": improvement_abs,
+                "improvement_pct": improvement_pct,
+                "runtime_seconds": runtime_seconds,
+                "kisialiou_improvement_sequence": kisialiou_improvement_sequence,
+            }
+        )
 
     args.results_path.parent.mkdir(parents=True, exist_ok=True)
     with args.results_path.open("w", encoding="utf-8") as fh:
@@ -235,7 +294,7 @@ def main() -> None:
     log(f"Wrote {len(results)} runs to {args.results_path}")
 
     summary = build_summary(results)
-    print_summary(summary, sizes, [mode])
+    print_summary(summary, sizes, [mode_label])
 
     with args.log_path.open("w", encoding="utf-8") as fh:
         for line in LOG_LINES:

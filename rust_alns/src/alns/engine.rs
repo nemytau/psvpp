@@ -127,6 +127,7 @@ pub struct ALNSEngineSnapshot {
     pub base_seed: u64,
     pub initial_temperature: f64,
     pub algorithm_mode: ALNSAlgorithmMode,
+    pub kisialiou_improvement_sequence_override: Option<Vec<usize>>,
 }
 
 /// Unified ALNS Engine - canonical implementation for all interfaces
@@ -152,6 +153,7 @@ pub struct ALNSEngine {
     pub base_seed: u64,
     pub initial_temperature: f64,
     pub algorithm_mode: ALNSAlgorithmMode,
+    pub kisialiou_improvement_sequence_override: Option<Vec<usize>>,
 }
 
 impl ALNSEngine {
@@ -337,6 +339,7 @@ impl ALNSEngine {
             base_seed: seed,
             initial_temperature: temperature,
             algorithm_mode,
+            kisialiou_improvement_sequence_override: None,
         })
     }
 
@@ -359,6 +362,9 @@ impl ALNSEngine {
             base_seed: self.base_seed,
             initial_temperature: self.initial_temperature,
             algorithm_mode: self.algorithm_mode,
+            kisialiou_improvement_sequence_override: self
+                .kisialiou_improvement_sequence_override
+                .clone(),
         }
     }
 
@@ -380,6 +386,55 @@ impl ALNSEngine {
         self.base_seed = snapshot.base_seed;
         self.initial_temperature = snapshot.initial_temperature;
         self.algorithm_mode = snapshot.algorithm_mode;
+        self.kisialiou_improvement_sequence_override = snapshot
+            .kisialiou_improvement_sequence_override
+            .clone();
+    }
+
+    pub fn clear_kisialiou_improvement_sequence_override(&mut self) {
+        self.kisialiou_improvement_sequence_override = None;
+    }
+
+    pub fn set_kisialiou_improvement_sequence_override_by_indices(
+        &mut self,
+        sequence: &[usize],
+    ) -> Result<(), String> {
+        if sequence.is_empty() {
+            self.kisialiou_improvement_sequence_override = Some(Vec::new());
+            return Ok(());
+        }
+
+        for &idx in sequence {
+            if idx >= self.operator_registry.improvement_operators.len() {
+                return Err(format!(
+                    "Invalid improvement operator index in kisialiou override sequence: {}",
+                    idx
+                ));
+            }
+        }
+
+        self.kisialiou_improvement_sequence_override = Some(sequence.to_vec());
+        Ok(())
+    }
+
+    pub fn set_kisialiou_improvement_sequence_override_by_names(
+        &mut self,
+        sequence: &[String],
+    ) -> Result<(), String> {
+        let mut indices = Vec::with_capacity(sequence.len());
+        for name in sequence {
+            let idx = self
+                .find_improvement_operator_index(name)
+                .ok_or_else(|| {
+                    format!(
+                        "Unknown improvement operator '{}' in kisialiou override sequence",
+                        name
+                    )
+                })?;
+            indices.push(idx);
+        }
+
+        self.set_kisialiou_improvement_sequence_override_by_indices(&indices)
     }
 
     fn create_default_metrics(&self) -> ALNSMetrics {
@@ -912,6 +967,10 @@ impl ALNSEngine {
     }
 
     fn compute_kisialiou_improvement_sequence(&self) -> Vec<usize> {
+        if let Some(sequence) = &self.kisialiou_improvement_sequence_override {
+            return sequence.clone();
+        }
+
         const ORDERED_NAMES: [&str; 6] = [
             "voyage_number_reduction",
             "fleet_and_cost_reduction",
