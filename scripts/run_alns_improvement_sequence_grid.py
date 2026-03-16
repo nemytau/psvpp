@@ -9,6 +9,7 @@ import itertools
 import json
 import statistics
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -19,6 +20,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from rl.dataset_manager import GeneratedDatasetManager
 from rl.rl_alns_environment import ALNSEnvironment
+
+
+def log(message: str) -> None:
+    print(message, flush=True)
 
 
 def parse_sizes(raw: str) -> List[str]:
@@ -237,6 +242,66 @@ def aggregate(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def write_rows_files(out_dir: Path, rows: Sequence[Dict[str, Any]], filename_prefix: str = "results") -> Tuple[Path, Path]:
+    results_json = out_dir / f"{filename_prefix}.json"
+    with results_json.open("w", encoding="utf-8") as fh:
+        json.dump(list(rows), fh, indent=2)
+
+    results_csv = out_dir / f"{filename_prefix}.csv"
+    with results_csv.open("w", encoding="utf-8", newline="") as fh:
+        fieldnames = [
+            "size",
+            "dataset",
+            "dataset_path",
+            "seed",
+            "sequence",
+            "sequence_key",
+            "sequence_length",
+            "iterations",
+            "runtime_seconds",
+            "runtime_budget_seconds",
+            "stopped_on_budget",
+            "initial_cost",
+            "best_cost",
+            "final_cost",
+            "improvement_pct",
+            "reference_kisialiou_best_cost",
+            "gap_vs_kisialiou_pct",
+        ]
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            row_csv = dict(row)
+            row_csv["sequence"] = ",".join(row["sequence"])
+            writer.writerow(row_csv)
+
+    return results_json, results_csv
+
+
+def write_progress_checkpoint(
+    *,
+    out_dir: Path,
+    rows: Sequence[Dict[str, Any]],
+    run_idx: int,
+    total_runs: int,
+    start_ts: float,
+) -> None:
+    write_rows_files(out_dir=out_dir, rows=rows, filename_prefix="results_partial")
+    elapsed = max(1e-9, time.perf_counter() - start_ts)
+    rate = run_idx / elapsed
+    eta_seconds = (total_runs - run_idx) / rate if rate > 1e-9 else None
+    progress = {
+        "completed_runs": int(run_idx),
+        "total_runs": int(total_runs),
+        "completion_ratio": float(run_idx / total_runs) if total_runs > 0 else 0.0,
+        "elapsed_seconds": float(elapsed),
+        "runs_per_second": float(rate),
+        "eta_seconds": float(eta_seconds) if eta_seconds is not None else None,
+        "updated_at": datetime.now().isoformat(),
+    }
+    (out_dir / "progress.json").write_text(json.dumps(progress, indent=2), encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run ALNS over all improvement sequences with Kisialiou time budget matching"
@@ -262,6 +327,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-module", type=str, default="features_v2")
     parser.add_argument("--run-tag", type=str, default="alns_seq_grid_l2_l3_i300_s5")
     parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=10,
+        help="Print progress every N completed runs (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=100,
+        help="Write partial results/progress every N completed runs (default: %(default)s)",
+    )
+    parser.add_argument(
         "--enable-operator-logging",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -278,6 +355,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    start_ts = time.perf_counter()
 
     sizes = parse_sizes(args.sizes)
     seeds = parse_seeds(args.seeds)
@@ -314,10 +392,10 @@ def main() -> None:
     if not sequences:
         raise RuntimeError("No sequences generated (check operators/lengths settings)")
 
-    print(f"run_id={run_id}")
-    print(f"sizes={sizes} datasets={len(dataset_entries)} seeds={len(seeds)}")
-    print(f"operators={operators}")
-    print(f"sequence_lengths={lengths} allow_repetition={args.allow_repetition} total_sequences={len(sequences)}")
+    log(f"run_id={run_id}")
+    log(f"sizes={sizes} datasets={len(dataset_entries)} seeds={len(seeds)}")
+    log(f"operators={operators}")
+    log(f"sequence_lengths={lengths} allow_repetition={args.allow_repetition} total_sequences={len(sequences)}")
 
     metadata = {
         "run_id": run_id,
@@ -363,7 +441,7 @@ def main() -> None:
                 key = (dataset_path, int(seed))
                 reference_runtime[key] = max(1e-6, float(stats["runtime_seconds"]))
                 reference_best[key] = float(stats["best_cost"])
-                print(
+                log(
                     f"[ref {ref_idx}/{total_refs}] dataset={Path(dataset_path).name} seed={seed} "
                     f"runtime={reference_runtime[key]:.4f}s best={reference_best[key]:.6f}"
                 )
@@ -432,43 +510,27 @@ def main() -> None:
                     }
                 )
 
-                if run_idx % 25 == 0 or run_idx == total_runs:
-                    print(
+                progress_every = max(1, int(args.progress_every))
+                checkpoint_every = max(1, int(args.checkpoint_every))
+                if run_idx % progress_every == 0 or run_idx == total_runs:
+                    elapsed = max(1e-9, time.perf_counter() - start_ts)
+                    rate = run_idx / elapsed
+                    eta_seconds = (total_runs - run_idx) / rate if rate > 1e-9 else None
+                    eta_display = f"{eta_seconds/60.0:.1f}m" if eta_seconds is not None else "n/a"
+                    log(
                         f"[run {run_idx}/{total_runs}] seq={sequence_key} dataset={dataset_name} seed={seed} "
-                        f"best={best_cost:.6f} gap_vs_ref={gap_vs_kisialiou_pct:.4f}%"
+                        f"best={best_cost:.6f} gap_vs_ref={gap_vs_kisialiou_pct:.4f}% eta={eta_display}"
+                    )
+                if run_idx % checkpoint_every == 0:
+                    write_progress_checkpoint(
+                        out_dir=out_dir,
+                        rows=rows,
+                        run_idx=run_idx,
+                        total_runs=total_runs,
+                        start_ts=start_ts,
                     )
 
-    results_json = out_dir / "results.json"
-    with results_json.open("w", encoding="utf-8") as fh:
-        json.dump(rows, fh, indent=2)
-
-    results_csv = out_dir / "results.csv"
-    with results_csv.open("w", encoding="utf-8", newline="") as fh:
-        fieldnames = [
-            "size",
-            "dataset",
-            "dataset_path",
-            "seed",
-            "sequence",
-            "sequence_key",
-            "sequence_length",
-            "iterations",
-            "runtime_seconds",
-            "runtime_budget_seconds",
-            "stopped_on_budget",
-            "initial_cost",
-            "best_cost",
-            "final_cost",
-            "improvement_pct",
-            "reference_kisialiou_best_cost",
-            "gap_vs_kisialiou_pct",
-        ]
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            row_csv = dict(row)
-            row_csv["sequence"] = ",".join(row["sequence"])
-            writer.writerow(row_csv)
+    results_json, results_csv = write_rows_files(out_dir=out_dir, rows=rows, filename_prefix="results")
 
     summary = aggregate(rows)
     summary_path = out_dir / "summary.json"
@@ -488,11 +550,11 @@ def main() -> None:
         )
     top_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    print(f"done run_id={run_id}")
-    print(f"results_json={results_json}")
-    print(f"results_csv={results_csv}")
-    print(f"summary={summary_path}")
-    print(f"top_sequences={top_path}")
+    log(f"done run_id={run_id}")
+    log(f"results_json={results_json}")
+    log(f"results_csv={results_csv}")
+    log(f"summary={summary_path}")
+    log(f"top_sequences={top_path}")
 
 
 if __name__ == "__main__":
