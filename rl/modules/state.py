@@ -172,3 +172,155 @@ class OperatorFeatureStateEncoderV3(BaseStateEncoder):
         )[:41]
         obs_array = np.array(obs_values, dtype=np.float32)
         return np.nan_to_num(obs_array, nan=0.0, posinf=1e6, neginf=-1e6)
+
+
+@register_state("features_improvement_v1")
+class ImprovementOnlyStateEncoderV1(BaseStateEncoder):
+    """Improvement-focused state for `improvement_only_v1` action space.
+
+    Keeps the 41-dim shape used by features_v3 for model compatibility, but
+    replaces noisy backbone-operator identifiers with normalized signals tied
+    to improvement decisions.
+    """
+
+    version = "improvement-1.0"
+
+    def __init__(self) -> None:
+        self._base_encoder = OperatorFeatureStateEncoder()
+        self._space = spaces.Box(low=-np.inf, high=np.inf, shape=(41,), dtype=np.float32)
+
+    def space(self) -> spaces.Box:
+        return self._space
+
+    def encode(self, result: Optional[Dict[str, Any]], env: Any) -> np.ndarray:
+        base_obs = self._base_encoder.encode(result, env).tolist()
+
+        last_improvement_idx = float(getattr(env, "last_improvement_idx", -1.0))
+        num_improvement = float(max(int(getattr(env, "num_improvement", 0)), 0))
+
+        improvement_applied = 1.0 if last_improvement_idx >= 0.0 else 0.0
+        if num_improvement > 1.0 and last_improvement_idx >= 0.0:
+            normalized_improvement_idx = float(np.clip(last_improvement_idx / (num_improvement - 1.0), 0.0, 1.0))
+        elif num_improvement == 1.0 and last_improvement_idx >= 0.0:
+            normalized_improvement_idx = 1.0
+        else:
+            normalized_improvement_idx = 0.0
+
+        last_improvement_type_id = float(getattr(env, "last_improvement_type_id", -1.0))
+        if last_improvement_type_id >= 0.0:
+            normalized_improvement_type_id = float(np.clip(last_improvement_type_id / 10.0, 0.0, 1.0))
+        else:
+            normalized_improvement_type_id = 0.0
+
+        stagnation = float(getattr(env, "stagnation_count", 0.0))
+        max_iterations = float(max(int(getattr(env, "max_iterations", 1)), 1))
+        normalized_stagnation = float(np.clip(stagnation / max_iterations, 0.0, 1.0))
+
+        last_reward = float(getattr(env, "last_reward", 0.0))
+        clipped_last_reward = float(np.clip(last_reward / 20.0, -1.0, 1.0))
+
+        instance_stats: Dict[str, float] = getattr(env, "current_instance_stats", {}) or {}
+        instance_features: list[float] = []
+        for key in INSTANCE_FEATURE_KEYS:
+            raw_value = float(instance_stats.get(key, 0.0))
+            scale = INSTANCE_NORMALIZATION.get(key, 1.0)
+            if scale <= 0.0:
+                normalized = 0.0
+            else:
+                normalized = raw_value / scale
+            instance_features.append(float(np.clip(normalized, 0.0, 1.0)))
+
+        obs_values = (
+            base_obs
+            + [
+                improvement_applied,
+                normalized_improvement_idx,
+                normalized_improvement_type_id,
+                normalized_stagnation,
+                clipped_last_reward,
+            ]
+            + instance_features
+        )[:41]
+        obs_array = np.array(obs_values, dtype=np.float32)
+        return np.nan_to_num(obs_array, nan=0.0, posinf=1e6, neginf=-1e6)
+
+
+@register_state("features_improvement_v2")
+class ImprovementOnlyStateEncoderV2(BaseStateEncoder):
+    """Improvement-focused state with short-term operator history.
+
+    Adds latest and previous improvement IDs/types plus chain streak signal so
+    policy can learn when repeating the same improvement is likely unhelpful.
+    """
+
+    version = "improvement-2.0"
+
+    def __init__(self) -> None:
+        self._base_encoder = OperatorFeatureStateEncoder()
+        self._space = spaces.Box(low=-np.inf, high=np.inf, shape=(43,), dtype=np.float32)
+
+    def space(self) -> spaces.Box:
+        return self._space
+
+    def _normalize_improvement_idx(self, idx: float, num_improvement: float) -> float:
+        if idx < 0.0:
+            return 0.0
+        if num_improvement > 1.0:
+            return float(np.clip(idx / (num_improvement - 1.0), 0.0, 1.0))
+        if num_improvement == 1.0:
+            return 1.0
+        return 0.0
+
+    def _normalize_type_id(self, type_id: float) -> float:
+        if type_id < 0.0:
+            return 0.0
+        return float(np.clip(type_id / 10.0, 0.0, 1.0))
+
+    def encode(self, result: Optional[Dict[str, Any]], env: Any) -> np.ndarray:
+        base_obs = self._base_encoder.encode(result, env).tolist()
+
+        num_improvement = float(max(int(getattr(env, "num_improvement", 0)), 0))
+        last_improvement_idx = float(getattr(env, "last_improvement_idx", -1.0))
+        last_improvement_type_id = float(getattr(env, "last_improvement_type_id", -1.0))
+        prev_improvement_idx = float(getattr(env, "prev_improvement_idx", -1.0))
+        prev_improvement_type_id = float(getattr(env, "prev_improvement_type_id", -1.0))
+
+        last_improvement_applied = 1.0 if last_improvement_idx >= 0.0 else 0.0
+        normalized_last_idx = self._normalize_improvement_idx(last_improvement_idx, num_improvement)
+        normalized_last_type = self._normalize_type_id(last_improvement_type_id)
+        normalized_prev_idx = self._normalize_improvement_idx(prev_improvement_idx, num_improvement)
+        normalized_prev_type = self._normalize_type_id(prev_improvement_type_id)
+
+        chain_streak = float(max(int(getattr(env, "chain_improvement_streak", 0)), 0))
+        max_iterations = float(max(int(getattr(env, "max_iterations", 1)), 1))
+        normalized_chain_streak = float(np.clip(chain_streak / max_iterations, 0.0, 1.0))
+
+        last_reward = float(getattr(env, "last_reward", 0.0))
+        clipped_last_reward = float(np.clip(last_reward / 20.0, -1.0, 1.0))
+
+        instance_stats: Dict[str, float] = getattr(env, "current_instance_stats", {}) or {}
+        instance_features: list[float] = []
+        for key in INSTANCE_FEATURE_KEYS:
+            raw_value = float(instance_stats.get(key, 0.0))
+            scale = INSTANCE_NORMALIZATION.get(key, 1.0)
+            if scale <= 0.0:
+                normalized = 0.0
+            else:
+                normalized = raw_value / scale
+            instance_features.append(float(np.clip(normalized, 0.0, 1.0)))
+
+        obs_values = (
+            base_obs
+            + [
+                last_improvement_applied,
+                normalized_last_idx,
+                normalized_last_type,
+                normalized_prev_idx,
+                normalized_prev_type,
+                normalized_chain_streak,
+                clipped_last_reward,
+            ]
+            + instance_features
+        )[:43]
+        obs_array = np.array(obs_values, dtype=np.float32)
+        return np.nan_to_num(obs_array, nan=0.0, posinf=1e6, neginf=-1e6)

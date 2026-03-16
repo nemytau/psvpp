@@ -76,9 +76,13 @@ class ALNSEnvironment(gym.Env):
         operator_logging_mode_label: Optional[str] = None,
         operator_logging_size: Optional[str] = None,
         operator_logging_dataset_name: Optional[str] = None,
+        operator_logging_restart_id: Optional[int] = None,
+        operator_logging_stable_filename: bool = False,
         force_baseline_improvement: bool = False,
         baseline_improvement_idx: Optional[int] = None,
         kisialiou_improvement_sequence: Optional[Sequence[str]] = None,
+        chain_max_consecutive_improvements: Optional[int] = 3,
+        anti_repeat_penalty: float = 0.0,
     ):
         """
         Initialize the ALNS environment.
@@ -149,6 +153,12 @@ class ALNSEnvironment(gym.Env):
             if kisialiou_improvement_sequence is not None
             else None
         )
+        self.chain_max_consecutive_improvements = (
+            None
+            if chain_max_consecutive_improvements is None
+            else max(0, int(chain_max_consecutive_improvements))
+        )
+        self.anti_repeat_penalty = max(0.0, float(anti_repeat_penalty))
         
         if self.force_baseline_improvement and self.algorithm_mode != "baseline":
             LOGGER.warning(
@@ -227,6 +237,8 @@ class ALNSEnvironment(gym.Env):
             mode_label=operator_logging_mode_label,
             size=operator_logging_size,
             dataset_name=operator_logging_dataset_name,
+            restart_id=operator_logging_restart_id,
+            stable_filename=bool(operator_logging_stable_filename),
         )
         self.operator_logging_future_window = max(0, int(operator_logging_future_window))
         self._operator_log_pending: Deque[Dict[str, Any]] = deque()
@@ -258,6 +270,9 @@ class ALNSEnvironment(gym.Env):
         self.last_operator_type_id: float = -1.0
         self.last_improvement_idx: float = -1.0
         self.last_improvement_type_id: float = -1.0
+        self.prev_improvement_idx: float = -1.0
+        self.prev_improvement_type_id: float = -1.0
+        self.chain_improvement_streak: int = 0
         self.last_fraction_removed: float = 0.0
         self.last_action_type: str = "none"
         self.last_acceptance_type: str = "unknown"
@@ -435,6 +450,9 @@ class ALNSEnvironment(gym.Env):
         self.last_operator_type_id = -1.0
         self.last_improvement_idx = -1.0
         self.last_improvement_type_id = -1.0
+        self.prev_improvement_idx = -1.0
+        self.prev_improvement_type_id = -1.0
+        self.chain_improvement_streak = 0
         self.last_fraction_removed = 0.0
         self._last_step_result = None
         self._last_step_result: Optional[Dict[str, Any]] = None
@@ -478,7 +496,7 @@ class ALNSEnvironment(gym.Env):
                 initial_record = {
                     "episode_id": self._current_episode_id,
                     "iteration": 0,
-                    "instance_id": self.current_problem_instance,
+                    "instance_name": Path(str(self.current_problem_instance)).name,
                     "reward": None,
                     "cost_current": float(self.initial_cost),
                     "cost_best": float(self.initial_cost),
@@ -487,6 +505,7 @@ class ALNSEnvironment(gym.Env):
                     "accepted": None,
                     "is_new_best": None,
                     "elapsed_ms": 0.0,
+                    "operator_elapsed_ms": 0.0,
                     "temperature": None,
                     "destroy_idx": None,
                     "repair_idx": None,
@@ -576,29 +595,41 @@ class ALNSEnvironment(gym.Env):
         
         # Decode action into operator indices
         destroy_idx, repair_idx, improvement_idx = self._encode_action(action)
-        improvement_only = (
-            improvement_idx is not None
-            and destroy_idx is None
-            and repair_idx is None
-        )
+        backbone_controlled = destroy_idx is None and repair_idx is None
+        improvement_only = improvement_idx is not None and backbone_controlled
+        chain_action_module = self.action_module_name == "improvement_chain_v1"
 
         selected_improvement_idx: Optional[int] = (
             int(improvement_idx) if improvement_idx is not None else None
         )
         baseline_improvement_triggered = False
+        forced_chain_backbone = False
         action_type = "improvement_only" if improvement_only else "destroy_repair"
         acceptance_type = "unknown"
 
         iteration_index = self.iteration + 1
 
         try:
+            if (
+                chain_action_module
+                and selected_improvement_idx is not None
+                and self.chain_max_consecutive_improvements is not None
+                and self.chain_improvement_streak >= self.chain_max_consecutive_improvements
+            ):
+                selected_improvement_idx = None
+                forced_chain_backbone = True
+
             # Execute ALNS iteration with selected operators
-            if improvement_only:
-                if selected_improvement_idx is None:
-                    raise ValueError("Improvement action must provide an improvement index")
+            if chain_action_module and backbone_controlled and selected_improvement_idx is not None:
                 result = self.alns.execute_improvement_only(
                     iteration=self.iteration,
                     improvement_operator_idx=selected_improvement_idx,
+                )
+            elif backbone_controlled:
+                result = self.alns.execute_iteration(
+                    iteration=self.iteration,
+                    improvement_operator_idx=selected_improvement_idx,
+                    mode="weighted",
                 )
             else:
                 if destroy_idx is None or repair_idx is None:
@@ -624,7 +655,20 @@ class ALNSEnvironment(gym.Env):
                     mode="explicit",
                 )
 
-            if improvement_only:
+            if (
+                chain_action_module
+                and backbone_controlled
+                and selected_improvement_idx is None
+                and forced_chain_backbone
+            ):
+                action_type = "chain_backbone_forced"
+            elif chain_action_module and backbone_controlled and selected_improvement_idx is None:
+                action_type = "chain_backbone"
+            elif chain_action_module and backbone_controlled and selected_improvement_idx is not None:
+                action_type = "chain_improvement_only"
+            elif backbone_controlled and selected_improvement_idx is None:
+                action_type = "backbone_skip_improvement"
+            elif backbone_controlled and selected_improvement_idx is not None:
                 action_type = "improvement_only"
             elif baseline_improvement_triggered:
                 action_type = "paired_with_baseline"
@@ -784,6 +828,25 @@ class ALNSEnvironment(gym.Env):
                 except (TypeError, ValueError):
                     improvement_type_id = None
 
+            previous_improvement_idx = int(self.last_improvement_idx) if self.last_improvement_idx >= 0.0 else None
+            repeated_improvement = (
+                improvement_idx_result is not None
+                and previous_improvement_idx is not None
+                and int(improvement_idx_result) == previous_improvement_idx
+            )
+            if (
+                self.anti_repeat_penalty > 0.0
+                and repeated_improvement
+                and not bool(result.get("is_new_best", False))
+            ):
+                reward -= self.anti_repeat_penalty
+                result["anti_repeat_penalty_applied"] = self.anti_repeat_penalty
+            else:
+                result["anti_repeat_penalty_applied"] = 0.0
+
+            self.prev_improvement_idx = float(self.last_improvement_idx)
+            self.prev_improvement_type_id = float(self.last_improvement_type_id)
+
             self.last_improvement_idx = (
                 float(improvement_idx_result) if improvement_idx_result is not None else -1.0
             )
@@ -792,6 +855,11 @@ class ALNSEnvironment(gym.Env):
                 if improvement_type_id is not None
                 else -1.0
             )
+
+            if action_type == "chain_improvement_only":
+                self.chain_improvement_streak += 1
+            else:
+                self.chain_improvement_streak = 0
 
             improvement_name = result.get("improvement_operator_name")
             if improvement_name is None and improvement_idx_result is not None:
@@ -804,6 +872,8 @@ class ALNSEnvironment(gym.Env):
                 result.setdefault("improvement_operator_idx", improvement_idx_result)
                 result.setdefault("improvement_operator_name", improvement_name)
                 result.setdefault("action_type", action_type)
+                result.setdefault("forced_chain_backbone", forced_chain_backbone)
+                result.setdefault("chain_improvement_streak", self.chain_improvement_streak)
 
             if isinstance(result, dict):
                 result["improvement_only_action"] = improvement_only
@@ -918,6 +988,7 @@ class ALNSEnvironment(gym.Env):
                 "accepted": result.get("accepted", False),
                 "temperature": result["temperature"],
                 "elapsed_ms": result.get("elapsed_ms", 0),
+                "operator_elapsed_ms": result.get("elapsed_ms", 0),
                 "baseline_improvement_triggered": baseline_improvement_triggered,
                 "raw_action_index": action,
                 "improvement_only_action": improvement_only,
@@ -1310,7 +1381,7 @@ class ALNSEnvironment(gym.Env):
         base_record = {
             "episode_id": self._current_episode_id,
             "iteration": self.iteration,
-            "instance_id": str(self.current_problem_instance),
+            "instance_name": Path(str(self.current_problem_instance)).name,
             "reward": float(reward),
             "cost_current": float(result.get("current_cost", 0.0)),
             "cost_best": float(result.get("best_cost", 0.0)),
@@ -1319,6 +1390,7 @@ class ALNSEnvironment(gym.Env):
             "accepted": bool(result.get("accepted", False)),
             "is_new_best": bool(result.get("is_new_best", False)),
             "elapsed_ms": int(result.get("elapsed_ms", 0)),
+            "operator_elapsed_ms": int(result.get("elapsed_ms", 0)),
             "temperature": float(result.get("temperature", 0.0)),
             "destroy_idx": destroy_idx_result if destroy_idx_result is not None else -1,
             "repair_idx": repair_idx_result if repair_idx_result is not None else -1,

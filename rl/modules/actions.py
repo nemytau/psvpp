@@ -143,3 +143,194 @@ class OperatorPairActionSpace(BaseActionSpace):
         if self._num_improvement <= 0:
             return None
         return self._num_pairs
+
+
+@register_action("improvement_only_v1")
+class ImprovementOnlyActionSpace(BaseActionSpace):
+    """Discrete actions for improvement selection on top of ALNS backbone.
+
+    Action mapping:
+    - 0: skip improvement (run destroy/repair backbone only)
+    - 1..N: apply one selected improvement operator
+
+    The class filters improvement operators to a preferred subset while preserving
+    their engine indices. Preferred names: voyage_number_reduction,
+    fleet_and_cost_reduction, deep_relocation, deep_swap.
+    """
+
+    version = "1.0"
+
+    _PREFERRED_IMPROVEMENTS = (
+        "voyage_number_reduction",
+        "fleet_and_cost_reduction",
+        "deep_relocation",
+        "deep_swap",
+    )
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+    ) -> None:
+        del destroy_operators, repair_operators
+
+        all_improvements = list(improvement_operators or [])
+        name_to_idx = {name: idx for idx, name in enumerate(all_improvements)}
+
+        selected_pairs = [
+            (name, name_to_idx[name])
+            for name in self._PREFERRED_IMPROVEMENTS
+            if name in name_to_idx
+        ]
+
+        if not selected_pairs and all_improvements:
+            selected_pairs = [(name, idx) for idx, name in enumerate(all_improvements)]
+
+        self.improvement_operators = [name for name, _ in selected_pairs]
+        self._improvement_indices = [idx for _, idx in selected_pairs]
+        self._improvement_to_action = {
+            idx: action_id + 1
+            for action_id, idx in enumerate(self._improvement_indices)
+        }
+
+        self._space = spaces.Discrete(1 + len(self._improvement_indices))
+
+    def gym_space(self) -> spaces.Discrete:
+        return self._space
+
+    def n(self) -> int:
+        return int(self._space.n)
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        if not self._space.contains(action_idx):
+            raise ValueError(f"Action index {action_idx} out of range [0, {self._space.n})")
+
+        if action_idx == 0:
+            return None, None, None
+
+        mapped_idx = action_idx - 1
+        if mapped_idx < 0 or mapped_idx >= len(self._improvement_indices):
+            raise ValueError(f"Improvement action index {action_idx} out of range")
+
+        return None, None, self._improvement_indices[mapped_idx]
+
+    def action_to_id(
+        self,
+        destroy_idx: Optional[int],
+        repair_idx: Optional[int],
+        improvement_idx: Optional[int] = None,
+    ) -> int:
+        if destroy_idx not in {None, -1} or repair_idx not in {None, -1}:
+            raise ValueError("Improvement-only action space does not accept destroy/repair indices")
+
+        if improvement_idx is None:
+            return 0
+
+        action_id = self._improvement_to_action.get(int(improvement_idx))
+        if action_id is None:
+            raise ValueError(
+                f"Improvement index {improvement_idx} not available in improvement_only_v1 action space"
+            )
+        return action_id
+
+    def sample(self) -> int:
+        return int(self._space.sample())
+
+    def num_improvement(self) -> int:
+        return len(self._improvement_indices)
+
+
+@register_action("improvement_chain_v1")
+class ImprovementChainActionSpace(BaseActionSpace):
+    """Action space that allows learned improvement chains.
+
+    Action mapping:
+    - 0: run backbone destroy+repair step (no explicit improvement)
+    - 1..N: run one improvement-only step with selected operator
+
+    Repeated 1..N actions naturally form an improvement chain before the next
+    backbone action is chosen.
+    """
+
+    version = "1.0"
+
+    _PREFERRED_IMPROVEMENTS = (
+        "voyage_number_reduction",
+        "fleet_and_cost_reduction",
+        "deep_relocation",
+        "deep_swap",
+    )
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+    ) -> None:
+        del destroy_operators, repair_operators
+
+        all_improvements = list(improvement_operators or [])
+        name_to_idx = {name: idx for idx, name in enumerate(all_improvements)}
+
+        selected_pairs = [
+            (name, name_to_idx[name])
+            for name in self._PREFERRED_IMPROVEMENTS
+            if name in name_to_idx
+        ]
+
+        if not selected_pairs and all_improvements:
+            selected_pairs = [(name, idx) for idx, name in enumerate(all_improvements)]
+
+        self.improvement_operators = [name for name, _ in selected_pairs]
+        self._improvement_indices = [idx for _, idx in selected_pairs]
+        self._improvement_to_action = {
+            idx: action_id + 1
+            for action_id, idx in enumerate(self._improvement_indices)
+        }
+
+        self._space = spaces.Discrete(1 + len(self._improvement_indices))
+
+    def gym_space(self) -> spaces.Discrete:
+        return self._space
+
+    def n(self) -> int:
+        return int(self._space.n)
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        if not self._space.contains(action_idx):
+            raise ValueError(f"Action index {action_idx} out of range [0, {self._space.n})")
+
+        if action_idx == 0:
+            return None, None, None
+
+        mapped_idx = action_idx - 1
+        if mapped_idx < 0 or mapped_idx >= len(self._improvement_indices):
+            raise ValueError(f"Improvement action index {action_idx} out of range")
+
+        return None, None, self._improvement_indices[mapped_idx]
+
+    def action_to_id(
+        self,
+        destroy_idx: Optional[int],
+        repair_idx: Optional[int],
+        improvement_idx: Optional[int] = None,
+    ) -> int:
+        if destroy_idx not in {None, -1} or repair_idx not in {None, -1}:
+            raise ValueError("improvement_chain_v1 does not accept explicit destroy/repair indices")
+
+        if improvement_idx is None:
+            return 0
+
+        action_id = self._improvement_to_action.get(int(improvement_idx))
+        if action_id is None:
+            raise ValueError(
+                f"Improvement index {improvement_idx} not available in improvement_chain_v1"
+            )
+        return action_id
+
+    def sample(self) -> int:
+        return int(self._space.sample())
+
+    def num_improvement(self) -> int:
+        return len(self._improvement_indices)

@@ -95,6 +95,7 @@ def load_inputs(paths: Sequence[str], labels: Sequence[str] | None) -> Tuple[pd.
             "cost_current",
             "cost_best",
             "elapsed_ms",
+            "operator_elapsed_ms",
             "cost_delta",
             "best_cost_delta",
             "best_cost_delta_future",
@@ -110,7 +111,7 @@ def load_inputs(paths: Sequence[str], labels: Sequence[str] | None) -> Tuple[pd.
         if boolean_col in combined.columns:
             combined[boolean_col] = _coerce_bool(combined[boolean_col])
 
-    for text_col in ["operator_type", "operator_name", "instance_id"]:
+    for text_col in ["operator_type", "operator_name", "instance_name"]:
         if text_col in combined.columns:
             combined[text_col] = combined[text_col].fillna("unknown").astype(str)
 
@@ -118,7 +119,7 @@ def load_inputs(paths: Sequence[str], labels: Sequence[str] | None) -> Tuple[pd.
 
 
 def summarize_steps(df: pd.DataFrame) -> pd.DataFrame:
-    dedupe_cols = [col for col in ["mode_label", "episode_id", "instance_id", "iteration"] if col in df.columns]
+    dedupe_cols = [col for col in ["mode_label", "episode_id", "instance_name", "iteration"] if col in df.columns]
     step_df = df.drop_duplicates(subset=dedupe_cols, keep="first")
 
     grouped = step_df.groupby("mode_label", dropna=False)
@@ -131,14 +132,14 @@ def summarize_steps(df: pd.DataFrame) -> pd.DataFrame:
         mean_cost_delta=("cost_delta", "mean"),
         mean_best_cost_delta=("best_cost_delta", "mean"),
         mean_future_best_delta=("best_cost_delta_future", "mean"),
-        mean_elapsed_ms=("elapsed_ms", "mean"),
+        mean_elapsed_ms=("operator_elapsed_ms", "mean"),
         final_best_cost=("cost_best", "min"),
     )
     return summary.reset_index().sort_values("mode_label")
 
 
 def extract_step_frame(df: pd.DataFrame) -> pd.DataFrame:
-    dedupe_cols = [col for col in ["mode_label", "episode_id", "instance_id", "iteration"] if col in df.columns]
+    dedupe_cols = [col for col in ["mode_label", "episode_id", "instance_name", "iteration"] if col in df.columns]
     step_df = df.drop_duplicates(subset=dedupe_cols, keep="first").copy()
     step_df = step_df.sort_values(["mode_label", "iteration"]).reset_index(drop=True)
     return step_df
@@ -166,8 +167,8 @@ def summarize_operator_usage(df: pd.DataFrame) -> pd.DataFrame:
         mean_cost_delta=("cost_delta", "mean"),
         mean_best_cost_delta=("best_cost_delta", "mean"),
         mean_future_best_delta=("best_cost_delta_future", "mean"),
-        mean_elapsed_ms=("elapsed_ms", "mean"),
-        total_elapsed_ms=("elapsed_ms", "sum"),
+        mean_elapsed_ms=("operator_elapsed_ms", "mean"),
+        total_elapsed_ms=("operator_elapsed_ms", "sum"),
     ).reset_index()
 
     total_by_mode = operator_summary.groupby("mode_label")["usage_count"].transform("sum")
@@ -189,7 +190,7 @@ def summarize_operator_type(df: pd.DataFrame) -> pd.DataFrame:
         mean_cost_delta=("cost_delta", "mean"),
         mean_best_cost_delta=("best_cost_delta", "mean"),
         mean_future_best_delta=("best_cost_delta_future", "mean"),
-        total_elapsed_ms=("elapsed_ms", "sum"),
+        total_elapsed_ms=("operator_elapsed_ms", "sum"),
     ).reset_index()
 
     total_by_mode = type_summary.groupby("mode_label")["usage_count"].transform("sum")
@@ -374,8 +375,8 @@ def generate_plots(
         plt.close()
         plot_paths.append(str(contrib_path))
 
-    if not step_df.empty and "instance_id" in step_df.columns:
-        step_df["dataset_size"] = step_df["instance_id"].apply(extract_dataset_size)
+    if not step_df.empty and "instance_name" in step_df.columns:
+        step_df["dataset_size"] = step_df["instance_name"].apply(extract_dataset_size)
         
         sizes = sorted([s for s in step_df["dataset_size"].unique() if s != "unknown"])
         
@@ -442,7 +443,7 @@ def generate_plots(
                 mode_data = size_df[size_df["mode_label"] == mode]
                 for episode in mode_data["episode_id"].unique():
                     episode_data = mode_data[mode_data["episode_id"] == episode].sort_values("iteration").copy()
-                    episode_data["elapsed_seconds_cum"] = episode_data["elapsed_ms"].fillna(0.0).cumsum() / 1000.0
+                    episode_data["elapsed_seconds_cum"] = episode_data["operator_elapsed_ms"].fillna(0.0).cumsum() / 1000.0
                     ax1.plot(
                         episode_data["elapsed_seconds_cum"],
                         episode_data["cost_best"],
@@ -461,7 +462,7 @@ def generate_plots(
                 mode_data = size_df[size_df["mode_label"] == mode]
                 for episode in mode_data["episode_id"].unique():
                     episode_data = mode_data[mode_data["episode_id"] == episode].sort_values("iteration").copy()
-                    episode_data["elapsed_seconds_cum"] = episode_data["elapsed_ms"].fillna(0.0).cumsum() / 1000.0
+                    episode_data["elapsed_seconds_cum"] = episode_data["operator_elapsed_ms"].fillna(0.0).cumsum() / 1000.0
                     ax2.plot(
                         episode_data["elapsed_seconds_cum"],
                         episode_data["improvement_pct"],

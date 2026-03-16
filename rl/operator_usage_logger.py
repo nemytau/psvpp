@@ -35,6 +35,8 @@ class OperatorUsageLogger:
     mode_label: Optional[str] = None  # e.g., "kisialiou_original" for traceable naming
     size: Optional[str] = None  # e.g., "small", "medium", "large"
     dataset_name: Optional[str] = None  # e.g., "small_test_1_01"
+    restart_id: Optional[int] = None  # e.g., 0, 1, 2, 3, 4 for restart index (included as column in rows, not filename)
+    stable_filename: bool = False  # When true, omit timestamp and append to a stable file
     _buffer: List[Dict[str, Any]] = field(default_factory=list, init=False, repr=False)
     _fieldnames: Optional[List[str]] = field(default=None, init=False, repr=False)
     _file_path: Optional[Path] = field(default=None, init=False, repr=False)
@@ -47,6 +49,9 @@ class OperatorUsageLogger:
     def append(self, row: Dict[str, Any]) -> None:
         if not self.enabled:
             return
+        # Inject restart_id as a column if set
+        if self.restart_id is not None:
+            row["restart_id"] = self.restart_id
         if self._fieldnames is None:
             # Preserve insertion order from first row for consistent CSV header.
             self._fieldnames = list(row.keys())
@@ -83,7 +88,10 @@ class OperatorUsageLogger:
         
         # Build filename with mode_label, size, and dataset for traceability
         if self.mode_label and self.size and self.dataset_name:
-            filename = f"operator_usage_{self.mode_label}__{self.size}__{self.dataset_name}_{timestamp}{suffix}"
+            if self.stable_filename:
+                filename = f"operator_usage_{self.mode_label}__{self.size}__{self.dataset_name}{suffix}"
+            else:
+                filename = f"operator_usage_{self.mode_label}__{self.size}__{self.dataset_name}_{timestamp}{suffix}"
         else:
             # Fallback to original naming for backward compatibility
             filename = f"operator_usage_{self.mode}_{timestamp}{suffix}"

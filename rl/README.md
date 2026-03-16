@@ -11,7 +11,7 @@ The `ALNSEnvironment` class implements the **Gymnasium `Env` interface** and int
 - **Gymnasium API Compatibility**: Full compliance with `gymnasium.Env` interface
 - **Rust Integration**: High-performance ALNS execution via PyO3 bindings  
 - **Flexible Action Space**: Discrete actions encoding operator combinations
-- **Rich Observations**: 30-dimensional state vector with solution metrics
+- **Rich Observations**: 41-dimensional default state vector (`features_v3`) with solution metrics, history, and instance statistics
 - **Shaped Rewards**: Multi-component reward function encouraging improvement
 - **Episode Management**: Proper reset/step cycle with statistics tracking
 - **Error Handling**: Robust error recovery and state validation
@@ -179,11 +179,18 @@ Actions encode combinations of destroy and repair operators:
 - `action_idx = destroy_idx * num_repair + repair_idx`
 - Typical size: 9 actions (3 destroy x 3 repair operators)
 
+### Improvement-Control Action Modules
+
+- `improvement_only_v1`: one-step improvement choice (`skip` or a selected improvement) on top of backbone destroy/repair.
+- `improvement_chain_v1`: chain-capable control where action `0` runs backbone destroy/repair, and actions `1..N` execute improvement-only steps (`execute_improvement_only`). Repeated improvement actions form a learned post-repair chain; selecting `0` again returns to backbone search.
+   - To prevent dropping backbone forever, use `chain_max_consecutive_improvements` (environment parameter) or `--chain-max-consecutive-improvements` in `run_experiment_rl_improvement_mvp.py`.
+   - To discourage getting stuck on one improvement operator, set `anti_repeat_penalty > 0` (or `--anti-repeat-penalty` in `run_experiment_rl_improvement_mvp.py`). The penalty is applied when the same improvement is repeated and does not produce a new best.
+
 ### Observation Space
 
-**Type**: `Box(shape=(30,), dtype=float32)`
+**Type**: `Box(shape=(41,), dtype=float32)` by default (`features_v3`)
 
-30-dimensional vector containing:
+Default 41-dimensional vector containing:
 
 | Component | Size | Description |
 |-----------|------|-------------|
@@ -191,7 +198,36 @@ Actions encode combinations of destroy and repair operators:
 | **Algorithm State** | 4 | Temperature, stagnation, iteration, progress |
 | **Solution Structure** | 6 | Voyages, utilization, feasibility flags |
 | **Operator Performance** | 6 | Success rates for destroy/repair operators |
-| **Recent History** | 8 | Recent rewards, statistics, trends |
+| **Recent History** | 5 | Last operator/action and reward context |
+| **Instance Features** | 6 | Normalized installation/visit/fleet/distance stats |
+
+For improvement-only control (`action_module=improvement_only_v1`), use
+`state_module=features_improvement_v1` to replace backbone repair-ID signals
+with normalized improvement-focused signals while keeping the same `(41,)` shape.
+
+For chain control, `state_module=features_improvement_v2` adds short-term
+operator history (latest + previous improvement IDs/types, plus chain streak)
+to help the policy avoid unproductive repeated improvement-only selections.
+
+For evaluation diagnostics, `run_experiment_rl_improvement_mvp.py --stochastic-check`
+adds an additional mode (`rl_improvement_mvp_stochastic`) that runs the same
+trained policy with `deterministic=False` to check sensitivity to action sampling.
+
+For fair ablations, `run_experiment_rl_improvement_mvp.py` isolates baseline by
+default with `baseline_action_module=op_pair_v1` and a random destroy/repair
+pair policy (no anti-repeat penalty, no chain forcing).
+
+Each run now also writes `run_manifest.json` in the output folder with full
+replication metadata (CLI args, resolved dataset paths, per-mode env config,
+runtime matching protocol, git state, and runtime package versions).
+
+In `--eval-runtime-mode match_kisialiou`, runtime matching now uses a fixed
+Kisialiou reference budget of `--eval-runtime-reference-restarts` restarts
+(default `5`), with checks applied only between restarts (never mid-restart).
+Per-restart iteration length remains capped by `--eval-restart-max-iterations`.
+
+Operator usage logs now use compact `instance_name` (dataset basename) instead
+of full path identifiers to reduce log volume.
 
 ### Reward Function
 
