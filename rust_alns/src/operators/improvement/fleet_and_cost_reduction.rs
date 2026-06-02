@@ -9,10 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 
-pub struct FleetAndCostReduction;
-
-impl FleetAndCostReduction {
-    pub const LAMBDA_MAX: u32 = 72;
+pub struct FleetAndCostReduction {
+    pub lambda_max: u32,
 }
 
 struct DebugSnapshotWriter {
@@ -287,7 +285,7 @@ impl ImprovementOperator for FleetAndCostReduction {
 					origin_vessel_id,
 					overlap_total
 				);
-                if overlap_total + f64::EPSILON < Self::LAMBDA_MAX as f64 {
+                if overlap_total + f64::EPSILON < self.lambda_max as f64 {
                     let target_lookup: HashMap<usize, (usize, f64)> = least_overlap_targets
                         .iter()
                         .filter_map(|(voyage_id, best)| best.map(|target| (*voyage_id, target)))
@@ -646,7 +644,7 @@ impl ImprovementOperator for FleetAndCostReduction {
 								removed_visit_ids.len()
 							);
                             candidate_solution.add_idle_vessel_and_add_empty_voyages(context);
-                            let repair_operator = KRegretInsertion { k: 2 };
+                            let repair_operator = KRegretInsertion { k: 2, search_k: 3 };
                             repair_operator.apply(&mut candidate_solution, context, rng);
                             if !candidate_solution.get_unassigned_visits().is_empty() {
                                 warn!(

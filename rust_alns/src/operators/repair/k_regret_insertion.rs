@@ -5,6 +5,7 @@ use rand::RngCore;
 
 pub struct KRegretInsertion {
     pub k: usize,
+    pub search_k: usize,
 }
 
 impl RepairOperator for KRegretInsertion {
@@ -21,12 +22,13 @@ impl RepairOperator for KRegretInsertion {
         let mut iteration = 0;
         debug!(target: "operator::repair", "[KRegretInsertion] Starting with {} uninserted visits", uninserted_visits.len());
         while !uninserted_visits.is_empty() {
+            let search_k = self.search_k.max(self.k).max(1);
             let mut best_visit: Option<usize> = None;
             let mut best_voyage: Option<usize> = None;
             let mut max_regret = f64::NEG_INFINITY;
 
             for &visit_id in &uninserted_visits {
-                let costs = solution.top_k_visit_insertion_costs(context, visit_id, self.k);
+                let costs = solution.top_k_visit_insertion_costs(context, visit_id, search_k);
                 if costs.len() < self.k {
                     continue;
                 }

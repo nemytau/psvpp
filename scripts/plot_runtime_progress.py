@@ -80,14 +80,24 @@ def resolve_run_id(run_id: str | None, run_tag: str | None) -> str:
     if not run_tag:
         raise ValueError("Either --run-id or --run-tag must be provided")
 
+    # Prefer active experiments folder when resolving run tags, then fallback
+    # to the main output directory (and finally archive).
+    output_root_active = REPO_ROOT / "output" / "active"
     output_root = REPO_ROOT / "output"
-    candidates = sorted(
-        output_root.glob(f"rl_improvement_mvp_*__{run_tag}"),
-        key=lambda p: (p.stat().st_mtime, p.name),
-    )
+    candidates = []
+    if output_root_active.exists():
+        candidates = sorted(
+            output_root_active.glob(f"rl_improvement_mvp_*__{run_tag}"),
+            key=lambda p: (p.stat().st_mtime, p.name),
+        )
+    if not candidates and output_root.exists():
+        candidates = sorted(
+            output_root.glob(f"rl_improvement_mvp_*__{run_tag}"),
+            key=lambda p: (p.stat().st_mtime, p.name),
+        )
     if not candidates:
         raise FileNotFoundError(
-            f"No output run found for run tag '{run_tag}' under {output_root}"
+            f"No output run found for run tag '{run_tag}' under {output_root_active} or {output_root}"
         )
     return candidates[-1].name
 

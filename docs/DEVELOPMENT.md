@@ -18,21 +18,20 @@ This guide explains how to set up, develop, and contribute to the PSVPP project.
    cd psvpp
    ```
 
-2. **Set up Python environment:**
+2. **Set up Python environment (recommended):**
    ```bash
-   # Create virtual environment
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   
-   # Install Python dependencies
-   pip install -r requirements.txt
+   conda create -n rl311 python=3.11 -y
+   conda activate rl311
+   python -m pip install -r requirements.txt
    ```
+
+   Project convention: use conda environment `rl311` for experiments and Rust/Python bindings.
 
 3. **Build Rust extension:**
    ```bash
-   cd src/rust_alns
-   maturin develop --release
-   cd ../..
+   cd rust_alns
+   CONDA_PREFIX=$CONDA_PREFIX python -m maturin develop --release
+   cd ..
    ```
 
 4. **Verify installation:**

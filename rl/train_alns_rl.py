@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import time
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
@@ -715,6 +716,7 @@ def run_episode_with_policy(
 ) -> Dict[str, Any]:
     resolved_state_module = _resolve_state_module(policy_model, state_module)
     algorithm_mode = normalize_algorithm_mode(algorithm_mode)
+    wall_start = time.perf_counter()
 
     env_kwargs: Dict[str, Any] = {
         "problem_instance": problem_path,
@@ -773,6 +775,7 @@ def run_episode_with_policy(
 
     stats = env.get_episode_statistics()
     env.close()
+    wall_seconds = time.perf_counter() - wall_start
 
     module_info = {
         "action": getattr(env, "action_module_name", action_module),
@@ -791,6 +794,7 @@ def run_episode_with_policy(
         "elapsed_seconds": stats.get("elapsed_seconds", []),
         "elapsed_ms_steps": stats.get("elapsed_ms_steps", []),
         "elapsed_ms_cumulative": stats.get("elapsed_ms_cumulative", []),
+        "wall_seconds": wall_seconds,
         "modules": module_info,
         "module_versions": getattr(env, "module_versions", {}),
     }

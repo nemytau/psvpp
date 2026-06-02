@@ -533,64 +533,116 @@ impl ALNSEngine {
 
     /// Setup standard ALNS operators
     pub fn setup_operators(registry: &mut OperatorRegistry) {
-        registry.add_destroy_operator(Box::new(
-            crate::operators::destroy::shaw_removal::ShawRemoval {
-                xi_min: 0.2,
-                xi_max: 0.4,
-                p: 5.0,
-                alpha: 1.0,
-                beta: 5.0,
-                phi: 2.0,
-            },
-        ));
-        registry.add_destroy_operator(Box::new(
-            crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
-                xi_min: 0.2, xi_max: 0.4,
-            }
-        ));
-        registry.add_destroy_operator(Box::new(
-            crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
-                xi_min: 0.2,
-                xi_max: 0.4,
-                p: 5.0,
-            },
-        ));
-        registry.add_repair_operator(Box::new(
-            crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {},
-        ));
-        registry.add_repair_operator(Box::new(
-            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2 },
-        ));
-        registry.add_repair_operator(Box::new(
-            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3 },
-        ));
+        for idx in 0..10 {
+            let step = idx as f64;
+            registry.add_destroy_operator(Box::new(
+                crate::operators::destroy::shaw_removal::ShawRemoval {
+                    xi_min: 0.10 + step * 0.02,
+                    xi_max: 0.25 + step * 0.02,
+                    p: 2.0 + step * 0.4,
+                    alpha: 1.0 + step * 0.05,
+                    beta: 4.0 + step * 0.3,
+                    phi: 1.0 + step * 0.15,
+                },
+            ));
+        }
+        for idx in 0..10 {
+            let step = idx as f64;
+            registry.add_destroy_operator(Box::new(
+                crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
+                    xi_min: 0.10 + step * 0.015,
+                    xi_max: 0.22 + step * 0.015,
+                },
+            ));
+        }
+        for idx in 0..10 {
+            let step = idx as f64;
+            registry.add_destroy_operator(Box::new(
+                crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
+                    xi_min: 0.12 + step * 0.015,
+                    xi_max: 0.30 + step * 0.015,
+                    p: 2.5 + step * 0.25,
+                },
+            ));
+        }
+        for candidate_rank in 1..=10 {
+            registry.add_repair_operator(Box::new(
+                crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {
+                    search_k: 10,
+                    candidate_rank,
+                },
+            ));
+        }
+        for search_k in 3..=7 {
+            registry.add_repair_operator(Box::new(
+                crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2, search_k },
+            ));
+        }
+        for search_k in 3..=7 {
+            registry.add_repair_operator(Box::new(
+                crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3, search_k },
+            ));
+        }
 
-        registry.add_improvement_operator(Box::new(VoyageNumberReduction));
-        registry.add_improvement_operator(Box::new(FleetAndCostReduction));
-        registry.add_improvement_operator(Box::new(DeepRelocation));
-        registry.add_improvement_operator(Box::new(DeepSwap));
+        // v1..v10: search_k = 1..10 (broader candidate search per step)
+        for search_k in 1..=10 {
+            registry.add_improvement_operator(Box::new(VoyageNumberReduction { search_k }));
+        }
+        // v1..v9: lambda_max = 8..72 (step 8); v10: lambda_max = 80
+        for idx in 0..10usize {
+            registry.add_improvement_operator(Box::new(FleetAndCostReduction {
+                lambda_max: ((idx + 1) * 8) as u32,
+            }));
+        }
+        // v1..v9: max_moves = 1..9; v10: unlimited
+        for idx in 0..10usize {
+            let max_moves = if idx < 9 { Some(idx + 1) } else { None };
+            registry.add_improvement_operator(Box::new(DeepRelocation { max_moves }));
+        }
+        // v1..v9: max_moves = 1..9; v10: unlimited
+        for idx in 0..10usize {
+            let max_moves = if idx < 9 { Some(idx + 1) } else { None };
+            registry.add_improvement_operator(Box::new(DeepSwap { max_moves }));
+        }
     }
 
     /// Get operator information for external interfaces
     pub fn get_operator_info() -> (Vec<String>, Vec<String>, Vec<String>) {
-        let destroy_operators = vec![
-            "shaw_removal".to_string(),
-            "random_visit_removal".to_string(),
-            "worst_visit_removal".to_string(),
-        ];
+        let mut destroy_operators = Vec::new();
+        for idx in 1..=10 {
+            destroy_operators.push(format!("shaw_removal_v{}", idx));
+        }
+        for idx in 1..=10 {
+            destroy_operators.push(format!("random_visit_removal_v{}", idx));
+        }
+        for idx in 1..=10 {
+            destroy_operators.push(format!("worst_visit_removal_v{}", idx));
+        }
 
-        let repair_operators = vec![
-            "deep_greedy_insertion".to_string(),
-            "k_regret_2".to_string(),
-            "k_regret_3".to_string(),
-        ];
+        let mut repair_operators = Vec::new();
+        for idx in 1..=10 {
+            repair_operators.push(format!("deep_greedy_rank_{}", idx));
+        }
+        for search_k in 3..=7 {
+            repair_operators.push(format!("k_regret_2_s{}", search_k));
+        }
+        for search_k in 3..=7 {
+            repair_operators.push(format!("k_regret_3_s{}", search_k));
+        }
 
-        let improvement_operators = vec![
-            "voyage_number_reduction".to_string(),
-            "fleet_and_cost_reduction".to_string(),
-            "deep_relocation".to_string(),
-            "deep_swap".to_string(),
-        ];
+        let mut improvement_operators = Vec::new();
+        for idx in 1..=10 {
+            improvement_operators.push(format!("voyage_number_reduction_v{}", idx));
+        }
+        for idx in 1..=10 {
+            improvement_operators.push(format!("fleet_and_cost_reduction_v{}", idx));
+        }
+        for idx in 1..=10 {
+            improvement_operators.push(format!("deep_relocation_v{}", idx));
+        }
+        for idx in 1..=10 {
+            improvement_operators.push(format!("deep_swap_v{}", idx));
+        }
 
         (destroy_operators, repair_operators, improvement_operators)
     }

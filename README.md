@@ -18,16 +18,22 @@ with Reinforcement Learning for maritime logistics optimization.
 
 ## 🚀 Quick Start
 
+Environment note: this project is expected to run in conda environment `rl311`.
+
+```bash
+conda activate rl311
+```
+
 1. **Build the Rust extension:**
    ```bash
-   cd src/rust_alns
-   maturin develop --release
-   cd ../..
+   cd rust_alns
+   CONDA_PREFIX=$CONDA_PREFIX python -m maturin develop --release
+   cd ..
    ```
 
 2. **Install Python dependencies:**
    ```bash
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
 
 3. **Generate train/test datasets (optional):**
@@ -51,6 +57,7 @@ with Reinforcement Learning for maritime logistics optimization.
 
 - **[Project Structure Guide](docs/PROJECT_STRUCTURE.md)** - Detailed overview of all folders and files
 - **[Development Guide](docs/DEVELOPMENT.md)** - Setup, testing, and development workflow  
+- **[Experiment Notes](docs/EXPERIMENTS.md)** - Short running list of planned experiments and comparisons
 - **[API Documentation](docs/API.md)** - Complete API reference for all components
 - **[Configuration Guide](docs/CONFIGURATION.md)** - Parameter and configuration management *(coming soon)*
 

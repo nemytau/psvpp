@@ -3,8 +3,11 @@ use crate::structs::{context::Context, solution::Solution};
 use log::{debug, error, info, warn};
 use rand::RngCore;
 
-/// Relocates every assigned visit greedily while strict improvements exist.
-pub struct DeepRelocation;
+/// Relocates assigned visits greedily while strict improvements exist.
+/// `max_moves`: cap on how many relocations to apply per invocation; `None` = unlimited.
+pub struct DeepRelocation {
+    pub max_moves: Option<usize>,
+}
 
 impl DeepRelocation {
 	fn find_best_relocation(
@@ -72,13 +75,19 @@ impl DeepRelocation {
 
 impl ImprovementOperator for DeepRelocation {
 	fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
-		info!(target: "operator::improvement", "[DeepRelocation] Invoked");
+		info!(target: "operator::improvement", "[DeepRelocation] Invoked (max_moves={:?})", self.max_moves);
 		solution.ensure_consistency_updated(context);
 		let original_solution = solution.clone();
 		let mut original_feasibility_probe = original_solution.clone();
 		let original_was_feasible = original_feasibility_probe.is_fully_feasible(context);
 
+		let mut moves_applied: usize = 0;
 		loop {
+			if let Some(limit) = self.max_moves {
+				if moves_applied >= limit {
+					break;
+				}
+			}
 			// Save state before attempting move to enable clean rollback
 			let iteration_start_solution = solution.clone();
 			
@@ -130,6 +139,7 @@ impl ImprovementOperator for DeepRelocation {
 			}
 
 			solution.ensure_consistency_updated(context);
+			moves_applied += 1;
 			let updated_cost = solution.cost_with_context(context);
 			debug!(
 				target: "operator::improvement",

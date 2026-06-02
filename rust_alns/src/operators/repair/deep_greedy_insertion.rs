@@ -1,10 +1,12 @@
 use crate::operators::traits::RepairOperator;
 use crate::structs::{context::Context, solution::Solution};
-use core::panic;
 use log::{debug, error, info, warn};
 use rand::RngCore;
 
-pub struct DeepGreedyInsertion;
+pub struct DeepGreedyInsertion {
+    pub search_k: usize,
+    pub candidate_rank: usize,
+}
 
 impl RepairOperator for DeepGreedyInsertion {
     fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
@@ -21,11 +23,15 @@ impl RepairOperator for DeepGreedyInsertion {
         let mut iteration = 0;
         debug!(target: "operator::repair", "[DeepGreedyInsertion] Starting with {} uninserted visits", uninserted_visits.len());
         while !uninserted_visits.is_empty() {
+            let search_k = self.search_k.max(self.candidate_rank).max(1);
             let mut best_insertion: Option<(usize, usize, f64)> = None;
             for &visit_id in &uninserted_visits {
-                // top_k_visit_insertion_costs already ensures the visit is not in the voyage
-                let costs = solution.top_k_visit_insertion_costs(context, visit_id, 3); // log top 3 for more info
-                if let Some((voyage_id, cost)) = costs.iter().cloned().next() {
+                let costs = solution.top_k_visit_insertion_costs(context, visit_id, search_k);
+                if costs.is_empty() {
+                    continue;
+                }
+                let candidate_idx = self.candidate_rank.saturating_sub(1).min(costs.len() - 1);
+                if let Some((voyage_id, cost)) = costs.get(candidate_idx).cloned() {
                     if best_insertion.is_none() || cost < best_insertion.as_ref().unwrap().2 {
                         best_insertion = Some((visit_id, voyage_id, cost));
                     }

@@ -71,13 +71,16 @@ fn run_alns_with_logging(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
     ));
     // Repair operators
     operator_registry.add_repair_operator(Box::new(
-        crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {},
+        crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {
+            search_k: 10,
+            candidate_rank: 1,
+        },
     ));
     operator_registry.add_repair_operator(Box::new(
-        crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2 },
+        crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2, search_k: 3 },
     ));
     operator_registry.add_repair_operator(Box::new(
-        crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3 },
+        crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3, search_k: 3 },
     ));
     // Add more operators as needed
 
@@ -207,7 +210,7 @@ fn test_main(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
 
     // Apply DeepGreedyInsertion repair operator
     use crate::operators::repair::k_regret_insertion::KRegretInsertion;
-    let repair_operator = KRegretInsertion { k: 3 };
+    let repair_operator = KRegretInsertion { k: 3, search_k: 3 };
     repair_operator.apply(&mut solution, &context, &mut rng);
 
     solution.ensure_consistency_updated(&context);
@@ -295,7 +298,7 @@ fn test_feasibility_over_seeds() -> Result<(), Box<dyn std::error::Error>> {
         beta: 5.0,
         phi: 2.0,
     };
-    let repair_operator = KRegretInsertion { k: 3 };
+    let repair_operator = KRegretInsertion { k: 3, search_k: 3 };
 
     for seed in 0..100u64 {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -413,7 +416,7 @@ fn test_voyage_number_reduction_over_seeds() -> Result<(), Box<dyn std::error::E
             .iter()
             .filter(|v| !v.borrow().visit_ids.is_empty())
             .count();
-        let op = VoyageNumberReduction;
+        let op = VoyageNumberReduction { search_k: 1 };
         op.apply(&mut solution, &context, &mut rng);
         let after = solution
             .voyages
@@ -461,7 +464,7 @@ fn test_voyage_number_reduction_dump(seed: u64) -> Result<(), Box<dyn std::error
         &format!("../output/voyage_reduction_init_seed{}.json", seed),
         &context,
     )?;
-    let op = VoyageNumberReduction;
+    let op = VoyageNumberReduction { search_k: 1 };
     op.apply(&mut solution, &context, &mut rng);
     dump_solution(
         &solution,

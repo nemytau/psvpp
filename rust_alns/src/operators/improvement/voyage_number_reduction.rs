@@ -5,7 +5,9 @@ use crate::operators::traits::ImprovementOperator;
 use crate::structs::{context::Context, solution::Solution};
 use rand::RngCore;
 
-pub struct VoyageNumberReduction;
+pub struct VoyageNumberReduction {
+    pub search_k: usize,
+}
 
 impl ImprovementOperator for VoyageNumberReduction {
     fn apply(&self, solution: &mut Solution, context: &Context, _rng: &mut dyn RngCore) {
@@ -42,7 +44,7 @@ impl ImprovementOperator for VoyageNumberReduction {
                         }
                         if temp_solution.visit_insertion_is_possible(context, visit_id, v2_id) {
                             let costs =
-                                temp_solution.top_k_visit_insertion_costs(context, visit_id, 1);
+                                temp_solution.top_k_visit_insertion_costs(context, visit_id, self.search_k);
                             if let Some((_, cost)) = costs.first() {
                                 if best_insertion.is_none()
                                     || *cost < best_insertion.as_ref().unwrap().1

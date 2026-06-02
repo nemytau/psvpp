@@ -10,6 +10,7 @@ import statistics
 import subprocess
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,10 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from stable_baselines3 import PPO
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from rl.dataset_manager import GeneratedDatasetManager
 from rl.rl_alns_environment import ALNSEnvironment
@@ -27,13 +32,18 @@ from rl.train_alns_rl import train_ppo_agent
 class EpisodeSummary:
     initial_cost: float
     best_cost: float
-    runtime_seconds: float
+    solver_runtime_seconds: float
+    wall_runtime_seconds: float
 
     @property
     def improvement_pct(self) -> float:
         if self.initial_cost <= 1e-12:
             return 0.0
         return max(0.0, (self.initial_cost - self.best_cost) / self.initial_cost * 100.0)
+
+    @property
+    def runtime_seconds(self) -> float:
+        return self.wall_runtime_seconds
 
 
 def _restart_seed(base_seed: int, restart_idx: int) -> int:
@@ -59,9 +69,69 @@ def infer_dataset_size_label(dataset_path: str) -> str:
         return "unknown"
 
 
+def _build_exact_command() -> str:
+    return " ".join([shlex.quote(sys.executable), *[shlex.quote(token) for token in sys.argv]])
+
+
+def _write_command_file(out_dir: Path, command: str) -> None:
+    (out_dir / "run_command.txt").write_text(command + "\n", encoding="utf-8")
+
+
+def _collect_training_operator_usage(log_dir: Path) -> Dict[str, Any]:
+    usage_dir = log_dir / "operator_usage"
+    csv_paths = sorted(usage_dir.glob("operator_usage_train_*.csv"))
+    if not csv_paths:
+        csv_paths = sorted(log_dir.glob("operator_usage_train_*.csv"))
+
+    operator_name_counts: Counter[str] = Counter()
+    operator_type_counts: Counter[str] = Counter()
+    source_files: List[str] = []
+
+    for csv_path in csv_paths:
+        source_files.append(str(csv_path))
+        with csv_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                operator_name = str(row.get("operator_name") or "")
+                operator_type = str(row.get("operator_type") or "")
+                if operator_name:
+                    operator_name_counts[operator_name] += 1
+                if operator_type:
+                    operator_type_counts[operator_type] += 1
+
+    return {
+        "source_files": source_files,
+        "operator_name_counts": dict(sorted(operator_name_counts.items())),
+        "operator_type_counts": dict(sorted(operator_type_counts.items())),
+        "unique_operator_names": sorted(operator_name_counts),
+        "unique_operator_types": sorted(operator_type_counts),
+        "total_operator_events": int(sum(operator_name_counts.values())),
+    }
+
+
+def _collect_action_space_trace(*, train_env: ALNSEnvironment) -> Dict[str, Any]:
+    action_impl = train_env.action_impl
+    action_space: Dict[str, Any] = {
+        "module": getattr(train_env, "action_module_name", None),
+        "version": getattr(action_impl, "version", None),
+        "space_n": int(action_impl.n()),
+        "num_destroy": int(getattr(train_env, "num_destroy", len(getattr(train_env, "destroy_operators", [])))),
+        "num_repair": int(getattr(train_env, "num_repair", len(getattr(train_env, "repair_operators", [])))),
+        "num_improvement": int(getattr(train_env, "num_improvement", len(getattr(train_env, "improvement_operators", [])))),
+        "destroy_operators": list(getattr(train_env, "destroy_operators", [])),
+        "repair_operators": list(getattr(train_env, "repair_operators", [])),
+        "improvement_operators": list(getattr(train_env, "improvement_operators", [])),
+    }
+    if hasattr(action_impl, "num_pairs"):
+        action_space["num_pairs"] = int(action_impl.num_pairs())
+    if hasattr(action_impl, "first_improvement_action"):
+        action_space["first_improvement_action"] = action_impl.first_improvement_action()
+    return action_space
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="MVP experiment: RL controls only improvement operator + skip"
+        description="Traceable RL experiment runner for final model comparisons"
     )
     parser.add_argument("--size", default="small", help="Dataset size to run (default: small)")
     parser.add_argument(
@@ -105,7 +175,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-seeds", default="42,43,44")
     parser.add_argument(
         "--action-module",
-        default="improvement_only_v1",
+        default="op_pair_v1",
         help="Action space registry key for train/eval environments",
     )
     parser.add_argument(
@@ -117,6 +187,11 @@ def parse_args() -> argparse.Namespace:
         "--state-module",
         default="features_improvement_v1",
         help="State encoder registry key for train/eval environments",
+    )
+    parser.add_argument(
+        "--reward-module",
+        default="delta_cost_v4",
+        help="Reward function registry key for train/eval environments",
     )
     parser.add_argument(
         "--baseline-state-module",
@@ -140,8 +215,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also evaluate RL policy with stochastic action sampling (deterministic=False)",
     )
-    parser.add_argument("--run-tag", default="mvp")
+    parser.add_argument("--run-tag", default="exp1_id1_op_pair_v1_features_improvement_v1_delta_cost_v4_train_only")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--force-overwrite",
+        action="store_true",
+        help="Allow overwriting an existing output/log folder if it already exists",
+    )
+    parser.add_argument(
+        "--run-eval",
+        action="store_true",
+        help="Also run evaluation episodes after training",
+    )
     parser.add_argument(
         "--skip-training",
         action="store_true",
@@ -178,27 +263,31 @@ def run_policy_episode(
     size_label: str,
     action_module: str,
     state_module: str,
+    reward_module: str,
     restart_max_iterations: int,
     chain_max_consecutive_improvements: Optional[int] = None,
     anti_repeat_penalty: float = 0.0,
     policy_deterministic: bool = True,
     target_runtime_seconds: Optional[float] = None,
     restart_limit: Optional[int] = None,
-) -> tuple[EpisodeSummary, List[object]]:
+) -> tuple[EpisodeSummary, List[object], List[Dict[str, object]]]:
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
     effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
-    elapsed_ms_total = 0.0
-    total_runtime_seconds = 0.0
+    solver_elapsed_ms_total = 0.0
+    total_solver_runtime_seconds = 0.0
+    total_wall_runtime_seconds = 0.0
     initial_cost: Optional[float] = None
     best_candidates: List[float] = []
     restart_snapshots: List[object] = []
+    restart_records: List[Dict[str, object]] = []
     restart_idx = 0
 
     while restart_idx < effective_restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and elapsed_ms_total >= target_runtime_seconds * 1000.0:
+        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
             break
 
         restart_seed = _restart_seed(seed, restart_idx)
+        restart_wall_start = time.perf_counter()
 
         env = ALNSEnvironment(
             problem_instance=dataset_path,
@@ -216,6 +305,7 @@ def run_policy_episode(
             operator_logging_dir=str(log_dir),
             action_module=action_module,
             state_module=state_module,
+            reward_module=reward_module,
             chain_max_consecutive_improvements=chain_max_consecutive_improvements,
             anti_repeat_penalty=anti_repeat_penalty,
             algorithm_mode="baseline",
@@ -235,7 +325,7 @@ def run_policy_episode(
             step_info = info.get("step_info", {}) if isinstance(info, dict) else {}
             step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
             restart_elapsed_ms += step_ms
-            elapsed_ms_total += step_ms
+            solver_elapsed_ms_total += step_ms
             steps += 1
 
         stats = env.get_episode_statistics()
@@ -248,8 +338,26 @@ def run_policy_episode(
         best_candidates.append(restart_best)
 
         elapsed_seq = stats.get("elapsed_seconds") or []
-        restart_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
-        total_runtime_seconds += restart_runtime
+        restart_solver_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
+        restart_wall_runtime = time.perf_counter() - restart_wall_start
+        total_solver_runtime_seconds += restart_solver_runtime
+        total_wall_runtime_seconds += restart_wall_runtime
+        restart_records.append(
+            {
+                "restart_id": restart_idx,
+                "seed": seed,
+                "restart_seed": restart_seed,
+                "solver_runtime_seconds": restart_solver_runtime,
+                "wall_runtime_seconds": restart_wall_runtime,
+                "initial_cost": restart_initial,
+                "best_cost": restart_best,
+                "iterations": int(stats.get("total_iterations", steps)),
+                "dataset_path": dataset_path,
+                "mode_label": mode_label,
+                "size_label": size_label,
+                "algorithm_mode": "baseline",
+            }
+        )
 
         restart_idx += 1
         if target_runtime_seconds is None:
@@ -263,9 +371,11 @@ def run_policy_episode(
         EpisodeSummary(
             initial_cost=float(initial_cost),
             best_cost=float(global_best),
-            runtime_seconds=float(total_runtime_seconds),
+            solver_runtime_seconds=float(total_solver_runtime_seconds),
+            wall_runtime_seconds=float(total_wall_runtime_seconds),
         ),
         restart_snapshots,
+        restart_records,
     )
 
 
@@ -280,23 +390,27 @@ def run_baseline_episode(
     initial_snapshots: Optional[List[object]],
     action_module: str,
     state_module: str,
+    reward_module: str,
     restart_max_iterations: int,
     target_runtime_seconds: Optional[float] = None,
     restart_limit: Optional[int] = None,
-) -> EpisodeSummary:
+) -> tuple[EpisodeSummary, List[Dict[str, object]]]:
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
     effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
-    elapsed_ms_total = 0.0
-    total_runtime_seconds = 0.0
+    solver_elapsed_ms_total = 0.0
+    total_solver_runtime_seconds = 0.0
+    total_wall_runtime_seconds = 0.0
     initial_cost: Optional[float] = None
     best_candidates: List[float] = []
     restart_idx = 0
+    restart_records: List[Dict[str, object]] = []
 
     while restart_idx < effective_restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and elapsed_ms_total >= target_runtime_seconds * 1000.0:
+        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
             break
 
         restart_seed = _restart_seed(seed, restart_idx)
+        restart_wall_start = time.perf_counter()
 
         env = ALNSEnvironment(
             problem_instance=dataset_path,
@@ -314,6 +428,7 @@ def run_baseline_episode(
             operator_logging_dir=str(log_dir),
             action_module=action_module,
             state_module=state_module,
+            reward_module=reward_module,
             force_baseline_improvement=False,
             baseline_improvement_idx=None,
             chain_max_consecutive_improvements=None,
@@ -346,7 +461,7 @@ def run_baseline_episode(
             step_info = info.get("step_info", {}) if isinstance(info, dict) else {}
             step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
             restart_elapsed_ms += step_ms
-            elapsed_ms_total += step_ms
+            solver_elapsed_ms_total += step_ms
             steps += 1
 
         stats = env.get_episode_statistics()
@@ -359,8 +474,26 @@ def run_baseline_episode(
         best_candidates.append(restart_best)
 
         elapsed_seq = stats.get("elapsed_seconds") or []
-        restart_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
-        total_runtime_seconds += restart_runtime
+        restart_solver_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
+        restart_wall_runtime = time.perf_counter() - restart_wall_start
+        total_solver_runtime_seconds += restart_solver_runtime
+        total_wall_runtime_seconds += restart_wall_runtime
+        restart_records.append(
+            {
+                "restart_id": restart_idx,
+                "seed": seed,
+                "restart_seed": restart_seed,
+                "solver_runtime_seconds": restart_solver_runtime,
+                "wall_runtime_seconds": restart_wall_runtime,
+                "initial_cost": restart_initial,
+                "best_cost": restart_best,
+                "iterations": int(stats.get("total_iterations", steps)),
+                "dataset_path": dataset_path,
+                "mode_label": mode_label,
+                "size_label": size_label,
+                "algorithm_mode": "baseline",
+            }
+        )
 
         restart_idx += 1
         if target_runtime_seconds is None:
@@ -373,8 +506,9 @@ def run_baseline_episode(
     return EpisodeSummary(
         initial_cost=float(initial_cost),
         best_cost=float(global_best),
-        runtime_seconds=float(total_runtime_seconds),
-    )
+        solver_runtime_seconds=float(total_solver_runtime_seconds),
+        wall_runtime_seconds=float(total_wall_runtime_seconds),
+    ), restart_records
 
 
 def _safe_git_output(repo: Path, args: List[str]) -> Optional[str]:
@@ -439,13 +573,15 @@ def _build_run_manifest(
     eval_iteration_cap: int,
     train_paths: List[str],
     test_paths: List[str],
+    exact_command: str,
+    action_space_trace: Dict[str, Any],
+    training_operator_usage: Dict[str, Any],
 ) -> Dict[str, Any]:
-    command = " ".join(shlex.quote(token) for token in sys.argv)
-
     train_env_kwargs = {
         "problem_sampling_strategy": "random",
         "action_module": args.action_module,
         "state_module": args.state_module,
+        "reward_module": args.reward_module,
         "algorithm_mode": "baseline",
         "chain_max_consecutive_improvements": args.chain_max_consecutive_improvements,
         "anti_repeat_penalty": args.anti_repeat_penalty,
@@ -453,6 +589,7 @@ def _build_run_manifest(
     rl_eval_env_kwargs = {
         "action_module": args.action_module,
         "state_module": args.state_module,
+        "reward_module": args.reward_module,
         "algorithm_mode": "baseline",
         "chain_max_consecutive_improvements": args.chain_max_consecutive_improvements,
         "anti_repeat_penalty": args.anti_repeat_penalty,
@@ -461,6 +598,7 @@ def _build_run_manifest(
     baseline_eval_env_kwargs = {
         "action_module": args.baseline_action_module,
         "state_module": args.baseline_state_module,
+        "reward_module": args.reward_module,
         "algorithm_mode": "baseline",
         "force_baseline_improvement": False,
         "baseline_improvement_idx": None,
@@ -472,6 +610,7 @@ def _build_run_manifest(
     kisialiou_eval_env_kwargs = {
         "action_module": args.action_module,
         "state_module": args.state_module,
+        "reward_module": args.reward_module,
         "algorithm_mode": "kisialiou",
         "chain_max_consecutive_improvements": args.chain_max_consecutive_improvements,
         "restart_max_iterations": args.eval_restart_max_iterations,
@@ -480,11 +619,17 @@ def _build_run_manifest(
     return {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(),
-        "command": command,
+        "command": exact_command,
         "repo_root": str(repo),
         "output_dir": str(out_dir),
         "log_dir": str(log_dir),
         "cli_args": vars(args),
+        "experiment_label": {
+            "action_module": args.action_module,
+            "state_module": args.state_module,
+            "reward_module": args.reward_module,
+            "tag": args.run_tag,
+        },
         "resolved": {
             "skip_training": bool(args.skip_training),
             "model_path": args.model_path,
@@ -497,6 +642,8 @@ def _build_run_manifest(
             "rl_eval_env_kwargs": rl_eval_env_kwargs,
             "baseline_eval_env_kwargs": baseline_eval_env_kwargs,
             "kisialiou_eval_env_kwargs": kisialiou_eval_env_kwargs,
+            "training_action_space": action_space_trace,
+            "training_operator_usage": training_operator_usage,
             "runtime_matching": {
                 "mode": args.eval_runtime_mode,
                 "target_source": (
@@ -524,11 +671,12 @@ def run_kisialiou_episode(
     size_label: str,
     action_module: str,
     state_module: str,
+    reward_module: str,
     restart_max_iterations: int,
     target_runtime_seconds: Optional[float] = None,
     chain_max_consecutive_improvements: Optional[int] = None,
     reference_restarts: Optional[int] = None,
-) -> EpisodeSummary:
+) -> tuple[EpisodeSummary, List[Dict[str, object]]]:
     """
     Run Kisialiou deterministic ALNS algorithm with operator logging.
     
@@ -545,18 +693,21 @@ def run_kisialiou_episode(
      use step-by-step execution and produce detailed operator logs for analysis.
      """
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
-    elapsed_ms_total = 0.0
-    total_runtime_seconds = 0.0
+    solver_elapsed_ms_total = 0.0
+    total_solver_runtime_seconds = 0.0
+    total_wall_runtime_seconds = 0.0
     initial_cost: Optional[float] = None
     best_candidates: List[float] = []
     restart_idx = 0
     restart_limit = max(1, int(reference_restarts)) if reference_restarts is not None else int(max_iterations)
+    restart_records: List[Dict[str, object]] = []
 
     while restart_idx < restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and elapsed_ms_total >= target_runtime_seconds * 1000.0:
+        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
             break
 
         restart_seed = _restart_seed(seed, restart_idx)
+        restart_wall_start = time.perf_counter()
 
         env = ALNSEnvironment(
             problem_instance=dataset_path,
@@ -574,6 +725,7 @@ def run_kisialiou_episode(
             operator_logging_dir=str(log_dir),
             action_module=action_module,
             state_module=state_module,
+            reward_module=reward_module,
             algorithm_mode="kisialiou",
             chain_max_consecutive_improvements=chain_max_consecutive_improvements,
         )
@@ -594,7 +746,7 @@ def run_kisialiou_episode(
             step_info = info.get("step_info", {}) if isinstance(info, dict) else {}
             step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
             restart_elapsed_ms += step_ms
-            elapsed_ms_total += step_ms
+            solver_elapsed_ms_total += step_ms
             steps += 1
 
         stats = env.get_episode_statistics()
@@ -607,8 +759,26 @@ def run_kisialiou_episode(
         best_candidates.append(restart_best)
 
         elapsed_seq = stats.get("elapsed_seconds") or []
-        restart_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
-        total_runtime_seconds += restart_runtime
+        restart_solver_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
+        restart_wall_runtime = time.perf_counter() - restart_wall_start
+        total_solver_runtime_seconds += restart_solver_runtime
+        total_wall_runtime_seconds += restart_wall_runtime
+        restart_records.append(
+            {
+                "restart_id": restart_idx,
+                "seed": seed,
+                "restart_seed": restart_seed,
+                "solver_runtime_seconds": restart_solver_runtime,
+                "wall_runtime_seconds": restart_wall_runtime,
+                "initial_cost": restart_initial,
+                "best_cost": restart_best,
+                "iterations": int(stats.get("total_iterations", steps)),
+                "dataset_path": dataset_path,
+                "mode_label": mode_label,
+                "size_label": size_label,
+                "algorithm_mode": "kisialiou",
+            }
+        )
 
         restart_idx += 1
         if target_runtime_seconds is None and reference_restarts is None:
@@ -621,8 +791,9 @@ def run_kisialiou_episode(
     return EpisodeSummary(
         initial_cost=float(initial_cost),
         best_cost=float(global_best),
-        runtime_seconds=float(total_runtime_seconds),
-    )
+        solver_runtime_seconds=float(total_solver_runtime_seconds),
+        wall_runtime_seconds=float(total_wall_runtime_seconds),
+    ), restart_records
 
 
 def main() -> None:
@@ -641,8 +812,21 @@ def main() -> None:
     ):
         eval_iteration_cap = max(eval_iteration_cap, 200000)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_id = f"rl_improvement_mvp_{ts}__{args.run_tag}"
+    # Allow the caller to provide an explicit run id via environment (useful for
+    # grouping or consistent timestamps when calling from shell wrappers).
+    env_run_id = None
+    try:
+        import os
+
+        env_run_id = os.environ.get("RL_RUN_ID")
+    except Exception:
+        env_run_id = None
+
+    if env_run_id:
+        run_id = env_run_id
+    else:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = f"rl_improvement_mvp_{ts}__{args.run_tag}"
     out_dir = repo / "output" / run_id
     log_dir = repo / "logs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -659,6 +843,24 @@ def main() -> None:
     if not train_paths or not test_paths:
         raise RuntimeError("Dataset manager returned empty train/test paths")
 
+    exact_command = _build_exact_command()
+    reference_train_env = ALNSEnvironment(
+        problem_instance=train_paths[0],
+        max_iterations=int(args.max_iterations),
+        seed=int(args.seed),
+        problem_instance_paths=list(train_paths),
+        problem_sampling_strategy="random",
+        enable_operator_logging=False,
+        action_module=args.action_module,
+        state_module=args.state_module,
+        reward_module=args.reward_module,
+        algorithm_mode="baseline",
+        chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
+        anti_repeat_penalty=args.anti_repeat_penalty,
+    )
+    action_space_trace = _collect_action_space_trace(train_env=reference_train_env)
+    reference_train_env.close()
+
     manifest = _build_run_manifest(
         args=args,
         repo=repo,
@@ -669,9 +871,14 @@ def main() -> None:
         eval_iteration_cap=eval_iteration_cap,
         train_paths=list(train_paths),
         test_paths=list(test_paths),
+        exact_command=exact_command,
+        action_space_trace=action_space_trace,
+        training_operator_usage={},
     )
     manifest_path = out_dir / "run_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _write_command_file(out_dir, exact_command)
+    _write_command_file(log_dir, exact_command)
 
     model_base_path = out_dir / "model" / "ppo_rl_improvement_mvp"
     model_base_path.parent.mkdir(parents=True, exist_ok=True)
@@ -697,6 +904,7 @@ def main() -> None:
             sampling_strategy="random",
             action_module=args.action_module,
             state_module=args.state_module,
+            reward_module=args.reward_module,
             enable_operator_logging=True,
             algorithm_mode="baseline",
             chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
@@ -704,11 +912,18 @@ def main() -> None:
         )
         vec_env.close()
 
+    manifest["resolved"]["training_operator_usage"] = _collect_training_operator_usage(log_dir)
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    if not args.run_eval:
+        return
+
     rows: List[Dict] = []
+    restart_rows: List[Dict[str, object]] = []
     for dataset_path in test_paths:
         dataset_size_label = infer_dataset_size_label(dataset_path)
         for seed in eval_seeds:
-            kisialiou_stats = run_kisialiou_episode(
+            kisialiou_stats, kisialiou_restart_rows = run_kisialiou_episode(
                 dataset_path=dataset_path,
                 seed=seed,
                 max_iterations=eval_iteration_cap,
@@ -718,6 +933,7 @@ def main() -> None:
                 size_label=dataset_size_label,
                 action_module=args.action_module,
                 state_module=args.state_module,
+                reward_module=args.reward_module,
                 target_runtime_seconds=None,
                 chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
                 reference_restarts=(
@@ -730,12 +946,23 @@ def main() -> None:
                     )
                 ),
             )
+            restart_rows.extend(
+                {
+                    **row,
+                    "dataset_path": dataset_path,
+                    "dataset": Path(dataset_path).name,
+                    "size": dataset_size_label,
+                    "seed": seed,
+                    "mode": "kisialiou",
+                }
+                for row in kisialiou_restart_rows
+            )
 
             runtime_target_seconds: Optional[float] = None
             if args.eval_runtime_mode == "match_kisialiou" and args.eval_fixed_restarts is None:
-                runtime_target_seconds = max(float(kisialiou_stats.runtime_seconds), 1e-6)
+                runtime_target_seconds = max(float(kisialiou_stats.wall_runtime_seconds), 1e-6)
 
-            rl_stats, snapshot = run_policy_episode(
+            rl_stats, snapshot, rl_restart_rows = run_policy_episode(
                 model=model,
                 dataset_path=dataset_path,
                 seed=seed,
@@ -746,13 +973,26 @@ def main() -> None:
                 size_label=dataset_size_label,
                 action_module=args.action_module,
                 state_module=args.state_module,
+                reward_module=args.reward_module,
                 chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
                 anti_repeat_penalty=args.anti_repeat_penalty,
                 policy_deterministic=True,
                 target_runtime_seconds=runtime_target_seconds,
                 restart_limit=args.eval_fixed_restarts,
             )
-            baseline_stats = run_baseline_episode(
+            restart_rows.extend(
+                {
+                    **row,
+                    "dataset_path": dataset_path,
+                    "dataset": Path(dataset_path).name,
+                    "size": dataset_size_label,
+                    "seed": seed,
+                    "mode": "rl_improvement_mvp",
+                }
+                for row in rl_restart_rows
+            )
+
+            baseline_stats, baseline_restart_rows = run_baseline_episode(
                 dataset_path=dataset_path,
                 seed=seed,
                 max_iterations=eval_iteration_cap,
@@ -763,8 +1003,20 @@ def main() -> None:
                 initial_snapshots=snapshot,
                 action_module=args.baseline_action_module,
                 state_module=args.baseline_state_module,
+                reward_module=args.reward_module,
                 target_runtime_seconds=runtime_target_seconds,
                 restart_limit=args.eval_fixed_restarts,
+            )
+            restart_rows.extend(
+                {
+                    **row,
+                    "dataset_path": dataset_path,
+                    "dataset": Path(dataset_path).name,
+                    "size": dataset_size_label,
+                    "seed": seed,
+                    "mode": "baseline",
+                }
+                for row in baseline_restart_rows
             )
 
             baseline_gap = (
@@ -797,9 +1049,12 @@ def main() -> None:
                     "mode": "rl_improvement_mvp",
                     "initial_cost": rl_stats.initial_cost,
                     "best_cost": rl_stats.best_cost,
+                    "solver_runtime_seconds": rl_stats.solver_runtime_seconds,
+                    "wall_runtime_seconds": rl_stats.wall_runtime_seconds,
                     "runtime_seconds": rl_stats.runtime_seconds,
                     "improvement_pct": rl_stats.improvement_pct,
-                    "improvement_pct_per_second": rl_stats.improvement_pct / max(rl_stats.runtime_seconds, 1e-12),
+                    "improvement_pct_per_wall_second": rl_stats.improvement_pct / max(rl_stats.wall_runtime_seconds, 1e-12),
+                    "improvement_pct_per_solver_second": rl_stats.improvement_pct / max(rl_stats.solver_runtime_seconds, 1e-12),
                     "baseline_gap_pct": baseline_gap,
                     "kisialiou_gap_pct": kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
@@ -807,7 +1062,7 @@ def main() -> None:
             )
 
             if args.stochastic_check:
-                rl_stochastic_stats, _ = run_policy_episode(
+                rl_stochastic_stats, _, rl_stochastic_restart_rows = run_policy_episode(
                     model=model,
                     dataset_path=dataset_path,
                     seed=seed,
@@ -818,11 +1073,23 @@ def main() -> None:
                     size_label=dataset_size_label,
                     action_module=args.action_module,
                     state_module=args.state_module,
+                    reward_module=args.reward_module,
                     chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
                     anti_repeat_penalty=args.anti_repeat_penalty,
                     policy_deterministic=False,
                     target_runtime_seconds=runtime_target_seconds,
                     restart_limit=args.eval_fixed_restarts,
+                )
+                restart_rows.extend(
+                    {
+                        **row,
+                        "dataset_path": dataset_path,
+                        "dataset": Path(dataset_path).name,
+                        "size": dataset_size_label,
+                        "seed": seed,
+                        "mode": "rl_improvement_mvp_stochastic",
+                    }
+                    for row in rl_stochastic_restart_rows
                 )
                 baseline_gap_stochastic = (
                     ((baseline_stats.best_cost - rl_stochastic_stats.best_cost) / baseline_stats.best_cost) * 100.0
@@ -843,9 +1110,12 @@ def main() -> None:
                         "mode": "rl_improvement_mvp_stochastic",
                         "initial_cost": rl_stochastic_stats.initial_cost,
                         "best_cost": rl_stochastic_stats.best_cost,
+                        "solver_runtime_seconds": rl_stochastic_stats.solver_runtime_seconds,
+                        "wall_runtime_seconds": rl_stochastic_stats.wall_runtime_seconds,
                         "runtime_seconds": rl_stochastic_stats.runtime_seconds,
                         "improvement_pct": rl_stochastic_stats.improvement_pct,
-                        "improvement_pct_per_second": rl_stochastic_stats.improvement_pct / max(rl_stochastic_stats.runtime_seconds, 1e-12),
+                        "improvement_pct_per_wall_second": rl_stochastic_stats.improvement_pct / max(rl_stochastic_stats.wall_runtime_seconds, 1e-12),
+                        "improvement_pct_per_solver_second": rl_stochastic_stats.improvement_pct / max(rl_stochastic_stats.solver_runtime_seconds, 1e-12),
                         "baseline_gap_pct": baseline_gap_stochastic,
                         "kisialiou_gap_pct": kisialiou_gap_stochastic,
                         "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
@@ -860,9 +1130,12 @@ def main() -> None:
                     "mode": "baseline",
                     "initial_cost": baseline_stats.initial_cost,
                     "best_cost": baseline_stats.best_cost,
+                    "solver_runtime_seconds": baseline_stats.solver_runtime_seconds,
+                    "wall_runtime_seconds": baseline_stats.wall_runtime_seconds,
                     "runtime_seconds": baseline_stats.runtime_seconds,
                     "improvement_pct": baseline_stats.improvement_pct,
-                    "improvement_pct_per_second": baseline_stats.improvement_pct / max(baseline_stats.runtime_seconds, 1e-12),
+                    "improvement_pct_per_wall_second": baseline_stats.improvement_pct / max(baseline_stats.wall_runtime_seconds, 1e-12),
+                    "improvement_pct_per_solver_second": baseline_stats.improvement_pct / max(baseline_stats.solver_runtime_seconds, 1e-12),
                     "baseline_gap_pct": 0.0,
                     "kisialiou_gap_pct": baseline_vs_kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
@@ -877,9 +1150,12 @@ def main() -> None:
                     "mode": "kisialiou",
                     "initial_cost": kisialiou_stats.initial_cost,
                     "best_cost": kisialiou_stats.best_cost,
+                    "solver_runtime_seconds": kisialiou_stats.solver_runtime_seconds,
+                    "wall_runtime_seconds": kisialiou_stats.wall_runtime_seconds,
                     "runtime_seconds": kisialiou_stats.runtime_seconds,
                     "improvement_pct": kisialiou_stats.improvement_pct,
-                    "improvement_pct_per_second": kisialiou_stats.improvement_pct / max(kisialiou_stats.runtime_seconds, 1e-12),
+                    "improvement_pct_per_wall_second": kisialiou_stats.improvement_pct / max(kisialiou_stats.wall_runtime_seconds, 1e-12),
+                    "improvement_pct_per_solver_second": kisialiou_stats.improvement_pct / max(kisialiou_stats.solver_runtime_seconds, 1e-12),
                     "baseline_gap_pct": kisialiou_vs_baseline_gap,
                     "kisialiou_gap_pct": 0.0,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
@@ -888,12 +1164,19 @@ def main() -> None:
 
     results_json = out_dir / "results.json"
     results_csv = out_dir / "results.csv"
+    restart_csv = out_dir / "restart_results.csv"
     results_json.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
     with results_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+
+    if restart_rows:
+        with restart_csv.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(restart_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(restart_rows)
 
     by_mode: Dict[str, List[Dict]] = {}
     for row in rows:
@@ -902,12 +1185,15 @@ def main() -> None:
     summary: Dict[str, Dict] = {}
     for mode, mode_rows in by_mode.items():
         total_improvement_pct = float(sum(float(r["improvement_pct"]) for r in mode_rows))
-        total_runtime = float(sum(float(r["runtime_seconds"]) for r in mode_rows))
-        improvement_per_second = total_improvement_pct / max(total_runtime, 1e-12)
+        total_wall_runtime = float(sum(float(r["wall_runtime_seconds"]) for r in mode_rows))
+        total_solver_runtime = float(sum(float(r["solver_runtime_seconds"]) for r in mode_rows))
+        improvement_per_wall_second = total_improvement_pct / max(total_wall_runtime, 1e-12)
+        improvement_per_solver_second = total_improvement_pct / max(total_solver_runtime, 1e-12)
         baseline_gap_values = [float(r["baseline_gap_pct"]) for r in mode_rows if mode != "baseline"]
         kisialiou_gap_values = [float(r["kisialiou_gap_pct"]) for r in mode_rows if mode != "kisialiou"]
         summary[mode] = {
-            "improvement_pct_per_second": improvement_per_second,
+            "improvement_pct_per_wall_second": improvement_per_wall_second,
+            "improvement_pct_per_solver_second": improvement_per_solver_second,
             "mean_baseline_gap_pct": float(np.mean(baseline_gap_values)) if baseline_gap_values else 0.0,
             "mean_kisialiou_gap_pct": float(np.mean(kisialiou_gap_values)) if kisialiou_gap_values else 0.0,
             "num_samples": len(mode_rows),
@@ -996,14 +1282,16 @@ def main() -> None:
         f"run_manifest: {manifest_path}",
         "",
         "Metrics:",
-        "- improvement_pct_per_second",
+        "- improvement_pct_per_wall_second",
+        "- improvement_pct_per_solver_second",
         "- mean_baseline_gap_pct",
         "- mean_kisialiou_gap_pct",
         "",
     ]
     for mode, stats in sorted(summary.items()):
         report_lines.append(f"- {mode}:")
-        report_lines.append(f"    improvement_pct_per_second: {stats['improvement_pct_per_second']:.6f}")
+        report_lines.append(f"    improvement_pct_per_wall_second: {stats['improvement_pct_per_wall_second']:.6f}")
+        report_lines.append(f"    improvement_pct_per_solver_second: {stats['improvement_pct_per_solver_second']:.6f}")
         report_lines.append(f"    mean_baseline_gap_pct: {stats['mean_baseline_gap_pct']:.6f}")
         report_lines.append(f"    mean_kisialiou_gap_pct: {stats['mean_kisialiou_gap_pct']:.6f}")
         report_lines.append(f"    num_samples: {stats['num_samples']}")

@@ -103,6 +103,7 @@ class OperatorUsageLogger:
     def _write_csv(self, file_path: Path) -> None:
         fieldnames = self._fieldnames or sorted(self._buffer[0].keys())
         file_exists = file_path.exists()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
 
         with file_path.open("a", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -111,6 +112,7 @@ class OperatorUsageLogger:
             writer.writerows(self._buffer)
 
     def _write_jsonl(self, file_path: Path) -> None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with file_path.open("a", encoding="utf-8") as handle:
             for row in self._buffer:
                 json.dump(row, handle)
