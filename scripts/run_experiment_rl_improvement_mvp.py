@@ -50,6 +50,41 @@ def _restart_seed(base_seed: int, restart_idx: int) -> int:
     return int(base_seed + restart_idx * 1009)
 
 
+def _time_to_best(stats: Dict) -> tuple:
+    """Return (solver_seconds_to_best, iterations_to_best) within a single restart.
+
+    Uses the cumulative elapsed_seconds from episode_history.  If the episode
+    produced no usable data both values are 0.
+    """
+    best_cost_history = stats.get("best_cost_history") or []
+    elapsed_seconds = stats.get("elapsed_seconds") or []
+    if not best_cost_history:
+        return 0.0, 0
+    global_best = min(best_cost_history)
+    for i, cost in enumerate(best_cost_history):
+        if cost <= global_best + 1e-9:
+            t = float(elapsed_seconds[i]) if i < len(elapsed_seconds) else 0.0
+            return t, i
+    return 0.0, 0
+
+
+def _episode_time_to_best(restart_records: list) -> float:
+    """Compute cumulative solver seconds until the global best was first found.
+
+    Sums full solver time of restarts that completed before the best-finding
+    restart, then adds the time-to-best within that restart.
+    """
+    if not restart_records:
+        return 0.0
+    global_best = min(r["best_cost"] for r in restart_records)
+    cumulative_solver = 0.0
+    for rec in restart_records:
+        if rec["best_cost"] <= global_best + 1e-9:
+            return cumulative_solver + float(rec.get("time_to_best_solver_seconds", 0.0))
+        cumulative_solver += float(rec.get("solver_runtime_seconds", 0.0))
+    return cumulative_solver
+
+
 def parse_size_list(size_arg: str) -> List[str]:
     sizes = [item.strip().lower() for item in str(size_arg).split(",") if item.strip()]
     deduped: List[str] = []
@@ -145,7 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--eval-runtime-mode",
         choices=("iterations", "match_kisialiou"),
-        default="iterations",
+        default="match_kisialiou",
         help="Evaluation stopping rule: fixed iterations or wall-time matched to Kisialiou per dataset/seed",
     )
     parser.add_argument(
@@ -172,7 +207,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="If set, run exactly this many restarts per dataset/seed for all evaluation modes",
     )
-    parser.add_argument("--eval-seeds", default="42,43,44")
+    parser.add_argument("--eval-seeds", default="42,43,44,45,46")
     parser.add_argument(
         "--action-module",
         default="op_pair_v1",
@@ -342,6 +377,7 @@ def run_policy_episode(
         restart_wall_runtime = time.perf_counter() - restart_wall_start
         total_solver_runtime_seconds += restart_solver_runtime
         total_wall_runtime_seconds += restart_wall_runtime
+        ttb_solver, ttb_iters = _time_to_best(stats)
         restart_records.append(
             {
                 "restart_id": restart_idx,
@@ -349,6 +385,8 @@ def run_policy_episode(
                 "restart_seed": restart_seed,
                 "solver_runtime_seconds": restart_solver_runtime,
                 "wall_runtime_seconds": restart_wall_runtime,
+                "time_to_best_solver_seconds": ttb_solver,
+                "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
                 "best_cost": restart_best,
                 "iterations": int(stats.get("total_iterations", steps)),
@@ -478,6 +516,7 @@ def run_baseline_episode(
         restart_wall_runtime = time.perf_counter() - restart_wall_start
         total_solver_runtime_seconds += restart_solver_runtime
         total_wall_runtime_seconds += restart_wall_runtime
+        ttb_solver, ttb_iters = _time_to_best(stats)
         restart_records.append(
             {
                 "restart_id": restart_idx,
@@ -485,6 +524,8 @@ def run_baseline_episode(
                 "restart_seed": restart_seed,
                 "solver_runtime_seconds": restart_solver_runtime,
                 "wall_runtime_seconds": restart_wall_runtime,
+                "time_to_best_solver_seconds": ttb_solver,
+                "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
                 "best_cost": restart_best,
                 "iterations": int(stats.get("total_iterations", steps)),
@@ -763,6 +804,7 @@ def run_kisialiou_episode(
         restart_wall_runtime = time.perf_counter() - restart_wall_start
         total_solver_runtime_seconds += restart_solver_runtime
         total_wall_runtime_seconds += restart_wall_runtime
+        ttb_solver, ttb_iters = _time_to_best(stats)
         restart_records.append(
             {
                 "restart_id": restart_idx,
@@ -770,6 +812,8 @@ def run_kisialiou_episode(
                 "restart_seed": restart_seed,
                 "solver_runtime_seconds": restart_solver_runtime,
                 "wall_runtime_seconds": restart_wall_runtime,
+                "time_to_best_solver_seconds": ttb_solver,
+                "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
                 "best_cost": restart_best,
                 "iterations": int(stats.get("total_iterations", steps)),
@@ -1040,6 +1084,7 @@ def main() -> None:
                 else 0.0
             )
 
+            restart_records_for_row = rl_restart_rows
             rows.append(
                 {
                     "dataset_path": dataset_path,
@@ -1058,6 +1103,7 @@ def main() -> None:
                     "baseline_gap_pct": baseline_gap,
                     "kisialiou_gap_pct": kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
+                    "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                 }
             )
 
@@ -1101,6 +1147,7 @@ def main() -> None:
                     if kisialiou_stats.best_cost > 1e-12
                     else 0.0
                 )
+                restart_records_for_row = rl_stochastic_restart_rows
                 rows.append(
                     {
                         "dataset_path": dataset_path,
@@ -1119,8 +1166,10 @@ def main() -> None:
                         "baseline_gap_pct": baseline_gap_stochastic,
                         "kisialiou_gap_pct": kisialiou_gap_stochastic,
                         "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
+                    "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                     }
                 )
+            restart_records_for_row = baseline_restart_rows
             rows.append(
                 {
                     "dataset_path": dataset_path,
@@ -1139,8 +1188,10 @@ def main() -> None:
                     "baseline_gap_pct": 0.0,
                     "kisialiou_gap_pct": baseline_vs_kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
+                    "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                 }
             )
+            restart_records_for_row = kisialiou_restart_rows
             rows.append(
                 {
                     "dataset_path": dataset_path,
@@ -1159,6 +1210,7 @@ def main() -> None:
                     "baseline_gap_pct": kisialiou_vs_baseline_gap,
                     "kisialiou_gap_pct": 0.0,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
+                    "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                 }
             )
 

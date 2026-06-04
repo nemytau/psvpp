@@ -565,7 +565,8 @@ impl ALNSEngine {
                 },
             ));
         }
-        for candidate_rank in 1..=10 {
+        // v1..v5: candidate_rank 1..5 (rank of insertion position selected per visit)
+        for candidate_rank in 1..=5 {
             registry.add_repair_operator(Box::new(
                 crate::operators::repair::deep_greedy_insertion::DeepGreedyInsertion {
                     search_k: 10,
@@ -573,19 +574,16 @@ impl ALNSEngine {
                 },
             ));
         }
-        for search_k in 3..=7 {
-            registry.add_repair_operator(Box::new(
-                crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2, search_k },
-            ));
-        }
-        for search_k in 3..=7 {
-            registry.add_repair_operator(Box::new(
-                crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3, search_k },
-            ));
-        }
+        // single version each — search_k variation is a no-op for regret calculation
+        registry.add_repair_operator(Box::new(
+            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 2, search_k: 2 },
+        ));
+        registry.add_repair_operator(Box::new(
+            crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3, search_k: 3 },
+        ));
 
-        // v1..v10: search_k = 1..10 (broader candidate search per step)
-        for search_k in 1..=10 {
+        // v1..v5: search_k = 1..5 (candidate voyages considered per visit relocation)
+        for search_k in 1..=5 {
             registry.add_improvement_operator(Box::new(VoyageNumberReduction { search_k }));
         }
         // v1..v9: lambda_max = 8..72 (step 8); v10: lambda_max = 80
@@ -620,18 +618,14 @@ impl ALNSEngine {
         }
 
         let mut repair_operators = Vec::new();
-        for idx in 1..=10 {
+        for idx in 1..=5 {
             repair_operators.push(format!("deep_greedy_rank_{}", idx));
         }
-        for search_k in 3..=7 {
-            repair_operators.push(format!("k_regret_2_s{}", search_k));
-        }
-        for search_k in 3..=7 {
-            repair_operators.push(format!("k_regret_3_s{}", search_k));
-        }
+        repair_operators.push("k_regret_2".to_string());
+        repair_operators.push("k_regret_3".to_string());
 
         let mut improvement_operators = Vec::new();
-        for idx in 1..=10 {
+        for idx in 1..=5 {
             improvement_operators.push(format!("voyage_number_reduction_v{}", idx));
         }
         for idx in 1..=10 {
@@ -1023,18 +1017,20 @@ impl ALNSEngine {
             return sequence.clone();
         }
 
-        const ORDERED_NAMES: [&str; 6] = [
+        // Each entry is a base name; we pick the first registered operator whose
+        // label starts with that prefix (e.g. "voyage_number_reduction_v1").
+        const ORDERED_BASES: [&str; 6] = [
             "voyage_number_reduction",
             "fleet_and_cost_reduction",
             "deep_relocation",
             "fleet_and_cost_reduction",
             "deep_swap",
-            "fleet_and_cost_reduction"
+            "fleet_and_cost_reduction",
         ];
 
-        ORDERED_NAMES
+        ORDERED_BASES
             .iter()
-            .filter_map(|name| self.find_improvement_operator_index(name))
+            .filter_map(|base| self.find_improvement_operator_index_by_prefix(base))
             .collect()
     }
 
@@ -1042,6 +1038,17 @@ impl ALNSEngine {
         self.improvement_operator_labels
             .iter()
             .position(|candidate| candidate == label)
+    }
+
+    fn find_improvement_operator_index_by_prefix(&self, prefix: &str) -> Option<usize> {
+        // Exact match first, then prefix match (e.g. "voyage_number_reduction_v1")
+        self.improvement_operator_labels
+            .iter()
+            .position(|candidate| {
+                candidate == prefix
+                    || candidate.starts_with(&format!("{}_v", prefix))
+                    || candidate.starts_with(&format!("{}_", prefix))
+            })
     }
 
     pub fn run_improvement_only(

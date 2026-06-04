@@ -34,26 +34,14 @@ impl ImprovementOperator for VoyageNumberReduction {
                 for &visit_id in &visit_ids {
                     // Ensure schedule is up-to-date before each insertion cost calculation
                     temp_solution.ensure_schedule_is_updated();
-                    // Find best feasible insertion using deep greedy insertion logic
-                    let mut best_insertion: Option<(usize, f64)> = None;
-                    for voyage_cell2 in &temp_solution.voyages {
-                        let v2 = voyage_cell2.borrow();
-                        let v2_id = v2.id;
-                        if v2_id == voyage_id {
-                            continue;
-                        }
-                        if temp_solution.visit_insertion_is_possible(context, visit_id, v2_id) {
-                            let costs =
-                                temp_solution.top_k_visit_insertion_costs(context, visit_id, self.search_k);
-                            if let Some((_, cost)) = costs.first() {
-                                if best_insertion.is_none()
-                                    || *cost < best_insertion.as_ref().unwrap().1
-                                {
-                                    best_insertion = Some((v2_id, *cost));
-                                }
-                            }
-                        }
-                    }
+                    // Find best feasible insertion: top_k_visit_insertion_costs ranks all
+                    // candidate voyages by insertion cost and returns the search_k cheapest.
+                    // Higher search_k = broader search (considers more voyages); lower = faster
+                    // but may miss better insertions.
+                    let candidates = temp_solution.top_k_visit_insertion_costs(context, visit_id, self.search_k);
+                    let best_insertion = candidates
+                        .into_iter()
+                        .find(|(cand_voyage_id, _)| *cand_voyage_id != voyage_id);
                     if let Some((target_voyage, _)) = best_insertion {
                         // Insert visit into target voyage
                         if temp_solution

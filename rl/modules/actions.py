@@ -49,16 +49,20 @@ class BaseActionSpace:
         raise NotImplementedError
 
 
-@register_action("op_pair_v1")
 class OperatorPairActionSpace(BaseActionSpace):
-    """Discrete actions covering destroy/repair pairs and independent improvements.
+    """Discrete actions as a full D×R×I product.
 
-    The first ``num_destroy * num_repair`` actions map to destroy/repair pairs with no
-    improvement operator selected. The remaining ``num_improvement`` actions represent
-    improvement-only steps where no destroy/repair operator is chosen.
+    Each action selects one destroy operator, one repair operator, and one
+    improvement operator simultaneously.  Action index is encoded as:
+
+        action_idx = d_local * (n_repair * n_improvement)
+                   + r_local * n_improvement
+                   + i_local
+
+    All three operators are required; pass filtered lists to this class.
     """
 
-    version = "1.3"
+    version = "2.0"
 
     def __init__(
         self,
@@ -69,8 +73,8 @@ class OperatorPairActionSpace(BaseActionSpace):
         destroy_list = list(destroy_operators)
         repair_list = list(repair_operators)
         improvement_list = list(improvement_operators or [])
-        if not destroy_list or not repair_list:
-            raise ValueError("Operator lists must be non-empty")
+        if not destroy_list or not repair_list or not improvement_list:
+            raise ValueError("All three operator lists must be non-empty for D×R×I action space")
 
         self.destroy_operators = destroy_list
         self.repair_operators = repair_list
@@ -79,16 +83,7 @@ class OperatorPairActionSpace(BaseActionSpace):
         self._num_repair = len(repair_list)
         self._num_improvement = len(improvement_list)
 
-        self._pairs = [
-            (d_idx, r_idx)
-            for d_idx in range(self._num_destroy)
-            for r_idx in range(self._num_repair)
-        ]
-        self._num_pairs = len(self._pairs)
-        self._pair_index = {pair: idx for idx, pair in enumerate(self._pairs)}
-
-        total_actions = self._num_pairs + self._num_improvement
-        self._space = spaces.Discrete(total_actions)
+        self._space = spaces.Discrete(self._num_destroy * self._num_repair * self._num_improvement)
 
     def gym_space(self) -> spaces.Discrete:
         return self._space
@@ -99,18 +94,10 @@ class OperatorPairActionSpace(BaseActionSpace):
     def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
         if not self._space.contains(action_idx):
             raise ValueError(f"Action index {action_idx} out of range [0, {self._space.n})")
-
-        if action_idx < self._num_pairs:
-            destroy_idx, repair_idx = self._pairs[action_idx]
-            return destroy_idx, repair_idx, None
-
-        improvement_offset = action_idx - self._num_pairs
-        if improvement_offset < 0 or improvement_offset >= self._num_improvement:
-            raise ValueError(
-                f"Improvement action index {action_idx} out of bounds for {self._num_improvement} improvement operators"
-            )
-
-        return None, None, improvement_offset
+        d_local = action_idx // (self._num_repair * self._num_improvement)
+        r_local = (action_idx // self._num_improvement) % self._num_repair
+        i_local = action_idx % self._num_improvement
+        return d_local, r_local, i_local
 
     def action_to_id(
         self,
@@ -118,45 +105,143 @@ class OperatorPairActionSpace(BaseActionSpace):
         repair_idx: Optional[int],
         improvement_idx: Optional[int] = None,
     ) -> int:
-        if improvement_idx is None:
-            if destroy_idx is None or repair_idx is None:
-                raise ValueError("Destroy and repair indices required for pair actions")
-            if destroy_idx < 0 or destroy_idx >= self._num_destroy:
-                raise ValueError(f"Destroy index {destroy_idx} out of range")
-            if repair_idx < 0 or repair_idx >= self._num_repair:
-                raise ValueError(f"Repair index {repair_idx} out of range")
-
-            pair_idx = self._pair_index.get((destroy_idx, repair_idx))
-            if pair_idx is None:
-                raise ValueError(
-                    f"Destroy/repair pair ({destroy_idx}, {repair_idx}) not registered"
-                )
-            return pair_idx
-
-        if self._num_improvement <= 0:
-            raise ValueError("Improvement action requested but no improvement operators registered")
-        if improvement_idx < 0 or improvement_idx >= self._num_improvement:
-            raise ValueError(f"Improvement index {improvement_idx} out of range")
-        if destroy_idx not in {None, -1} or repair_idx not in {None, -1}:
-            raise ValueError(
-                "Improvement-only actions must omit destroy and repair indices"
-            )
-
-        return self._num_pairs + improvement_idx
+        if destroy_idx is None or repair_idx is None or improvement_idx is None:
+            raise ValueError("D×R×I action space requires all three indices")
+        return (int(destroy_idx) * self._num_repair * self._num_improvement
+                + int(repair_idx) * self._num_improvement
+                + int(improvement_idx))
 
     def sample(self) -> int:
         return int(self._space.sample())
 
     def num_pairs(self) -> int:
-        return self._num_pairs
+        return self._num_destroy * self._num_repair
 
     def num_improvement(self) -> int:
         return self._num_improvement
 
-    def first_improvement_action(self) -> Optional[int]:
-        if self._num_improvement <= 0:
-            return None
-        return self._num_pairs
+
+def _first(names: Sequence[str], prefix: str) -> Optional[str]:
+    """Return the first name starting with `prefix`, or None."""
+    return next((n for n in names if n.startswith(prefix)), None)
+
+
+def _base_destroy_repair(d_all: list, r_all: list) -> Tuple[list, list]:
+    """Pick one base (v1) operator per destroy family and the standard repair set."""
+    selected_destroy = [n for n in (
+        _first(d_all, "shaw_removal_v1"),
+        _first(d_all, "random_visit_removal_v1"),
+        _first(d_all, "worst_visit_removal_v1"),
+    ) if n is not None]
+    selected_repair = [n for n in (
+        _first(r_all, "deep_greedy_rank_1"),
+        next((x for x in r_all if x == "k_regret_2" or x.startswith("k_regret_2_")), None),
+        next((x for x in r_all if x == "k_regret_3" or x.startswith("k_regret_3_")), None),
+    ) if n is not None]
+    return selected_destroy, selected_repair
+
+
+_BASE_IMPROVEMENTS = (
+    "voyage_number_reduction_v1",
+    "fleet_and_cost_reduction_v9",  # lambda_max=72, original constant
+    "deep_relocation_v10",           # unlimited, run to convergence
+    "deep_swap_v10",                  # unlimited, run to convergence
+)
+
+
+@register_action("op_pair_v1")
+class OpPairV1ActionSpace(BaseActionSpace):
+    """RL selects destroy+repair pairs only — no improvement phase.
+
+    Intended as exp0 baseline: compare pure RL pair selection against
+    random-pair ALNS without any improvement operator.
+
+    Action space: 3 destroy × 3 repair = 9 actions.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+    ) -> None:
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        selected_destroy, selected_repair = _base_destroy_repair(d_all, r_all)
+
+        self.destroy_operators = selected_destroy
+        self.repair_operators = selected_repair
+        self.improvement_operators: list = []
+        self._num_destroy = len(selected_destroy)
+        self._num_repair = len(selected_repair)
+        self._pairs = [(d, r) for d in range(self._num_destroy) for r in range(self._num_repair)]
+        self._space = spaces.Discrete(len(self._pairs))
+        # Engine-index mappings
+        self._d_engine = [d_all.index(n) for n in selected_destroy]
+        self._r_engine = [r_all.index(n) for n in selected_repair]
+
+    def gym_space(self) -> spaces.Discrete:
+        return self._space
+
+    def n(self) -> int:
+        return int(self._space.n)
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        if not self._space.contains(action_idx):
+            raise ValueError(f"Action index {action_idx} out of range [0, {self._space.n})")
+        d_local, r_local = self._pairs[action_idx]
+        return self._d_engine[d_local], self._r_engine[r_local], None
+
+    def action_to_id(self, destroy_idx, repair_idx, improvement_idx=None) -> int:
+        local_d = self._d_engine.index(int(destroy_idx))
+        local_r = self._r_engine.index(int(repair_idx))
+        return local_d * self._num_repair + local_r
+
+    def sample(self) -> int:
+        return int(self._space.sample())
+
+    def num_pairs(self) -> int:
+        return len(self._pairs)
+
+    def num_improvement(self) -> int:
+        return 0
+
+
+@register_action("op_triple_v1")
+class OpTripleV1ActionSpace(OperatorPairActionSpace):
+    """D×R×I action space using one base (v1) operator per family.
+
+    Action space: 3 destroy × 3 repair × 4 improvement = 36 actions.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+    ) -> None:
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        i_all = list(improvement_operators or [])
+        selected_destroy, selected_repair = _base_destroy_repair(d_all, r_all)
+        selected_improve = [n for n in _BASE_IMPROVEMENTS if n in i_all]
+
+        super().__init__(
+            destroy_operators=selected_destroy,
+            repair_operators=selected_repair,
+            improvement_operators=selected_improve,
+        )
+        self._d_engine = [d_all.index(n) for n in selected_destroy]
+        self._r_engine = [r_all.index(n) for n in selected_repair]
+        self._i_engine = [i_all.index(n) for n in selected_improve]
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        d_local, r_local, i_local = super().id_to_action(action_idx)
+        return self._d_engine[d_local], self._r_engine[r_local], self._i_engine[i_local]
 
 
 @register_action("destroy_repair_many_v1")
@@ -341,19 +426,13 @@ class ImprovementChainActionSpace(BaseActionSpace):
 
     Action mapping:
     - 0: run backbone destroy+repair step (no explicit improvement)
-    - 1..N: run one improvement-only step with selected operator
+    - 1..4: run one improvement-only step with one of the 4 base operators
 
-    Repeated 1..N actions naturally form an improvement chain before the next
-    backbone action is chosen.
+    Uses only the 4 base improvement operators (one per family).
+    Repeated 1..4 actions form an improvement chain before the next backbone step.
     """
 
     version = "1.0"
-
-    _PREFERRED_IMPROVEMENTS = tuple(
-        f"{base}_v{i}"
-        for base in ("voyage_number_reduction", "fleet_and_cost_reduction", "deep_relocation", "deep_swap")
-        for i in range(1, 11)
-    )
 
     def __init__(
         self,
@@ -366,14 +445,12 @@ class ImprovementChainActionSpace(BaseActionSpace):
         all_improvements = list(improvement_operators or [])
         name_to_idx = {name: idx for idx, name in enumerate(all_improvements)}
 
+        # Use only the 4 base improvement operators — one per family
         selected_pairs = [
             (name, name_to_idx[name])
-            for name in self._PREFERRED_IMPROVEMENTS
+            for name in _BASE_IMPROVEMENTS
             if name in name_to_idx
         ]
-
-        if not selected_pairs and all_improvements:
-            selected_pairs = [(name, idx) for idx, name in enumerate(all_improvements)]
 
         self.improvement_operators = [name for name, _ in selected_pairs]
         self._improvement_indices = [idx for _, idx in selected_pairs]
@@ -541,105 +618,44 @@ class OperatorPairMappedActionSpace(BaseActionSpace):
         repair_operators: Sequence[str],
         improvement_operators: Optional[Sequence[str]] = None,
     ) -> None:
-        original_destroy = list(destroy_operators)
-        original_repair = list(repair_operators)
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        i_all = list(improvement_operators or [])
 
-        def pick_mid(candidates: list[str]) -> Optional[str]:
-            if not candidates:
-                return None
-            return candidates[len(candidates) // 2]
+        def pick_mid(items: list[str]) -> Optional[str]:
+            return items[len(items) // 2] if items else None
 
-        # Select representative destroy operators by family
-        shaw = [n for n in original_destroy if n.startswith("shaw_removal_v")]
-        random_visit = [n for n in original_destroy if n.startswith("random_visit_removal_v")]
-        worst_visit = [n for n in original_destroy if n.startswith("worst_visit_removal_v")]
+        # One representative destroy per family — mid-range parameterised version
+        selected_destroy = [n for n in (
+            pick_mid([x for x in d_all if x.startswith("shaw_removal_v")]),
+            pick_mid([x for x in d_all if x.startswith("random_visit_removal_v")]),
+            pick_mid([x for x in d_all if x.startswith("worst_visit_removal_v")]),
+        ) if n is not None]
 
-        selected_destroy_names: list[str] = []
-        for group in (shaw, random_visit, worst_visit):
-            v = pick_mid(group)
-            if v is not None:
-                selected_destroy_names.append(v)
+        # Repair: greedy rank_1, k_regret_2, k_regret_3 (exact or first match)
+        selected_repair = [n for n in (
+            _first(r_all, "deep_greedy_rank_1"),
+            next((x for x in r_all if x == "k_regret_2" or x.startswith("k_regret_2_")), None),
+            next((x for x in r_all if x == "k_regret_3" or x.startswith("k_regret_3_")), None),
+        ) if n is not None]
 
-        # Select representative repair operators
-        selected_repair_names: list[str] = []
-        # prefer deep_greedy_rank_1 when available (matches earlier candidate_rank=1)
-        if any(n.startswith("deep_greedy_rank_1") for n in original_repair):
-            selected_repair_names.append(next(n for n in original_repair if n.startswith("deep_greedy_rank_1")))
-        else:
-            dg = [n for n in original_repair if n.startswith("deep_greedy_rank_")]
-            if dg:
-                selected_repair_names.append(dg[0])
+        # One representative improvement per family — mid-range parameterised version
+        selected_improve = [n for n in (
+            pick_mid([x for x in i_all if x.startswith("voyage_number_reduction_v")]),
+            pick_mid([x for x in i_all if x.startswith("fleet_and_cost_reduction_v")]),
+            pick_mid([x for x in i_all if x.startswith("deep_relocation_v")]),
+            pick_mid([x for x in i_all if x.startswith("deep_swap_v")]),
+        ) if n is not None]
 
-        # prefer k_regret_2_s3 / k_regret_3_s3 when present
-        for pref in ("k_regret_2_s3", "k_regret_3_s3"):
-            if pref in original_repair:
-                selected_repair_names.append(pref)
+        # Store engine-index mappings
+        self._d_engine = [d_all.index(n) for n in selected_destroy]
+        self._r_engine = [r_all.index(n) for n in selected_repair]
+        self._i_engine = [i_all.index(n) for n in selected_improve]
 
-        # fallback to middle k_regret variants if specific s3 variants missing
-        if len(selected_repair_names) < 3:
-            k2 = [n for n in original_repair if n.startswith("k_regret_2_")]
-            k3 = [n for n in original_repair if n.startswith("k_regret_3_")]
-            if k2:
-                v = pick_mid(k2)
-                if v:
-                    selected_repair_names.append(v)
-            if k3:
-                v = pick_mid(k3)
-                if v:
-                    selected_repair_names.append(v)
-
-        # Ensure uniqueness and presence in original lists
-        selected_destroy_names = [n for i, n in enumerate(selected_destroy_names) if n in original_destroy]
-        selected_repair_names = [n for i, n in enumerate(selected_repair_names) if n in original_repair]
-
-        def _pick_evenly(items: list[str], count: int) -> list[str]:
-            if not items:
-                return []
-            count = min(count, len(items))
-            if count <= 0:
-                return []
-            if count == 1:
-                return [items[len(items) // 2]]
-            step = max(1, len(items) // count)
-            picks: list[str] = []
-            idx = 0
-            while len(picks) < count and idx < len(items):
-                picks.append(items[idx])
-                idx += step
-            # Ensure we have exactly `count` elements by appending from the end if needed
-            i = 1
-            while len(picks) < count and i <= len(items):
-                candidate = items[-i]
-                if candidate not in picks:
-                    picks.append(candidate)
-                i += 1
-            return picks
-
-        # If preferences failed to match any operators, fall back to evenly spaced
-        # representatives from the engine-provided lists. Only raise if the engine
-        # supplied no operators at all.
-        if not original_destroy:
-            raise ValueError("Engine provided no destroy operators for op_pair_mapped_v1")
-        if not original_repair:
-            raise ValueError("Engine provided no repair operators for op_pair_mapped_v1")
-
-        if not selected_destroy_names:
-            # pick up to three representative destroys
-            selected_destroy_names = _pick_evenly(original_destroy, 3)
-        if not selected_repair_names:
-            # pick up to three representative repairs
-            selected_repair_names = _pick_evenly(original_repair, 3)
-
-        # Map selected names back to engine indices
-        self._destroy_name_to_engine_idx = [original_destroy.index(n) for n in selected_destroy_names]
-        self._repair_name_to_engine_idx = [original_repair.index(n) for n in selected_repair_names]
-
-        # Build an inner OperatorPairActionSpace over the selected names so the
-        # RL agent sees a compact, human-readable action mapping.
         self._inner = OperatorPairActionSpace(
-            destroy_operators=selected_destroy_names,
-            repair_operators=selected_repair_names,
-            improvement_operators=list(improvement_operators or []),
+            destroy_operators=selected_destroy,
+            repair_operators=selected_repair,
+            improvement_operators=selected_improve,
         )
 
     def gym_space(self) -> spaces.Discrete:
@@ -649,11 +665,8 @@ class OperatorPairMappedActionSpace(BaseActionSpace):
         return int(self._inner.n())
 
     def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
-        d_idx_local, r_idx_local, imp = self._inner.id_to_action(action_idx)
-        if d_idx_local is None or r_idx_local is None:
-            return None, None, imp
-        # Map local indices back to engine-global indices
-        return self._destroy_name_to_engine_idx[int(d_idx_local)], self._repair_name_to_engine_idx[int(r_idx_local)], None
+        d_local, r_local, i_local = self._inner.id_to_action(action_idx)
+        return self._d_engine[int(d_local)], self._r_engine[int(r_local)], self._i_engine[int(i_local)]
 
     def action_to_id(
         self,
@@ -661,22 +674,15 @@ class OperatorPairMappedActionSpace(BaseActionSpace):
         repair_idx: Optional[int],
         improvement_idx: Optional[int] = None,
     ) -> int:
-        # Accept engine-global destroy/repair indices and map them into the
-        # compact inner space before delegating to the inner action_to_id.
-        if improvement_idx is not None:
-            # delegate improvement-only semantics to inner
-            return self._inner.action_to_id(None, None, improvement_idx)
-
-        if destroy_idx is None or repair_idx is None:
-            raise ValueError("Destroy and repair indices required for op_pair_mapped_v1")
-
+        if destroy_idx is None or repair_idx is None or improvement_idx is None:
+            raise ValueError("op_pair_mapped_v1 requires all three engine-global indices")
         try:
-            local_d = self._destroy_name_to_engine_idx.index(int(destroy_idx))
-            local_r = self._repair_name_to_engine_idx.index(int(repair_idx))
+            local_d = self._d_engine.index(int(destroy_idx))
+            local_r = self._r_engine.index(int(repair_idx))
+            local_i = self._i_engine.index(int(improvement_idx))
         except ValueError as exc:
-            raise ValueError("Requested engine operator indices are not part of the mapped selection") from exc
-
-        return self._inner.action_to_id(local_d, local_r, None)
+            raise ValueError("Operator indices not part of the mapped selection") from exc
+        return self._inner.action_to_id(local_d, local_r, local_i)
 
     def sample(self) -> int:
         return int(self._inner.sample())
