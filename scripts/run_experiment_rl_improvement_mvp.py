@@ -215,8 +215,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--baseline-action-module",
-        default="op_pair_v1",
-        help="Baseline action space key (default isolates baseline to random destroy/repair pairs)",
+        default="backbone_v1",
+        help="Baseline action space key (default: backbone_v1 = adaptive weighted ALNS)",
     )
     parser.add_argument(
         "--state-module",
@@ -1322,7 +1322,7 @@ def main() -> None:
         f"state_module: {args.state_module}",
         f"baseline_action_module: {args.baseline_action_module}",
         f"baseline_state_module: {args.baseline_state_module}",
-        "baseline_policy: random_destroy_repair_pair_only_v1",
+        f"baseline_policy: {args.baseline_action_module}",
         f"chain_max_consecutive_improvements: {args.chain_max_consecutive_improvements}",
         f"anti_repeat_penalty: {args.anti_repeat_penalty}",
         f"stochastic_check: {args.stochastic_check}",

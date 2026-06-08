@@ -121,6 +121,51 @@ class OperatorPairActionSpace(BaseActionSpace):
         return self._num_improvement
 
 
+@register_action("backbone_v1")
+class BackboneActionSpace(BaseActionSpace):
+    """Single-action space that always triggers the adaptive weighted backbone.
+
+    Action 0 → (None, None, None): the engine selects destroy and repair via
+    weighted roulette (adaptive ALNS), updating weights every segment.
+    Used as the default baseline so it runs true adaptive ALNS, not random
+    explicit pair selection.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+    ) -> None:
+        self.destroy_operators = list(destroy_operators)
+        self.repair_operators = list(repair_operators)
+        self.improvement_operators: list = []
+        self._space = spaces.Discrete(1)
+
+    def gym_space(self) -> spaces.Discrete:
+        return self._space
+
+    def n(self) -> int:
+        return 1
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        return None, None, None
+
+    def action_to_id(self, destroy_idx, repair_idx, improvement_idx=None) -> int:
+        return 0
+
+    def sample(self) -> int:
+        return 0
+
+    def num_pairs(self) -> int:
+        return 1
+
+    def num_improvement(self) -> int:
+        return 0
+
+
 def _first(names: Sequence[str], prefix: str) -> Optional[str]:
     """Return the first name starting with `prefix`, or None."""
     return next((n for n in names if n.startswith(prefix)), None)

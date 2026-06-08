@@ -1009,6 +1009,7 @@ class ALNSEnvironment(gym.Env):
                 log_improvement=(
                     improvement_only
                     or self.algorithm_mode == "kisialiou"
+                    or improvement_idx_result is not None
                 ),
                 prev_current_cost=prev_current_cost,
                 prev_best_cost=prev_best_cost,
