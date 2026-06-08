@@ -366,6 +366,44 @@ impl RustALNSInterface {
         Ok(())
     }
 
+    /// Restrict weighted operator selection to specific operators by name.
+    ///
+    /// Any destroy/repair operator NOT in the supplied lists gets its weight
+    /// set to 0.0 and is excluded from roulette-wheel selection.  The engine
+    /// still tracks scores for the active operators and updates their weights
+    /// normally, so the adaptive mechanism works over the restricted pool.
+    fn restrict_operators(
+        &mut self,
+        destroy_names: Vec<String>,
+        repair_names: Vec<String>,
+    ) -> PyResult<()> {
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
+
+        let active_destroy: std::collections::HashSet<&str> =
+            destroy_names.iter().map(|s| s.as_str()).collect();
+        let active_repair: std::collections::HashSet<&str> =
+            repair_names.iter().map(|s| s.as_str()).collect();
+
+        for (i, label) in engine.destroy_operator_labels.iter().enumerate() {
+            if !active_destroy.contains(label.as_str()) {
+                if let Some(w) = engine.alns_context.destroy_operator_weights.get_mut(i) {
+                    *w = 0.0;
+                }
+            }
+        }
+        for (i, label) in engine.repair_operator_labels.iter().enumerate() {
+            if !active_repair.contains(label.as_str()) {
+                if let Some(w) = engine.alns_context.repair_operator_weights.get_mut(i) {
+                    *w = 0.0;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn create_snapshot(&self) -> PyResult<RustALNSSnapshot> {
         let engine = self
             .engine

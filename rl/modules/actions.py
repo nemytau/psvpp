@@ -485,7 +485,10 @@ class ImprovementChainActionSpace(BaseActionSpace):
         repair_operators: Sequence[str],
         improvement_operators: Optional[Sequence[str]] = None,
     ) -> None:
-        del destroy_operators, repair_operators
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        # Store the base 3+3 for engine operator restriction
+        self.destroy_operators, self.repair_operators = _base_destroy_repair(d_all, r_all)
 
         all_improvements = list(improvement_operators or [])
         name_to_idx = {name: idx for idx, name in enumerate(all_improvements)}
@@ -568,7 +571,9 @@ class ImprovementManyActionSpace(BaseActionSpace):
         repair_operators: Sequence[str],
         improvement_operators: Optional[Sequence[str]] = None,
     ) -> None:
-        del destroy_operators, repair_operators
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        self.destroy_operators, self.repair_operators = _base_destroy_repair(d_all, r_all)
 
         all_improvements = list(improvement_operators or [])
         name_to_idx = {name: idx for idx, name in enumerate(all_improvements)}

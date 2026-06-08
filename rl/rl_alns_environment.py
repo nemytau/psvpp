@@ -480,6 +480,18 @@ class ALNSEnvironment(gym.Env):
             if snapshot_override is not None:
                 init_result = self.alns.apply_snapshot(snapshot_override)
 
+            # Restrict weighted operator selection to the action module's pool.
+            # Any operator not listed gets weight 0 and is excluded from roulette
+            # selection — ensuring baseline and Kisialiou use the same operator
+            # set as the RL policy.
+            active_destroy = getattr(self.action_impl, "destroy_operators", None)
+            active_repair = getattr(self.action_impl, "repair_operators", None)
+            if active_destroy and active_repair:
+                self.alns.restrict_operators(
+                    list(active_destroy),
+                    list(active_repair),
+                )
+
             self._initial_snapshot = self.alns.create_snapshot()
             
             # Store initial cost for reward computation
