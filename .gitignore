@@ -161,6 +161,7 @@ rust_alns/output/
 # Benchmark experiment outputs (generated)
 output/benchmark_modes_matrix_*/
 output/rl_improvement_mvp_*/
+output/operator_usage_analysis_*/
 
 # Local archive scratch
 archives/
