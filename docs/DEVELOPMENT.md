@@ -20,12 +20,12 @@ This guide explains how to set up, develop, and contribute to the PSVPP project.
 
 2. **Set up Python environment (recommended):**
    ```bash
-   conda create -n rl311 python=3.11 -y
-   conda activate rl311
+   conda create -n py312 python=3.12 -y
+   conda activate py312
    python -m pip install -r requirements.txt
    ```
 
-   Project convention: use conda environment `rl311` for experiments and Rust/Python bindings.
+   Project convention: use conda environment `py312` for experiments and Rust/Python bindings.
 
 3. **Build Rust extension:**
    ```bash

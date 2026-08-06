@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PYTHONPATH="$ROOT"
-CONDA_PREFIX="/Users/timothy/opt/miniconda3/envs/rl311"
+CONDA_PREFIX="/Users/timothy/opt/miniconda3/envs/py312"
 PY="$CONDA_PREFIX/bin/python"
 
 TIMESTEPS=${1:-1000000}

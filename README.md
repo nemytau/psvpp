@@ -18,10 +18,10 @@ with Reinforcement Learning for maritime logistics optimization.
 
 ## 🚀 Quick Start
 
-Environment note: this project is expected to run in conda environment `rl311`.
+Environment note: this project is expected to run in conda environment `py312`.
 
 ```bash
-conda activate rl311
+conda activate py312
 ```
 
 1. **Build the Rust extension:**
