@@ -167,3 +167,6 @@ archives/
 
 # Local experiment notes (generated/scratch)
 docs/experiments/
+
+# Local reference material (not project source)
+/Kisia_PSVPPFC.pdf
