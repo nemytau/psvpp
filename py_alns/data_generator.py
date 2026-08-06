@@ -29,9 +29,10 @@ def generate_installation_dataframe(inst_sample_name):
         df = pd.DataFrame(index=range(inst_type_config['num']))
         df['name'] = inst_type_config['name_prefix'] + df.index.astype(str)
         df['inst_type'] = inst_type_config['type']
-        df['deck_demand'] = np.round(np.random.normal(inst_type_config['demand_mu'],
-                                                      inst_type_config['demand_sigma'],
-                                                      inst_type_config['num'])).astype(int)
+        df['deck_demand'] = np.maximum(1, np.round(np.random.normal(
+            inst_type_config['demand_mu'],
+            inst_type_config['demand_sigma'],
+            inst_type_config['num']))).astype(int)
         df['visit_frequency'] = np.random.choice(inst_type_config['frequencies']['values'],
                                                  size=inst_type_config['num'],
                                                  p=inst_type_config['frequencies']['probs'])

@@ -67,7 +67,11 @@ def to_native(value):
     return value
 
 
-def generate_samples(samples_per_config: int, sizes: Optional[Sequence[str]] = None) -> None:
+def generate_samples(
+    samples_per_config: int,
+    sizes: Optional[Sequence[str]] = None,
+    only_split: Optional[str] = None,
+) -> None:
     base_template = generate_base()
     longitude = float(getattr(base_template, "longitude", 0.0))
     latitude = float(getattr(base_template, "latitude", 0.0))
@@ -90,6 +94,10 @@ def generate_samples(samples_per_config: int, sizes: Optional[Sequence[str]] = N
     selected_configs = [
         name for name in CONFIG_SEQUENCE if CONFIG_LOOKUP[name][0] in size_filter
     ]
+    if only_split:
+        selected_configs = [
+            name for name in selected_configs if CONFIG_LOOKUP[name][1] == only_split
+        ]
 
     for cfg_index, config_name in enumerate(selected_configs):
         summary[config_name] = {"samples": samples_per_config}
@@ -149,12 +157,22 @@ def parse_args() -> argparse.Namespace:
         choices=sorted(DATASET_CONFIGS.keys()),
         help="Restrict generation to the provided dataset sizes",
     )
+    parser.add_argument(
+        "--only-split",
+        choices=("train", "test"),
+        default=None,
+        help="Restrict generation to only the train or only the test split",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    generate_samples(samples_per_config=max(1, args.samples), sizes=args.sizes)
+    generate_samples(
+        samples_per_config=max(1, args.samples),
+        sizes=args.sizes,
+        only_split=args.only_split,
+    )
 
 
 if __name__ == "__main__":

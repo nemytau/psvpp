@@ -115,6 +115,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional tag appended to run_id",
     )
+    parser.add_argument(
+        "--modes",
+        default=None,
+        help=(
+            "Comma-separated subset of mode labels to run (default: all 6). "
+            "Example: baseline,kisialiou_original"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -297,7 +305,7 @@ def run_mode_size_with_time_budget(
 
         if proc is not None and proc.returncode != 0:
             raise RuntimeError(
-                f"{mode.mode_label} size={size} dataset={dataset_path.name} restart={restart_count} failed with exit code {proc.returncode}; see {console_path}"
+                f"{mode.mode_label} size={size} dataset={dataset_path.name} restart={restart_count} failed with exit code {proc.returncode}; see {combined_console_path}"
             )
 
         if results_path.exists():
@@ -541,6 +549,17 @@ def run() -> None:
     )
 
     mode_specs = get_mode_specs()
+    if args.modes:
+        requested = [m.strip() for m in args.modes.split(",") if m.strip()]
+        available = {spec.mode_label: spec for spec in mode_specs}
+        unknown = [m for m in requested if m not in available]
+        if unknown:
+            raise ValueError(
+                f"Unknown mode label(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(available)}"
+            )
+        mode_specs = [available[m] for m in requested]
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = f"__{args.run_tag}" if args.run_tag else ""
     run_id = f"benchmark_modes_matrix_{ts}{suffix}"
