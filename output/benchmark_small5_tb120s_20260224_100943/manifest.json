@@ -1,9 +1,0 @@
-{
-  "run_id": "benchmark_small5_tb120s_20260224_100943",
-  "output_dir": "/Users/timothy/Documents/Documents/asspirantura/Projects/psvpp/output/benchmark_small5_tb120s_20260224_100943",
-  "log_dir": "/Users/timothy/Documents/Documents/asspirantura/Projects/psvpp/logs/benchmark_small5_tb120s_20260224_100943",
-  "combined_results": "/Users/timothy/Documents/Documents/asspirantura/Projects/psvpp/output/benchmark_small5_tb120s_20260224_100943/combined_results.json",
-  "analysis_json": "/Users/timothy/Documents/Documents/asspirantura/Projects/psvpp/output/benchmark_small5_tb120s_20260224_100943/analysis.json",
-  "analysis_txt": "/Users/timothy/Documents/Documents/asspirantura/Projects/psvpp/output/benchmark_small5_tb120s_20260224_100943/analysis.txt",
-  "num_result_rows": 140
-}
