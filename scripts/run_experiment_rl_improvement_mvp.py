@@ -223,6 +223,19 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="If set, run exactly this many restarts per dataset/seed for all evaluation modes",
     )
+    parser.add_argument(
+        "--eval-runtime-budget-seconds",
+        type=float,
+        default=None,
+        help=(
+            "In match_kisialiou mode, cap the Kisialiou reference run's own wall time at this "
+            "many seconds (in addition to --eval-runtime-reference-restarts), so a slow "
+            "operator mix (e.g. large instances) can't silently blow up total eval time. "
+            "Baseline/RL still match whatever wall time Kisialiou actually took, so this stays "
+            "a genuine wall-time comparison -- it just bounds the reference measurement itself. "
+            "Default (None) preserves the old unbounded-reference behavior."
+        ),
+    )
     parser.add_argument("--eval-seeds", default="42,43,44,45,46")
     parser.add_argument(
         "--action-module",
@@ -711,6 +724,7 @@ def _build_run_manifest(
                     else "kisialiou_runtime_seconds_per_dataset_seed"
                 ),
                 "reference_restarts": args.eval_runtime_reference_restarts,
+                "reference_runtime_budget_seconds": args.eval_runtime_budget_seconds,
                 "fixed_restarts": args.eval_fixed_restarts,
                 "minimum_seconds": 1e-6,
             },
@@ -1008,7 +1022,11 @@ def main() -> None:
                 action_module=args.action_module,
                 state_module=args.state_module,
                 reward_module=args.reward_module,
-                target_runtime_seconds=None,
+                target_runtime_seconds=(
+                    args.eval_runtime_budget_seconds
+                    if args.eval_fixed_restarts is None and args.eval_runtime_mode == "match_kisialiou"
+                    else None
+                ),
                 chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
                 reference_restarts=(
                     max(1, int(args.eval_fixed_restarts))
@@ -1360,6 +1378,7 @@ def main() -> None:
         f"eval_iteration_cap: {eval_iteration_cap}",
         f"eval_restart_max_iterations: {args.eval_restart_max_iterations}",
         f"eval_runtime_reference_restarts: {args.eval_runtime_reference_restarts}",
+        f"eval_runtime_budget_seconds: {args.eval_runtime_budget_seconds}",
         f"eval_fixed_restarts: {args.eval_fixed_restarts}",
         f"run_manifest: {manifest_path}",
         "",
