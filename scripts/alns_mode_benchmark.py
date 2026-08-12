@@ -92,11 +92,11 @@ def run_episode(
         env_kwargs["action_module"] = "op_pair_v1"
     elif algorithm_mode in ("baseline", "kisialiou"):
         # Both modes must use the adaptive weighted engine for destroy/repair
-        # selection (see rl/modules/actions.py:BackboneActionSpace). Without this,
-        # ALNSEnvironment falls back to its default action module (op_pair_v1),
-        # which is a *random*-pair action space intended for RL comparisons, not
-        # a real baseline -- see op_pair_v1's own docstring.
-        env_kwargs["action_module"] = "backbone_v1"
+        # selection (see rl/modules/actions.py:AdaptiveWeightedActionSpace).
+        # Without this, ALNSEnvironment falls back to its default action module
+        # (op_pair_v1), which is a *random*-pair action space intended for RL
+        # comparisons, not a real baseline -- see op_pair_v1's own docstring.
+        env_kwargs["action_module"] = "adaptive_weighted_v1"
     if operator_logging_dir:
         env_kwargs["operator_logging_dir"] = operator_logging_dir
 

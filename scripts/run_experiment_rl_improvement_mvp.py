@@ -215,8 +215,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--baseline-action-module",
-        default="backbone_v1",
-        help="Baseline action space key (default: backbone_v1 = adaptive weighted ALNS)",
+        default="adaptive_weighted_v1",
+        help="Baseline action space key (default: adaptive_weighted_v1 = adaptive weighted ALNS)",
     )
     parser.add_argument(
         "--state-module",

@@ -10,7 +10,7 @@ reference restarts.
 ### Common setup
 - Training: 200 000 PPO timesteps, 50 iterations/episode, seed 42, small dataset
 - Eval: `match_kisialiou` runtime mode, 5 eval seeds (42–46), 5 datasets
-- **Baseline**: adaptive weighted ALNS (`backbone_v1`) — engine selects destroy/repair
+- **Baseline**: adaptive weighted ALNS (`adaptive_weighted_v1`) — engine selects destroy/repair
   via roulette-wheel with weights updated every 10 iterations (σ1=33, σ2=9, σ3=3, γ=0.2).
   No improvement operators.
 - **Kisialiou**: full Kisialiou ALNS — adaptive backbone + fixed improvement sequence
@@ -40,7 +40,7 @@ reference restarts.
 | Training timesteps | 200 000 |
 
 **Action details**: RL picks one of 9 D×R pairs each step. Engine does not apply
-any improvement operator. Baseline also runs without improvement (backbone_v1).
+any improvement operator. Baseline also runs without improvement (adaptive_weighted_v1).
 
 **Expected finding**: RL should learn to prefer sophisticated operators (shaw + k_regret)
 over simpler ones (random + deep_greedy). Win rate vs baseline indicates whether RL
@@ -149,7 +149,7 @@ before the current series:
   per-voyage in an outer loop; fixed: single call ranks all voyages)
 - `KRegretInsertion.search_k` was a no-op for regret computation (fixed: removed
   redundant variants, kept single k=2 and k=3)
-- Baseline used random explicit pair selection (fixed: `backbone_v1` uses adaptive
+- Baseline used random explicit pair selection (fixed: `adaptive_weighted_v1` uses adaptive
   weighted engine selection)
 - Improvement operators missing from logs for D×R×I triple actions (fixed:
   `log_improvement` now true whenever `improvement_idx_result is not None`)

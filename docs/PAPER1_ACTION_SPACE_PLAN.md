@@ -21,7 +21,7 @@ Four experiments are already defined and have been run once, on the **small** da
 - **Exp 3** — fixed-pair benchmark (no RL), sanity check that adaptive selection beats any single
   fixed destroy/repair pair.
 
-Baselines are `backbone_v1` (adaptive weighted ALNS, no improvement) and `kisialiou` (fixed
+Baselines are `adaptive_weighted_v1` (adaptive weighted ALNS, no improvement) and `kisialiou` (fixed
 improvement sequence after every step). As of `ada50ff` (2026-06-08), baseline and Kisialiou are
 restricted to the same 3×3 destroy/repair pool as the RL experiments, so the comparison is
 apples-to-apples on operator choice.
@@ -110,8 +110,8 @@ numbers are in.
   2026-08-05/06 entries below claimed.** Those entries (signal-to-noise explanation, "reconfirmed
   on two independent runs") are **retracted** — see section 7. Root cause was a real bug:
   `alns_mode_benchmark.py` was calling `op_pair_v1` (random pair selection) instead of
-  `backbone_v1` (adaptive weighted) for "baseline" mode, so there was never any real weight update
-  happening to observe. With that fixed (plus the separate `BackboneActionSpace` pool-restriction
+  `adaptive_weighted_v1` (adaptive weighted) for "baseline" mode, so there was never any real weight update
+  happening to observe. With that fixed (plus the separate `AdaptiveWeightedActionSpace` pool-restriction
   bug in section 6, plus a full Kisialiou-paper calibration pass), real adaptive weighting shows
   strong divergence — this actually answers the original June 9 question directly: yes, the
   adaptive mechanism does produce real, non-uniform operator preference, and on large instances it
@@ -187,11 +187,11 @@ immediate next actions are now the open follow-ups listed at the end of section 
 that used to be here. Phase 0 housekeeping (`git status` cleanup) is still outstanding and still
 worth doing before more runs pile up.
 
-## 6. Known issue — BackboneActionSpace pool-restriction bug (found 2026-08-07)
+## 6. Known issue — AdaptiveWeightedActionSpace pool-restriction bug (found 2026-08-07)
 
 `rl_alns_environment.py` restricts the adaptive engine's operator pool to the same 3×3 set used by
 `op_pair_v1`/RL/Exp 3 by reading `action_impl.destroy_operators`/`.repair_operators` and calling
-`restrict_operators()`. `BackboneActionSpace` (`backbone_v1`) never filters those lists down,
+`restrict_operators()`. `AdaptiveWeightedActionSpace` (`adaptive_weighted_v1`) never filters those lists down,
 though — it stores the full registry as-is (~30 destroy variants, 7 repair variants), unlike
 `OpPairV1ActionSpace`, which correctly calls the `_base_destroy_repair()` helper
 (`rl/modules/actions.py`) to select just the 3 canonical destroy / 3 canonical repair operators. So
@@ -211,12 +211,12 @@ which does correctly restrict to the 3×3 pool. That data is clean and stands as
 
 **Resolved answer to the open question above:** it wasn't this bug that caused the flat
 `085142`/`134054` operator-usage pattern — it was a *different* bug, `alns_mode_benchmark.py`
-using `op_pair_v1` (random selection) instead of `backbone_v1` for "baseline" mode entirely (see
+using `op_pair_v1` (random selection) instead of `adaptive_weighted_v1` for "baseline" mode entirely (see
 section 7). Both bugs are now fixed.
 
-**Fix applied 2026-08-07:** `BackboneActionSpace` now calls `_base_destroy_repair()` the same way
+**Fix applied 2026-08-07:** `AdaptiveWeightedActionSpace` now calls `_base_destroy_repair()` the same way
 `OpPairV1ActionSpace` does. The old unrestricted-pool behavior is preserved deliberately as a
-separate action module, `backbone_full_v1`, for anyone who wants it.
+separate action module, `adaptive_weighted_full_v1`, for anyone who wants it.
 
 **Status: ✅ resolved.** See section 7 for the calibrated results this enabled.
 
@@ -225,7 +225,7 @@ separate action module, `backbone_full_v1`, for anyone who wants it.
 **This section supersedes sections 4-6's 2026-08-05/06 material.** Full source:
 `docs/experiments/diary_entry_calibrated_baseline_and_exp3.md`. Three bugs were fixed together to
 get here: (1) `alns_mode_benchmark.py` was using `op_pair_v1` (random pair selection) for
-"baseline"/"kisialiou" instead of adaptive-weighted `backbone_v1`; (2) `BackboneActionSpace` never
+"baseline"/"kisialiou" instead of adaptive-weighted `adaptive_weighted_v1`; (2) `AdaptiveWeightedActionSpace` never
 restricted the operator pool to 3×3 (section 6); (3) a full calibration pass against Kisialiou,
 Gribkovskaia & Laporte (2018) Table 1 — fixed a cooling-schedule formula bug, corrected γ
 (0.2→0.6), σ (33/9/3→25/15/20), δ (10→50/100 by ρ), added paper-calibrated Shaw/Worst/Random-

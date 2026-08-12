@@ -121,9 +121,9 @@ class OperatorPairActionSpace(BaseActionSpace):
         return self._num_improvement
 
 
-@register_action("backbone_v1")
-class BackboneActionSpace(BaseActionSpace):
-    """Single-action space that always triggers the adaptive weighted backbone,
+@register_action("adaptive_weighted_v1")
+class AdaptiveWeightedActionSpace(BaseActionSpace):
+    """Single-action space that always triggers the adaptive weighted engine,
     restricted to the same 3x3 destroy/repair pool as op_pair_v1 (see
     _base_destroy_repair) -- matching Kisialiou's original paper's operator
     selection, and ensuring baseline/Kisialiou/RL are all comparing the same
@@ -137,8 +137,10 @@ class BackboneActionSpace(BaseActionSpace):
     CAUTION: this class previously stored the *unrestricted* full operator
     catalog (a bug -- restrict_operators() in rl_alns_environment.py became a
     no-op as a result). If you need that old unrestricted-pool behavior
-    (e.g. to reproduce a specific historical run), use backbone_full_v1
-    instead -- do not "fix" this class back to unrestricted.
+    (e.g. to reproduce a specific historical run), use adaptive_weighted_full_v1
+    instead -- do not "fix" this class back to unrestricted. (Formerly named
+    backbone_v1 / BackboneActionSpace -- renamed 2026-08-12 for clarity; old
+    run manifests may still reference "backbone_v1" by the pre-rename name.)
     """
 
     version = "2.0"
@@ -180,17 +182,19 @@ class BackboneActionSpace(BaseActionSpace):
         return 0
 
 
-@register_action("backbone_full_v1")
-class BackboneFullActionSpace(BaseActionSpace):
-    """Single-action space that triggers the adaptive weighted backbone over
+@register_action("adaptive_weighted_full_v1")
+class AdaptiveWeightedFullActionSpace(BaseActionSpace):
+    """Single-action space that triggers the adaptive weighted engine over
     the FULL registered operator catalog (every versioned variant), not the
-    restricted 3x3 pool. This is what "backbone_v1" incorrectly did before
-    the pool-restriction bug was found and fixed (2026-08-07) -- kept here,
-    honestly named, as a deliberate "adaptive search over the whole catalog"
-    option, distinct from the canonical restricted baseline (backbone_v1).
+    restricted 3x3 pool. This is what "adaptive_weighted_v1" (formerly
+    backbone_v1) incorrectly did before the pool-restriction bug was found
+    and fixed (2026-08-07) -- kept here, honestly named, as a deliberate
+    "adaptive search over the whole catalog" option, distinct from the
+    canonical restricted baseline (adaptive_weighted_v1).
 
     Action 0 → (None, None, None): destroy/repair chosen via weighted
-    roulette over ALL registered operators (no restriction).
+    roulette over ALL registered operators (no restriction). (Formerly named
+    backbone_full_v1 / BackboneFullActionSpace -- renamed 2026-08-12.)
     """
 
     version = "1.0"

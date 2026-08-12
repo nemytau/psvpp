@@ -224,7 +224,7 @@ class ALNSEnvironment(gym.Env):
             improvement_operators=self.improvement_operators,
         )
         if self.action_module_name in (
-            "backbone_v1",
+            "adaptive_weighted_v1",
             "op_pair_v1",
             "op_triple_v1",
             "improvement_chain_v1",
