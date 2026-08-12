@@ -145,17 +145,33 @@ def _collect_training_operator_usage(log_dir: Path) -> Dict[str, Any]:
 
 
 def _collect_action_space_trace(*, train_env: ALNSEnvironment) -> Dict[str, Any]:
+    # NOTE: reads from action_impl (the actual restricted operator set the
+    # action space uses), not train_env (the full unrestricted engine
+    # catalog) -- these differ for every action module except the
+    # deliberately-unrestricted adaptive_weighted_full_v1. Falling back to
+    # train_env here previously made this trace misleadingly report e.g. 36
+    # destroy operators for op_pair_v1, which only ever uses 3.
     action_impl = train_env.action_impl
+
+    def _pick(attr: str) -> list:
+        impl_value = getattr(action_impl, attr, None)
+        if impl_value is not None:
+            return list(impl_value)
+        return list(getattr(train_env, attr, []))
+
+    destroy_operators = _pick("destroy_operators")
+    repair_operators = _pick("repair_operators")
+    improvement_operators = _pick("improvement_operators")
     action_space: Dict[str, Any] = {
         "module": getattr(train_env, "action_module_name", None),
         "version": getattr(action_impl, "version", None),
         "space_n": int(action_impl.n()),
-        "num_destroy": int(getattr(train_env, "num_destroy", len(getattr(train_env, "destroy_operators", [])))),
-        "num_repair": int(getattr(train_env, "num_repair", len(getattr(train_env, "repair_operators", [])))),
-        "num_improvement": int(getattr(train_env, "num_improvement", len(getattr(train_env, "improvement_operators", [])))),
-        "destroy_operators": list(getattr(train_env, "destroy_operators", [])),
-        "repair_operators": list(getattr(train_env, "repair_operators", [])),
-        "improvement_operators": list(getattr(train_env, "improvement_operators", [])),
+        "num_destroy": len(destroy_operators),
+        "num_repair": len(repair_operators),
+        "num_improvement": len(improvement_operators),
+        "destroy_operators": destroy_operators,
+        "repair_operators": repair_operators,
+        "improvement_operators": improvement_operators,
     }
     if hasattr(action_impl, "num_pairs"):
         action_space["num_pairs"] = int(action_impl.num_pairs())
