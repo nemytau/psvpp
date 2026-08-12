@@ -58,9 +58,10 @@ class ALNSEnvironment(gym.Env):
         seed: int = 42,
         max_iterations: int = 100,
         temperature: float = 500.0,
-        theta: float = 0.9,
-        weight_update_interval: int = 10,
+        theta: float = 7.0,
+        weight_update_interval: Optional[int] = None,
         aggressive_search_factor: float = 0.85,
+        size_bucket: str = "large",
         num_episodes: int = 1,
         problem_instance_paths: Optional[Sequence[str]] = None,
         problem_sampling_strategy: str = "round_robin",
@@ -128,7 +129,14 @@ class ALNSEnvironment(gym.Env):
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.theta = theta
-        self.weight_update_interval = weight_update_interval
+        # delta (weight-update interval): 50 if rho<500, 100 if rho>=500,
+        # per Kisialiou et al. (2018) Table 1, unless explicitly overridden.
+        self.weight_update_interval = (
+            weight_update_interval
+            if weight_update_interval is not None
+            else (50 if self.max_iterations < 500 else 100)
+        )
+        self.size_bucket = size_bucket if size_bucket in ("small", "large") else "large"
         self.aggressive_search_factor = float(aggressive_search_factor)
         self.num_episodes = max(1, int(num_episodes))
         self.current_restart = 0
@@ -210,12 +218,20 @@ class ALNSEnvironment(gym.Env):
             )
             self.baseline_improvement_idx = 0 if self.num_improvement > 0 else None
 
-        self.action_impl = create_action_space(
-            self.action_module_name,
+        _action_kwargs = dict(
             destroy_operators=self.destroy_operators,
             repair_operators=self.repair_operators,
             improvement_operators=self.improvement_operators,
         )
+        if self.action_module_name in (
+            "backbone_v1",
+            "op_pair_v1",
+            "op_triple_v1",
+            "improvement_chain_v1",
+            "improvement_many_v1",
+        ):
+            _action_kwargs["size_bucket"] = self.size_bucket
+        self.action_impl = create_action_space(self.action_module_name, **_action_kwargs)
         self.action_space = self.action_impl.gym_space()
 
         self.state_encoder = create_state_encoder(self.state_module_name)
@@ -1403,7 +1419,6 @@ class ALNSEnvironment(gym.Env):
             "accepted": bool(result.get("accepted", False)),
             "is_new_best": bool(result.get("is_new_best", False)),
             "elapsed_ms": int(result.get("elapsed_ms", 0)),
-            "operator_elapsed_ms": int(result.get("elapsed_ms", 0)),
             "temperature": float(result.get("temperature", 0.0)),
             "destroy_idx": destroy_idx_result if destroy_idx_result is not None else -1,
             "repair_idx": repair_idx_result if repair_idx_result is not None else -1,
@@ -1437,6 +1452,7 @@ class ALNSEnvironment(gym.Env):
                 "cost_after": None,
                 "cost_delta": None,
                 "best_cost_delta": None,
+                "operator_elapsed_ms": float(result.get("destroy_elapsed_ns", 0)) / 1e6,
             }
             self._queue_operator_log_record(destroy_record, current_best_cost)
 
@@ -1459,6 +1475,7 @@ class ALNSEnvironment(gym.Env):
                 "cost_after": float(cost_after_repair),
                 "cost_delta": float(cost_after_repair - cost_after_destroy),
                 "best_cost_delta": _consume_step_best_delta(float(cost_after_repair)),
+                "operator_elapsed_ms": float(result.get("repair_elapsed_ns", 0)) / 1e6,
             }
             self._queue_operator_log_record(repair_record, current_best_cost)
 
@@ -1509,6 +1526,11 @@ class ALNSEnvironment(gym.Env):
                         except (TypeError, ValueError):
                             individual_cost_delta = float(current_cost) - float(prev_current_cost)
 
+                    try:
+                        step_elapsed_ms = float(item.get("elapsed_ns", 0)) / 1e6
+                    except (TypeError, ValueError):
+                        step_elapsed_ms = 0.0
+
                     improvement_step_metrics.append(
                         {
                             "operator_index": idx,
@@ -1518,6 +1540,7 @@ class ALNSEnvironment(gym.Env):
                             "cost_after": cost_after,
                             "cost_delta": individual_cost_delta,
                             "best_cost_delta": _consume_step_best_delta(cost_after),
+                            "elapsed_ms": step_elapsed_ms,
                         }
                     )
 
@@ -1538,6 +1561,7 @@ class ALNSEnvironment(gym.Env):
                         "best_cost_delta": float(step["best_cost_delta"]),
                         "sequence_position": seq_pos,
                         "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
+                        "operator_elapsed_ms": float(step["elapsed_ms"]),
                     }
                     self._queue_operator_log_record(improvement_record, current_best_cost)
 
@@ -1609,6 +1633,10 @@ class ALNSEnvironment(gym.Env):
                     "best_cost_delta": individual_best_cost_delta,
                     "sequence_position": seq_pos,
                     "sequence_call_id": f"{sequence_call_prefix}:{seq_pos}",
+                    # No per-step timing available on this legacy fallback path (Rust doesn't
+                    # report improvement_step_metrics here); whole-iteration time is the best
+                    # available estimate, not a true per-operator duration.
+                    "operator_elapsed_ms": int(result.get("elapsed_ms", 0)),
                 }
                 self._queue_operator_log_record(improvement_record, current_best_cost)
 
