@@ -119,9 +119,23 @@ outperform simpler ones (random removal + greedy insertion) regardless of learni
 solution quality. Confirms which pair performs best individually and shows
 whether adaptive ALNS outperforms any fixed pair.
 
-**Expected finding**: shaw_removal + k_regret achieves highest quality among
-fixed pairs. Adaptive ALNS baseline outperforms all fixed pairs due to dynamic
-operator selection learning over the run.
+**Original expectation (superseded 2026-08-07 — see below)**: shaw_removal + k_regret achieves
+highest quality among fixed pairs. Adaptive ALNS baseline outperforms all fixed pairs due to
+dynamic operator selection learning over the run.
+
+**Actual result (2026-08-07, first fully-calibrated run, small size only —
+`benchmark_modes_matrix_20260807_180302`, full details in
+`docs/experiments/diary_entry_calibrated_baseline_and_exp3.md`)**: the opposite pattern on both
+counts. `worst_removal` + `k_regret_3` ranks *best* of all 9 pairs (+0.05% vs adaptive baseline —
+essentially a tie, nominally beating it), and `shaw_removal` pairs rank *worst* of the 9. Every
+fixed pair lands within ±0.33% of the full adaptive baseline on small instances — switching
+operators buys essentially nothing here, which does still support the experiment's original
+question ("is switching necessary, or does picking the best pair suffice?") even though it
+guessed wrong about which pair. Destroy-operator choice drives ~9x more variation than
+repair-operator choice. Not yet run on medium/large — this conclusion is small-instance-only for
+now; operator effectiveness may not be scale-invariant (see Finding 1 in the diary entry, which
+found a strong, size-specific destroy-operator preference on large instances in the adaptive
+baseline).
 
 ---
 
