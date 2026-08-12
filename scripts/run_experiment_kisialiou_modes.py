@@ -22,6 +22,7 @@ class ModeSpec:
     mode_label: str
     algorithm_mode: str
     kisialiou_improvement_sequence: Optional[List[str]] = None
+    fixed_pair_idx: Optional[int] = None
 
 
 def safe_float(value) -> float:
@@ -126,6 +127,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# op_pair_v1 pair indexing (see rl/modules/actions.py:OpPairV1ActionSpace /
+# _base_destroy_repair): destroy order [shaw_removal, random_visit_removal,
+# worst_visit_removal] x repair order [deep_greedy_rank_1, k_regret_2, k_regret_3],
+# pair_idx = destroy_local * 3 + repair_local. Destroy operators resolve to the
+# Kisialiou-calibrated variant for the run's size_bucket (small/large per
+# Kisialiou et al. 2018 Table 1), not a literal "_v1" -- see alns_mode_benchmark.py.
+FIXED_PAIR_LABELS = [
+    "fixed_shaw_greedy",
+    "fixed_shaw_kregret2",
+    "fixed_shaw_kregret3",
+    "fixed_random_greedy",
+    "fixed_random_kregret2",
+    "fixed_random_kregret3",
+    "fixed_worst_greedy",
+    "fixed_worst_kregret2",
+    "fixed_worst_kregret3",
+]
+
+
 def get_mode_specs() -> List[ModeSpec]:
     return [
         ModeSpec(mode_label="baseline", algorithm_mode="baseline", kisialiou_improvement_sequence=None),
@@ -154,6 +174,9 @@ def get_mode_specs() -> List[ModeSpec]:
                 "voyage_number_reduction",
             ],
         ),
+    ] + [
+        ModeSpec(mode_label=label, algorithm_mode="baseline", fixed_pair_idx=idx)
+        for idx, label in enumerate(FIXED_PAIR_LABELS)
     ]
 
 
@@ -243,6 +266,9 @@ def run_mode_size_with_time_budget(
                     ",".join(mode.kisialiou_improvement_sequence),
                 ]
             )
+
+        if mode.fixed_pair_idx is not None:
+            cmd.extend(["--fixed-pair-idx", str(mode.fixed_pair_idx)])
 
         remaining = time_budget - elapsed
         

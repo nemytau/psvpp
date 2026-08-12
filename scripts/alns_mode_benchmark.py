@@ -57,6 +57,7 @@ def run_episode(
     operator_logging_dir: Optional[str] = None,
     mode_label: Optional[str] = None,
     size_label: Optional[str] = None,
+    fixed_pair_idx: Optional[int] = None,
 ) -> Dict[str, Any]:
     # Extract dataset filename for operator logging
     dataset_name = Path(problem_path).stem if problem_path else None
@@ -78,7 +79,24 @@ def run_episode(
         "force_baseline_improvement": False,
         "baseline_improvement_idx": None,
         "kisialiou_improvement_sequence": kisialiou_improvement_sequence,
+        # Kisialiou et al. (2018) Table 1: destroy-operator removal-fraction
+        # calibration depends on instance size (<15 installations vs >=15).
+        # Our "small" size (10 installations) is the only one below that
+        # threshold; medium (20) and large (40) both use the "large" bucket.
+        "size_bucket": "small" if size_label == "small" else "large",
     }
+    if fixed_pair_idx is not None:
+        # Force one specific destroy/repair pair for every iteration of the run
+        # (no adaptive weighting, no random pair switching) -- Exp 3, testing
+        # whether a single well-chosen pair matches or beats adaptive selection.
+        env_kwargs["action_module"] = "op_pair_v1"
+    elif algorithm_mode in ("baseline", "kisialiou"):
+        # Both modes must use the adaptive weighted engine for destroy/repair
+        # selection (see rl/modules/actions.py:BackboneActionSpace). Without this,
+        # ALNSEnvironment falls back to its default action module (op_pair_v1),
+        # which is a *random*-pair action space intended for RL comparisons, not
+        # a real baseline -- see op_pair_v1's own docstring.
+        env_kwargs["action_module"] = "backbone_v1"
     if operator_logging_dir:
         env_kwargs["operator_logging_dir"] = operator_logging_dir
 
@@ -90,15 +108,23 @@ def run_episode(
     done = False
     truncated = False
 
+    if fixed_pair_idx is not None:
+        num_pairs = int(env.action_impl.num_pairs())
+        if not (0 <= fixed_pair_idx < num_pairs):
+            raise ValueError(f"fixed_pair_idx {fixed_pair_idx} out of range [0, {num_pairs})")
+
     while not done and not truncated and steps < max_iterations:
-        action = env.action_space.sample()
-        if hasattr(env, "action_impl") and hasattr(env.action_impl, "num_pairs"):
-            try:
-                num_pairs = int(env.action_impl.num_pairs())
-            except Exception:
-                num_pairs = -1
-            if num_pairs and num_pairs > 0:
-                action = int(rng.integers(0, num_pairs))
+        if fixed_pair_idx is not None:
+            action = fixed_pair_idx
+        else:
+            action = env.action_space.sample()
+            if hasattr(env, "action_impl") and hasattr(env.action_impl, "num_pairs"):
+                try:
+                    num_pairs = int(env.action_impl.num_pairs())
+                except Exception:
+                    num_pairs = -1
+                if num_pairs and num_pairs > 0:
+                    action = int(rng.integers(0, num_pairs))
         obs, reward, done, truncated, info = env.step(action)
         steps += 1
 
@@ -146,6 +172,15 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Comma-separated ordered improvement operator names for kisialiou override",
+    )
+    parser.add_argument(
+        "--fixed-pair-idx",
+        type=int,
+        default=None,
+        help=(
+            "Force one specific destroy/repair pair (0-8, op_pair_v1 indexing) for "
+            "every iteration instead of adaptive/random selection (Exp 3)."
+        ),
     )
     parser.add_argument(
         "--iterations",
@@ -253,6 +288,7 @@ def main() -> None:
             operator_logging_dir=args.log_dir,
             mode_label=mode_label,
             size_label=size,
+            fixed_pair_idx=args.fixed_pair_idx,
         )
         wall_time = time.perf_counter() - start_time
 
