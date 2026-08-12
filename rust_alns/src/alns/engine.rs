@@ -79,6 +79,8 @@ pub struct ALNSMetrics {
     pub destroy_weights: Vec<f64>,
     pub repair_weights: Vec<f64>,
     pub elapsed_ms: u128,
+    pub destroy_elapsed_ns: u128,
+    pub repair_elapsed_ns: u128,
 }
 
 #[derive(Clone)]
@@ -89,6 +91,7 @@ pub struct ALNSImprovementStepMetric {
     pub cost_before: f64,
     pub cost_after: f64,
     pub cost_delta: f64,
+    pub elapsed_ns: u128,
 }
 
 #[derive(Clone)]
@@ -310,8 +313,8 @@ impl ALNSEngine {
             destroy_operator_counts: vec![0; n_destroy],
             repair_operator_counts: vec![0; n_repair],
             cost_history: Vec::new(),
-            reaction_factor: 0.2,
-            reward_values: vec![33.0, 9.0, 3.0],
+            reaction_factor: 0.6,
+            reward_values: vec![25.0, 15.0, 20.0],
         };
 
         let initial_cost = initial_solution.total_cost;
@@ -489,6 +492,8 @@ impl ALNSEngine {
             destroy_weights: vec![],
             repair_weights: vec![],
             elapsed_ms: 0,
+            destroy_elapsed_ns: 0,
+            repair_elapsed_ns: 0,
         }
     }
 
@@ -513,8 +518,8 @@ impl ALNSEngine {
             destroy_operator_counts: vec![0; n_destroy],
             repair_operator_counts: vec![0; n_repair],
             cost_history: Vec::new(),
-            reaction_factor: 0.2,
-            reward_values: vec![33.0, 9.0, 3.0],
+            reaction_factor: 0.6,
+            reward_values: vec![25.0, 15.0, 20.0],
         };
 
         self.initial_cost = initial_solution.total_cost;
@@ -546,6 +551,29 @@ impl ALNSEngine {
                 },
             ));
         }
+        // Kisialiou et al. (2018) Table 1 calibration: alpha=0.6, beta=0.4,
+        // phi=0.3, p=100. xi range depends on instance size (Section 3.3):
+        // <15 installations uses [0.18,0.23], >=15 uses [0.13,0.18].
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::shaw_removal::ShawRemoval {
+                xi_min: 0.18,
+                xi_max: 0.23,
+                p: 100.0,
+                alpha: 0.6,
+                beta: 0.4,
+                phi: 0.3,
+            },
+        ));
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::shaw_removal::ShawRemoval {
+                xi_min: 0.13,
+                xi_max: 0.18,
+                p: 100.0,
+                alpha: 0.6,
+                beta: 0.4,
+                phi: 0.3,
+            },
+        ));
         for idx in 0..10 {
             let step = idx as f64;
             registry.add_destroy_operator(Box::new(
@@ -555,6 +583,19 @@ impl ALNSEngine {
                 },
             ));
         }
+        // Kisialiou calibration (no determinism parameter for random removal).
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
+                xi_min: 0.18,
+                xi_max: 0.23,
+            },
+        ));
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
+                xi_min: 0.13,
+                xi_max: 0.18,
+            },
+        ));
         for idx in 0..10 {
             let step = idx as f64;
             registry.add_destroy_operator(Box::new(
@@ -565,6 +606,21 @@ impl ALNSEngine {
                 },
             ));
         }
+        // Kisialiou calibration: p=100, same xi ranges as Shaw removal above.
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
+                xi_min: 0.18,
+                xi_max: 0.23,
+                p: 100.0,
+            },
+        ));
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
+                xi_min: 0.13,
+                xi_max: 0.18,
+                p: 100.0,
+            },
+        ));
         // v1..v5: candidate_rank 1..5 (rank of insertion position selected per visit)
         for candidate_rank in 1..=5 {
             registry.add_repair_operator(Box::new(
@@ -592,6 +648,8 @@ impl ALNSEngine {
                 lambda_max: ((idx + 1) * 8) as u32,
             }));
         }
+        // Kisialiou et al. (2018) Table 1 calibration: lambda_max=35.
+        registry.add_improvement_operator(Box::new(FleetAndCostReduction { lambda_max: 35 }));
         // v1..v9: max_moves = 1..9; v10: unlimited
         for idx in 0..10usize {
             let max_moves = if idx < 9 { Some(idx + 1) } else { None };
@@ -610,12 +668,18 @@ impl ALNSEngine {
         for idx in 1..=10 {
             destroy_operators.push(format!("shaw_removal_v{}", idx));
         }
+        destroy_operators.push("shaw_removal_kisialiou_small_v1".to_string());
+        destroy_operators.push("shaw_removal_kisialiou_large_v1".to_string());
         for idx in 1..=10 {
             destroy_operators.push(format!("random_visit_removal_v{}", idx));
         }
+        destroy_operators.push("random_visit_removal_kisialiou_small_v1".to_string());
+        destroy_operators.push("random_visit_removal_kisialiou_large_v1".to_string());
         for idx in 1..=10 {
             destroy_operators.push(format!("worst_visit_removal_v{}", idx));
         }
+        destroy_operators.push("worst_visit_removal_kisialiou_small_v1".to_string());
+        destroy_operators.push("worst_visit_removal_kisialiou_large_v1".to_string());
 
         let mut repair_operators = Vec::new();
         for idx in 1..=5 {
@@ -631,6 +695,7 @@ impl ALNSEngine {
         for idx in 1..=10 {
             improvement_operators.push(format!("fleet_and_cost_reduction_v{}", idx));
         }
+        improvement_operators.push("fleet_and_cost_reduction_kisialiou_v1".to_string());
         for idx in 1..=10 {
             improvement_operators.push(format!("deep_relocation_v{}", idx));
         }
@@ -753,16 +818,20 @@ impl ALNSEngine {
 
         // Apply destroy and repair operators
         // TODO: expose destroy_removed_requests + fraction_removed to Python result
+        let destroy_start = std::time::Instant::now();
         destroy_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
         candidate_solution.add_idle_vessel_and_add_empty_voyages(&self.context);
         candidate_solution.update_total_cost(&self.context);
         let cost_after_destroy = candidate_solution.total_cost;
+        let destroy_elapsed_ns = destroy_start.elapsed().as_nanos();
 
+        let repair_start = std::time::Instant::now();
         repair_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
         candidate_solution.update_total_cost(&self.context);
         let cost_after_repair = candidate_solution.total_cost;
+        let repair_elapsed_ns = repair_start.elapsed().as_nanos();
 
         // Capture cost after destroy+repair and track each improvement operator separately
         let mut previous_improvement_cost = candidate_solution.total_cost;
@@ -772,10 +841,12 @@ impl ALNSEngine {
         for &idx in improvement_sequence {
             let improvement_op = self.operator_registry.get_improvement_operator(idx);
             let cost_before = previous_improvement_cost;
+            let improvement_start = std::time::Instant::now();
             improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
             candidate_solution.ensure_consistency_updated(&self.context);
             candidate_solution.update_total_cost(&self.context);
             let cost_after = candidate_solution.total_cost;
+            let step_elapsed_ns = improvement_start.elapsed().as_nanos();
             improvement_costs.push(cost_after);
 
             let operator_name = self
@@ -791,6 +862,7 @@ impl ALNSEngine {
                 cost_before,
                 cost_after,
                 cost_delta: cost_after - cost_before,
+                elapsed_ns: step_elapsed_ns,
             });
             previous_improvement_cost = cost_after;
         }
@@ -838,7 +910,7 @@ impl ALNSEngine {
         }
 
         // Update temperature
-        self.temperature = acceptance::cool_down(self.temperature, self.theta, iteration + 1);
+        self.temperature = acceptance::cool_down(self.temperature, self.theta, self.max_iterations);
         self.iteration = iteration;
         self.alns_context.iteration = iteration;
 
@@ -989,6 +1061,8 @@ impl ALNSEngine {
             destroy_weights: self.alns_context.destroy_operator_weights.clone(),
             repair_weights: self.alns_context.repair_operator_weights.clone(),
             elapsed_ms,
+            destroy_elapsed_ns,
+            repair_elapsed_ns,
         })
     }
 
@@ -1019,13 +1093,19 @@ impl ALNSEngine {
 
         // Each entry is a base name; we pick the first registered operator whose
         // label starts with that prefix (e.g. "voyage_number_reduction_v1").
+        // fleet_and_cost_reduction targets the Kisialiou-calibrated variant
+        // (lambda_max=35, paper Table 1) rather than the first-registered
+        // "_v1" (lambda_max=8). deep_relocation/deep_swap target "_v10"
+        // (unlimited moves), matching the paper's Algorithm 2 pseudocode
+        // ("while s' improves") rather than the first-registered "_v1"
+        // (capped at 1 move).
         const ORDERED_BASES: [&str; 6] = [
             "voyage_number_reduction",
-            "fleet_and_cost_reduction",
-            "deep_relocation",
-            "fleet_and_cost_reduction",
-            "deep_swap",
-            "fleet_and_cost_reduction",
+            "fleet_and_cost_reduction_kisialiou",
+            "deep_relocation_v10",
+            "fleet_and_cost_reduction_kisialiou",
+            "deep_swap_v10",
+            "fleet_and_cost_reduction_kisialiou",
         ];
 
         ORDERED_BASES
@@ -1078,9 +1158,11 @@ impl ALNSEngine {
         let improvement_op = self
             .operator_registry
             .get_improvement_operator(improvement_operator_idx);
+        let improvement_start = std::time::Instant::now();
         improvement_op.apply(&mut candidate_solution, &self.context, &mut self.rng);
         candidate_solution.ensure_consistency_updated(&self.context);
         candidate_solution.update_total_cost(&self.context);
+        let improvement_step_elapsed_ns = improvement_start.elapsed().as_nanos();
 
         let candidate_cost = candidate_solution.total_cost;
         let current_cost = self.current_solution.total_cost;
@@ -1121,7 +1203,7 @@ impl ALNSEngine {
             self.stagnation_count += 1;
         }
 
-        self.temperature = acceptance::cool_down(self.temperature, self.theta, iteration + 1);
+        self.temperature = acceptance::cool_down(self.temperature, self.theta, self.max_iterations);
         self.iteration = iteration;
         self.alns_context.iteration = iteration;
 
@@ -1215,6 +1297,7 @@ impl ALNSEngine {
                 cost_before: current_cost,
                 cost_after: candidate_cost,
                 cost_delta: candidate_cost - current_cost,
+                elapsed_ns: improvement_step_elapsed_ns,
             }],
             cost_before_destroy: None,
             cost_after_destroy: None,
@@ -1243,6 +1326,8 @@ impl ALNSEngine {
             destroy_weights: self.alns_context.destroy_operator_weights.clone(),
             repair_weights: self.alns_context.repair_operator_weights.clone(),
             elapsed_ms,
+            destroy_elapsed_ns: 0,
+            repair_elapsed_ns: 0,
         })
     }
 

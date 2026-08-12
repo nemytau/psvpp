@@ -154,6 +154,7 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         step_dict.set_item("cost_before", step.cost_before)?;
         step_dict.set_item("cost_after", step.cost_after)?;
         step_dict.set_item("cost_delta", step.cost_delta)?;
+        step_dict.set_item("elapsed_ns", step.elapsed_ns)?;
         improvement_step_metrics.append(step_dict)?;
     }
     dict.set_item("improvement_step_metrics", improvement_step_metrics)?;
@@ -169,6 +170,8 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         PyList::new(py, metrics.repair_weights.clone()),
     )?;
     dict.set_item("elapsed_ms", metrics.elapsed_ms)?;
+    dict.set_item("destroy_elapsed_ns", metrics.destroy_elapsed_ns)?;
+    dict.set_item("repair_elapsed_ns", metrics.repair_elapsed_ns)?;
     Ok(dict.into())
 }
 

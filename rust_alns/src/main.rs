@@ -86,10 +86,10 @@ fn run_alns_with_logging(seed: u64) -> Result<(), Box<dyn std::error::Error>> {
 
     // ALNS parameters
     let temperature = 1000.0;
-    let theta = 0.9;
+    let theta = 7.0;
     let max_iterations = 100;
-    let reaction_factor = 0.2;
-    let reward_values = vec![33.0, 9.0, 3.0]; // Example: [σ1, σ2, σ3]
+    let reaction_factor = 0.6;
+    let reward_values = vec![25.0, 15.0, 20.0]; // [σ1, σ2, σ3] per Kisialiou et al. (2018) Table 1
     let n_destroy = operator_registry.destroy_operators.len();
     let n_repair = operator_registry.repair_operators.len();
 

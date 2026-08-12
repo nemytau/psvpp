@@ -23,18 +23,21 @@ pub fn accept<R: Rng + ?Sized>(
     }
 }
 
-/// Cooling schedule for Simulated Annealing.
-/// Returns the new temperature after cooling.
+/// Cooling schedule for Simulated Annealing, per Kisialiou et al. (2018),
+/// Section 3.8: mu = 1 - theta/rho is a FIXED per-restart cooling rate
+/// (rho = total iterations for the restart, not the current iteration
+/// index), applied geometrically every iteration: temp_t = temp_0 * mu^t.
 ///
 /// # Arguments
 /// * `temperature` - Current temperature (τ)
 /// * `theta` - User-defined parameter controlling cooling rate (θ)
-/// * `iteration` - Current iteration (ρ)
-pub fn cool_down(temperature: f64, theta: f64, iteration: usize) -> f64 {
-    if iteration == 0 {
+/// * `max_iterations` - Total iteration budget for this restart (ρ), fixed
+///   for the whole restart -- NOT the current iteration counter.
+pub fn cool_down(temperature: f64, theta: f64, max_iterations: usize) -> f64 {
+    if max_iterations == 0 {
         temperature
     } else {
-        let mu = 1.0 - theta / (iteration as f64);
+        let mu = 1.0 - theta / (max_iterations as f64);
         temperature * mu
     }
 }
