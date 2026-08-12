@@ -344,6 +344,7 @@ def run_policy_episode(
             chain_max_consecutive_improvements=chain_max_consecutive_improvements,
             anti_repeat_penalty=anti_repeat_penalty,
             algorithm_mode="baseline",
+            size_bucket="small" if size_label == "small" else "large",
         )
 
         obs, _ = env.reset(seed=restart_seed, options={"problem_path": dataset_path})
@@ -472,6 +473,7 @@ def run_baseline_episode(
             chain_max_consecutive_improvements=None,
             anti_repeat_penalty=0.0,
             algorithm_mode="baseline",
+            size_bucket="small" if size_label == "small" else "large",
         )
 
         reset_options: Dict[str, Any] = {"problem_path": dataset_path}
@@ -769,6 +771,7 @@ def run_kisialiou_episode(
             reward_module=reward_module,
             algorithm_mode="kisialiou",
             chain_max_consecutive_improvements=chain_max_consecutive_improvements,
+            size_bucket="small" if size_label == "small" else "large",
         )
 
         obs, _ = env.reset(seed=restart_seed, options={"problem_path": dataset_path})
@@ -887,6 +890,15 @@ def main() -> None:
     if not train_paths or not test_paths:
         raise RuntimeError("Dataset manager returned empty train/test paths")
 
+    if sizes != ["small"] and "small" in sizes:
+        raise RuntimeError(
+            "size_bucket (Kisialiou-calibrated destroy-operator variants) is fixed per training "
+            "run and only correct for a single-size run; a joint run mixing 'small' with "
+            "medium/large would need size_bucket resolved dynamically per-episode, which is not "
+            "implemented. Train small separately, or extend size_bucket handling before mixing sizes."
+        )
+    size_bucket = "small" if sizes == ["small"] else "large"
+
     exact_command = _build_exact_command()
     reference_train_env = ALNSEnvironment(
         problem_instance=train_paths[0],
@@ -901,6 +913,7 @@ def main() -> None:
         algorithm_mode="baseline",
         chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
         anti_repeat_penalty=args.anti_repeat_penalty,
+        size_bucket=size_bucket,
     )
     action_space_trace = _collect_action_space_trace(train_env=reference_train_env)
     reference_train_env.close()
@@ -953,6 +966,7 @@ def main() -> None:
             algorithm_mode="baseline",
             chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
             anti_repeat_penalty=args.anti_repeat_penalty,
+            size_bucket=size_bucket,
         )
         vec_env.close()
 

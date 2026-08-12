@@ -329,6 +329,7 @@ def train_ppo_agent(
     algorithm_mode: str = "baseline",
     chain_max_consecutive_improvements: Optional[int] = None,
     anti_repeat_penalty: float = 0.0,
+    size_bucket: str = "large",
 ) -> Tuple[PPO, DummyVecEnv]:
     """Train a PPO agent on the ALNS environment using provided datasets."""
 
@@ -376,6 +377,7 @@ def train_ppo_agent(
         env_kwargs["algorithm_mode"] = algorithm_mode
         if chain_max_consecutive_improvements is not None:
             env_kwargs["chain_max_consecutive_improvements"] = int(chain_max_consecutive_improvements)
+        env_kwargs["size_bucket"] = size_bucket
 
         return ALNSEnvironment(**env_kwargs)
 
