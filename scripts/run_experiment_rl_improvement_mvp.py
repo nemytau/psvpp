@@ -99,6 +99,29 @@ def _episode_vessel_stats(restart_records: list) -> tuple:
     return initial_vessels, best_record.get("best_num_vessels_used")
 
 
+def _episode_structure_stats(restart_records: list) -> Dict[str, Any]:
+    """Return initial/best num_voyages and avg_vessel_load_utilization for an episode.
+
+    Same aggregation convention as _episode_vessel_stats: initial from the first
+    restart, best from whichever restart hit the episode's global-best cost.
+    """
+    if not restart_records:
+        return {
+            "initial_num_voyages": None,
+            "best_num_voyages": None,
+            "initial_avg_vessel_load_utilization": None,
+            "best_avg_vessel_load_utilization": None,
+        }
+    first = restart_records[0]
+    best_record = min(restart_records, key=lambda r: r["best_cost"])
+    return {
+        "initial_num_voyages": first.get("initial_num_voyages"),
+        "best_num_voyages": best_record.get("best_num_voyages"),
+        "initial_avg_vessel_load_utilization": first.get("initial_avg_vessel_load_utilization"),
+        "best_avg_vessel_load_utilization": best_record.get("best_avg_vessel_load_utilization"),
+    }
+
+
 def _cache_key(dataset_path: str, seed: int) -> str:
     return f"{Path(dataset_path).name}__seed{seed}"
 
@@ -452,6 +475,10 @@ def run_policy_episode(
         restart_best = float(stats.get("best_cost") or restart_initial)
         restart_initial_vessels = stats.get("initial_num_vessels_used")
         restart_best_vessels = stats.get("best_num_vessels_used")
+        restart_initial_voyages = stats.get("initial_num_voyages")
+        restart_best_voyages = stats.get("best_num_voyages")
+        restart_initial_load_util = stats.get("initial_avg_vessel_load_utilization")
+        restart_best_load_util = stats.get("best_avg_vessel_load_utilization")
         if initial_cost is None:
             initial_cost = restart_initial
         best_candidates.append(restart_best)
@@ -475,6 +502,10 @@ def run_policy_episode(
                 "best_cost": restart_best,
                 "initial_num_vessels_used": restart_initial_vessels,
                 "best_num_vessels_used": restart_best_vessels,
+                "initial_num_voyages": restart_initial_voyages,
+                "best_num_voyages": restart_best_voyages,
+                "initial_avg_vessel_load_utilization": restart_initial_load_util,
+                "best_avg_vessel_load_utilization": restart_best_load_util,
                 "iterations": int(stats.get("total_iterations", steps)),
                 "dataset_path": dataset_path,
                 "mode_label": mode_label,
@@ -596,6 +627,10 @@ def run_baseline_episode(
         restart_best = float(stats.get("best_cost") or restart_initial)
         restart_initial_vessels = stats.get("initial_num_vessels_used")
         restart_best_vessels = stats.get("best_num_vessels_used")
+        restart_initial_voyages = stats.get("initial_num_voyages")
+        restart_best_voyages = stats.get("best_num_voyages")
+        restart_initial_load_util = stats.get("initial_avg_vessel_load_utilization")
+        restart_best_load_util = stats.get("best_avg_vessel_load_utilization")
         if initial_cost is None:
             initial_cost = restart_initial
         best_candidates.append(restart_best)
@@ -619,6 +654,10 @@ def run_baseline_episode(
                 "best_cost": restart_best,
                 "initial_num_vessels_used": restart_initial_vessels,
                 "best_num_vessels_used": restart_best_vessels,
+                "initial_num_voyages": restart_initial_voyages,
+                "best_num_voyages": restart_best_voyages,
+                "initial_avg_vessel_load_utilization": restart_initial_load_util,
+                "best_avg_vessel_load_utilization": restart_best_load_util,
                 "iterations": int(stats.get("total_iterations", steps)),
                 "dataset_path": dataset_path,
                 "mode_label": mode_label,
@@ -890,6 +929,10 @@ def run_kisialiou_episode(
         restart_best = float(stats.get("best_cost") or restart_initial)
         restart_initial_vessels = stats.get("initial_num_vessels_used")
         restart_best_vessels = stats.get("best_num_vessels_used")
+        restart_initial_voyages = stats.get("initial_num_voyages")
+        restart_best_voyages = stats.get("best_num_voyages")
+        restart_initial_load_util = stats.get("initial_avg_vessel_load_utilization")
+        restart_best_load_util = stats.get("best_avg_vessel_load_utilization")
         if initial_cost is None:
             initial_cost = restart_initial
         best_candidates.append(restart_best)
@@ -913,6 +956,10 @@ def run_kisialiou_episode(
                 "best_cost": restart_best,
                 "initial_num_vessels_used": restart_initial_vessels,
                 "best_num_vessels_used": restart_best_vessels,
+                "initial_num_voyages": restart_initial_voyages,
+                "best_num_voyages": restart_best_voyages,
+                "initial_avg_vessel_load_utilization": restart_initial_load_util,
+                "best_avg_vessel_load_utilization": restart_best_load_util,
                 "iterations": int(stats.get("total_iterations", steps)),
                 "dataset_path": dataset_path,
                 "mode_label": mode_label,
@@ -1244,6 +1291,7 @@ def main() -> None:
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
+                    **_episode_structure_stats(restart_records_for_row),
                 }
             )
 
@@ -1309,6 +1357,7 @@ def main() -> None:
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
+                    **_episode_structure_stats(restart_records_for_row),
                     }
                 )
             restart_records_for_row = baseline_restart_rows
@@ -1333,6 +1382,7 @@ def main() -> None:
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
+                    **_episode_structure_stats(restart_records_for_row),
                 }
             )
             restart_records_for_row = kisialiou_restart_rows
@@ -1357,6 +1407,7 @@ def main() -> None:
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
+                    **_episode_structure_stats(restart_records_for_row),
                 }
             )
 

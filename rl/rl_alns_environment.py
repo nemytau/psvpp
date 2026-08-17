@@ -275,6 +275,8 @@ class ALNSEnvironment(gym.Env):
         self.initial_num_vessels_used = None
         self.initial_fixed_cost = None
         self.initial_variable_cost = None
+        self.initial_num_voyages = None
+        self.initial_avg_vessel_load_utilization = None
         self.current_episode_best = None
         self.episode_history = []
         self.best_improvement_pct = 0.0
@@ -518,6 +520,8 @@ class ALNSEnvironment(gym.Env):
             self.initial_num_vessels_used = init_result.get("num_vessels_used")
             self.initial_fixed_cost = init_result.get("fixed_cost")
             self.initial_variable_cost = init_result.get("variable_cost")
+            self.initial_num_voyages = init_result.get("num_voyages")
+            self.initial_avg_vessel_load_utilization = init_result.get("avg_vessel_load_utilization")
             self.current_episode_best = self.initial_cost
             self.last_current_cost = float(self.initial_cost)
             self.last_best_cost = float(self.initial_cost)
@@ -1027,6 +1031,8 @@ class ALNSEnvironment(gym.Env):
                 "num_vessels_used": (result.get("solution_metrics") or {}).get("num_vessels_used"),
                 "fixed_cost": (result.get("solution_metrics") or {}).get("fixed_cost"),
                 "variable_cost": (result.get("solution_metrics") or {}).get("variable_cost"),
+                "num_voyages": (result.get("solution_metrics") or {}).get("num_voyages"),
+                "avg_vessel_load_utilization": (result.get("solution_metrics") or {}).get("avg_vessel_load_utilization"),
                 "baseline_improvement_triggered": baseline_improvement_triggered,
                 "raw_action_index": action,
                 "improvement_only_action": improvement_only,
@@ -1249,11 +1255,15 @@ class ALNSEnvironment(gym.Env):
         best_num_vessels_used = None
         best_fixed_cost = None
         best_variable_cost = None
+        best_num_voyages = None
+        best_avg_vessel_load_utilization = None
         for step in self.episode_history:
             if step["best_cost"] <= global_best_cost + 1e-9:
                 best_num_vessels_used = step.get("num_vessels_used")
                 best_fixed_cost = step.get("fixed_cost")
                 best_variable_cost = step.get("variable_cost")
+                best_num_voyages = step.get("num_voyages")
+                best_avg_vessel_load_utilization = step.get("avg_vessel_load_utilization")
                 break
 
         return {
@@ -1262,11 +1272,15 @@ class ALNSEnvironment(gym.Env):
             "initial_num_vessels_used": self.initial_num_vessels_used,
             "initial_fixed_cost": self.initial_fixed_cost,
             "initial_variable_cost": self.initial_variable_cost,
+            "initial_num_voyages": self.initial_num_voyages,
+            "initial_avg_vessel_load_utilization": self.initial_avg_vessel_load_utilization,
             "final_cost": costs[-1] if costs else self.initial_cost,
             "best_cost": min(best_costs) if best_costs else self.initial_cost,
             "best_num_vessels_used": best_num_vessels_used,
             "best_fixed_cost": best_fixed_cost,
             "best_variable_cost": best_variable_cost,
+            "best_num_voyages": best_num_voyages,
+            "best_avg_vessel_load_utilization": best_avg_vessel_load_utilization,
             "best_improvement_abs": self.best_improvement_abs,
             "best_improvement_pct": self.best_improvement_pct,
             "total_improvement_pct": self.total_improvement_pct,
