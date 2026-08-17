@@ -99,6 +99,30 @@ def _episode_vessel_stats(restart_records: list) -> tuple:
     return initial_vessels, best_record.get("best_num_vessels_used")
 
 
+def _cache_key(dataset_path: str, seed: int) -> str:
+    return f"{Path(dataset_path).name}__seed{seed}"
+
+
+def _episode_summary_to_cache(stats: "EpisodeSummary", restart_rows: list) -> Dict[str, Any]:
+    return {
+        "initial_cost": stats.initial_cost,
+        "best_cost": stats.best_cost,
+        "solver_runtime_seconds": stats.solver_runtime_seconds,
+        "wall_runtime_seconds": stats.wall_runtime_seconds,
+        "restart_rows": restart_rows,
+    }
+
+
+def _episode_summary_from_cache(entry: Dict[str, Any]) -> tuple:
+    stats = EpisodeSummary(
+        initial_cost=entry["initial_cost"],
+        best_cost=entry["best_cost"],
+        solver_runtime_seconds=entry["solver_runtime_seconds"],
+        wall_runtime_seconds=entry["wall_runtime_seconds"],
+    )
+    return stats, entry["restart_rows"]
+
+
 def parse_size_list(size_arg: str) -> List[str]:
     sizes = [item.strip().lower() for item in str(size_arg).split(",") if item.strip()]
     deduped: List[str] = []
@@ -251,6 +275,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--eval-seeds", default="42,43,44,45,46")
+    parser.add_argument(
+        "--baseline-kisialiou-cache",
+        default=None,
+        help=(
+            "Path to a baseline_kisialiou_cache.json produced by a prior --run-eval invocation "
+            "(written automatically to <out_dir>/baseline_kisialiou_cache.json whenever baseline/"
+            "Kisialiou are actually computed). When set, baseline and Kisialiou eval episodes are "
+            "loaded from this file instead of recomputed -- only the RL model's episodes run fresh. "
+            "Saves the (often dominant) cost of re-running baseline+Kisialiou for every new RL "
+            "model comparison against the same test set/seeds. Cached entries are keyed by "
+            "dataset filename + eval seed, so the cache is reusable across different RL models/"
+            "experiments as long as --eval-seeds and the test set are unchanged."
+        ),
+    )
     parser.add_argument(
         "--action-module",
         default="op_pair_v1",
@@ -1032,38 +1070,56 @@ def main() -> None:
     if not args.run_eval:
         return
 
+    bk_cache_in: Optional[Dict[str, Any]] = None
+    if args.baseline_kisialiou_cache:
+        cache_path = Path(args.baseline_kisialiou_cache)
+        if not cache_path.is_absolute():
+            cache_path = (repo / cache_path).resolve()
+        if not cache_path.exists():
+            raise RuntimeError(f"--baseline-kisialiou-cache path not found: {cache_path}")
+        bk_cache_in = json.loads(cache_path.read_text(encoding="utf-8"))
+        print(f"Loaded baseline/Kisialiou cache from {cache_path} ({len(bk_cache_in)} dataset/seed entries) "
+              f"-- baseline and Kisialiou will NOT be re-run.")
+    bk_cache_out: Dict[str, Any] = {}
+
     rows: List[Dict] = []
     restart_rows: List[Dict[str, object]] = []
     for dataset_path in test_paths:
         dataset_size_label = infer_dataset_size_label(dataset_path)
         for seed in eval_seeds:
-            kisialiou_stats, kisialiou_restart_rows = run_kisialiou_episode(
-                dataset_path=dataset_path,
-                seed=seed,
-                max_iterations=eval_iteration_cap,
-                restart_max_iterations=args.eval_restart_max_iterations,
-                log_dir=log_dir,
-                mode_label="kisialiou",
-                size_label=dataset_size_label,
-                action_module=args.action_module,
-                state_module=args.state_module,
-                reward_module=args.reward_module,
-                target_runtime_seconds=(
-                    args.eval_runtime_budget_seconds
-                    if args.eval_fixed_restarts is None and args.eval_runtime_mode == "match_kisialiou"
-                    else None
-                ),
-                chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
-                reference_restarts=(
-                    max(1, int(args.eval_fixed_restarts))
-                    if args.eval_fixed_restarts is not None
-                    else (
-                        max(1, int(args.eval_runtime_reference_restarts))
-                        if args.eval_runtime_mode == "match_kisialiou"
+            cache_key = _cache_key(dataset_path, seed)
+            cached_entry = bk_cache_in.get(cache_key) if bk_cache_in is not None else None
+
+            if cached_entry is not None:
+                kisialiou_stats, kisialiou_restart_rows = _episode_summary_from_cache(cached_entry["kisialiou"])
+            else:
+                kisialiou_stats, kisialiou_restart_rows = run_kisialiou_episode(
+                    dataset_path=dataset_path,
+                    seed=seed,
+                    max_iterations=eval_iteration_cap,
+                    restart_max_iterations=args.eval_restart_max_iterations,
+                    log_dir=log_dir,
+                    mode_label="kisialiou",
+                    size_label=dataset_size_label,
+                    action_module=args.action_module,
+                    state_module=args.state_module,
+                    reward_module=args.reward_module,
+                    target_runtime_seconds=(
+                        args.eval_runtime_budget_seconds
+                        if args.eval_fixed_restarts is None and args.eval_runtime_mode == "match_kisialiou"
                         else None
-                    )
-                ),
-            )
+                    ),
+                    chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
+                    reference_restarts=(
+                        max(1, int(args.eval_fixed_restarts))
+                        if args.eval_fixed_restarts is not None
+                        else (
+                            max(1, int(args.eval_runtime_reference_restarts))
+                            if args.eval_runtime_mode == "match_kisialiou"
+                            else None
+                        )
+                    ),
+                )
             restart_rows.extend(
                 {
                     **row,
@@ -1110,21 +1166,24 @@ def main() -> None:
                 for row in rl_restart_rows
             )
 
-            baseline_stats, baseline_restart_rows = run_baseline_episode(
-                dataset_path=dataset_path,
-                seed=seed,
-                max_iterations=eval_iteration_cap,
-                restart_max_iterations=args.eval_restart_max_iterations,
-                log_dir=log_dir,
-                mode_label="baseline",
-                size_label=dataset_size_label,
-                initial_snapshots=snapshot,
-                action_module=args.baseline_action_module,
-                state_module=args.baseline_state_module,
-                reward_module=args.reward_module,
-                target_runtime_seconds=runtime_target_seconds,
-                restart_limit=args.eval_fixed_restarts,
-            )
+            if cached_entry is not None:
+                baseline_stats, baseline_restart_rows = _episode_summary_from_cache(cached_entry["baseline"])
+            else:
+                baseline_stats, baseline_restart_rows = run_baseline_episode(
+                    dataset_path=dataset_path,
+                    seed=seed,
+                    max_iterations=eval_iteration_cap,
+                    restart_max_iterations=args.eval_restart_max_iterations,
+                    log_dir=log_dir,
+                    mode_label="baseline",
+                    size_label=dataset_size_label,
+                    initial_snapshots=snapshot,
+                    action_module=args.baseline_action_module,
+                    state_module=args.baseline_state_module,
+                    reward_module=args.reward_module,
+                    target_runtime_seconds=runtime_target_seconds,
+                    restart_limit=args.eval_fixed_restarts,
+                )
             restart_rows.extend(
                 {
                     **row,
@@ -1136,6 +1195,11 @@ def main() -> None:
                 }
                 for row in baseline_restart_rows
             )
+
+            bk_cache_out[cache_key] = {
+                "kisialiou": _episode_summary_to_cache(kisialiou_stats, kisialiou_restart_rows),
+                "baseline": _episode_summary_to_cache(baseline_stats, baseline_restart_rows),
+            }
 
             baseline_gap = (
                 ((baseline_stats.best_cost - rl_stats.best_cost) / baseline_stats.best_cost) * 100.0
@@ -1295,6 +1359,11 @@ def main() -> None:
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                 }
             )
+
+    bk_cache_path = out_dir / "baseline_kisialiou_cache.json"
+    bk_cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
+    if bk_cache_in is None:
+        print(f"Saved baseline/Kisialiou cache to {bk_cache_path} for reuse via --baseline-kisialiou-cache.")
 
     results_json = out_dir / "results.json"
     results_csv = out_dir / "results.csv"
