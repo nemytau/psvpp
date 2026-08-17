@@ -170,6 +170,7 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
         PyList::new(py, metrics.repair_weights.clone()),
     )?;
     dict.set_item("elapsed_ms", metrics.elapsed_ms)?;
+    dict.set_item("elapsed_ns", metrics.elapsed_ns)?;
     dict.set_item("destroy_elapsed_ns", metrics.destroy_elapsed_ns)?;
     dict.set_item("repair_elapsed_ns", metrics.repair_elapsed_ns)?;
     Ok(dict.into())

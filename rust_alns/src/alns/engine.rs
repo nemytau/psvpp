@@ -79,6 +79,7 @@ pub struct ALNSMetrics {
     pub destroy_weights: Vec<f64>,
     pub repair_weights: Vec<f64>,
     pub elapsed_ms: u128,
+    pub elapsed_ns: u128,
     pub destroy_elapsed_ns: u128,
     pub repair_elapsed_ns: u128,
 }
@@ -492,6 +493,7 @@ impl ALNSEngine {
             destroy_weights: vec![],
             repair_weights: vec![],
             elapsed_ms: 0,
+            elapsed_ns: 0,
             destroy_elapsed_ns: 0,
             repair_elapsed_ns: 0,
         }
@@ -940,7 +942,8 @@ impl ALNSEngine {
         }
 
         // Calculate elapsed time
-        let elapsed_ms = start_time.elapsed().as_millis();
+        let elapsed_ns = start_time.elapsed().as_nanos();
+        let elapsed_ms = elapsed_ns / 1_000_000;
 
         // Log iteration progress
         let improvement_marker = if improvement_sequence.is_empty() {
@@ -1061,6 +1064,7 @@ impl ALNSEngine {
             destroy_weights: self.alns_context.destroy_operator_weights.clone(),
             repair_weights: self.alns_context.repair_operator_weights.clone(),
             elapsed_ms,
+            elapsed_ns,
             destroy_elapsed_ns,
             repair_elapsed_ns,
         })
@@ -1213,7 +1217,8 @@ impl ALNSEngine {
             self.alns_context.reset_segment_scores();
         }
 
-        let elapsed_ms = start_time.elapsed().as_millis();
+        let elapsed_ns = start_time.elapsed().as_nanos();
+        let elapsed_ms = elapsed_ns / 1_000_000;
 
         log::info!(
             "Iter {:3} (improvement): cost={:.4}, best={:.4}, temp={:6.1}, improvement={}, accepted={}, elapsed={}ms",
@@ -1326,6 +1331,7 @@ impl ALNSEngine {
             destroy_weights: self.alns_context.destroy_operator_weights.clone(),
             repair_weights: self.alns_context.repair_operator_weights.clone(),
             elapsed_ms,
+            elapsed_ns,
             destroy_elapsed_ns: 0,
             repair_elapsed_ns: 0,
         })

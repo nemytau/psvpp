@@ -1016,6 +1016,7 @@ class ALNSEnvironment(gym.Env):
                 "accepted": result.get("accepted", False),
                 "temperature": result["temperature"],
                 "elapsed_ms": result.get("elapsed_ms", 0),
+                "elapsed_ns": result.get("elapsed_ns", 0),
                 "operator_elapsed_ms": result.get("elapsed_ms", 0),
                 "baseline_improvement_triggered": baseline_improvement_triggered,
                 "raw_action_index": action,
@@ -1212,8 +1213,24 @@ class ALNSEnvironment(gym.Env):
             cumulative_ms += ms_value
             elapsed_ms_cumulative.append(cumulative_ms)
 
-        elapsed_seconds = [ms / 1000.0 for ms in elapsed_ms_cumulative]
-        
+        # elapsed_seconds drives solver-time / time-to-best tracking, so it needs
+        # nanosecond precision -- millisecond-granularity per-iteration timing
+        # (elapsed_ms above) truncates fast, lightweight iterations (e.g. a bare
+        # destroy+repair pair with no adaptive weight-update bookkeeping, as in
+        # op_pair_v1) to 0ms each, making cumulative solver time silently read
+        # as exactly 0.0 even though real work happened. elapsed_ns is summed
+        # in nanoseconds throughout to avoid the same truncation on cumulation.
+        cumulative_ns = 0
+        elapsed_seconds: List[float] = []
+        for step in self.episode_history:
+            ns_raw = step.get("elapsed_ns", 0)
+            try:
+                ns_value = int(ns_raw)
+            except (TypeError, ValueError):
+                ns_value = 0
+            cumulative_ns += ns_value
+            elapsed_seconds.append(cumulative_ns / 1e9)
+
         return {
             "total_iterations": len(self.episode_history),
             "initial_cost": self.initial_cost,
