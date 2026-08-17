@@ -85,6 +85,20 @@ def _episode_time_to_best(restart_records: list) -> float:
     return cumulative_solver
 
 
+def _episode_vessel_stats(restart_records: list) -> tuple:
+    """Return (initial_num_vessels_used, best_num_vessels_used) for an episode.
+
+    initial is taken from the first restart (representative of the constructive
+    heuristic's fleet size before search); best is the vessel count of whichever
+    restart achieved the episode's global-best cost.
+    """
+    if not restart_records:
+        return None, None
+    initial_vessels = restart_records[0].get("initial_num_vessels_used")
+    best_record = min(restart_records, key=lambda r: r["best_cost"])
+    return initial_vessels, best_record.get("best_num_vessels_used")
+
+
 def parse_size_list(size_arg: str) -> List[str]:
     sizes = [item.strip().lower() for item in str(size_arg).split(",") if item.strip()]
     deduped: List[str] = []
@@ -398,6 +412,8 @@ def run_policy_episode(
 
         restart_initial = float(stats.get("initial_cost") or 0.0)
         restart_best = float(stats.get("best_cost") or restart_initial)
+        restart_initial_vessels = stats.get("initial_num_vessels_used")
+        restart_best_vessels = stats.get("best_num_vessels_used")
         if initial_cost is None:
             initial_cost = restart_initial
         best_candidates.append(restart_best)
@@ -419,6 +435,8 @@ def run_policy_episode(
                 "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
                 "best_cost": restart_best,
+                "initial_num_vessels_used": restart_initial_vessels,
+                "best_num_vessels_used": restart_best_vessels,
                 "iterations": int(stats.get("total_iterations", steps)),
                 "dataset_path": dataset_path,
                 "mode_label": mode_label,
@@ -538,6 +556,8 @@ def run_baseline_episode(
 
         restart_initial = float(stats.get("initial_cost") or 0.0)
         restart_best = float(stats.get("best_cost") or restart_initial)
+        restart_initial_vessels = stats.get("initial_num_vessels_used")
+        restart_best_vessels = stats.get("best_num_vessels_used")
         if initial_cost is None:
             initial_cost = restart_initial
         best_candidates.append(restart_best)
@@ -559,6 +579,8 @@ def run_baseline_episode(
                 "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
                 "best_cost": restart_best,
+                "initial_num_vessels_used": restart_initial_vessels,
+                "best_num_vessels_used": restart_best_vessels,
                 "iterations": int(stats.get("total_iterations", steps)),
                 "dataset_path": dataset_path,
                 "mode_label": mode_label,
@@ -828,6 +850,8 @@ def run_kisialiou_episode(
 
         restart_initial = float(stats.get("initial_cost") or 0.0)
         restart_best = float(stats.get("best_cost") or restart_initial)
+        restart_initial_vessels = stats.get("initial_num_vessels_used")
+        restart_best_vessels = stats.get("best_num_vessels_used")
         if initial_cost is None:
             initial_cost = restart_initial
         best_candidates.append(restart_best)
@@ -849,6 +873,8 @@ def run_kisialiou_episode(
                 "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
                 "best_cost": restart_best,
+                "initial_num_vessels_used": restart_initial_vessels,
+                "best_num_vessels_used": restart_best_vessels,
                 "iterations": int(stats.get("total_iterations", steps)),
                 "dataset_path": dataset_path,
                 "mode_label": mode_label,
@@ -1152,6 +1178,8 @@ def main() -> None:
                     "kisialiou_gap_pct": kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
+                    "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                 }
             )
 
@@ -1215,6 +1243,8 @@ def main() -> None:
                         "kisialiou_gap_pct": kisialiou_gap_stochastic,
                         "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
+                    "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                     }
                 )
             restart_records_for_row = baseline_restart_rows
@@ -1237,6 +1267,8 @@ def main() -> None:
                     "kisialiou_gap_pct": baseline_vs_kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
+                    "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                 }
             )
             restart_records_for_row = kisialiou_restart_rows
@@ -1259,6 +1291,8 @@ def main() -> None:
                     "kisialiou_gap_pct": 0.0,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
+                    "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                 }
             )
 

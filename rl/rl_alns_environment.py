@@ -272,6 +272,7 @@ class ALNSEnvironment(gym.Env):
         # Initialize state variables
         self.iteration = 0
         self.initial_cost = None
+        self.initial_num_vessels_used = None
         self.current_episode_best = None
         self.episode_history = []
         self.best_improvement_pct = 0.0
@@ -512,6 +513,7 @@ class ALNSEnvironment(gym.Env):
             
             # Store initial cost for reward computation
             self.initial_cost = init_result["total_cost"]
+            self.initial_num_vessels_used = init_result.get("num_vessels_used")
             self.current_episode_best = self.initial_cost
             self.last_current_cost = float(self.initial_cost)
             self.last_best_cost = float(self.initial_cost)
@@ -1018,6 +1020,7 @@ class ALNSEnvironment(gym.Env):
                 "elapsed_ms": result.get("elapsed_ms", 0),
                 "elapsed_ns": result.get("elapsed_ns", 0),
                 "operator_elapsed_ms": result.get("elapsed_ms", 0),
+                "num_vessels_used": (result.get("solution_metrics") or {}).get("num_vessels_used"),
                 "baseline_improvement_triggered": baseline_improvement_triggered,
                 "raw_action_index": action,
                 "improvement_only_action": improvement_only,
@@ -1231,11 +1234,25 @@ class ALNSEnvironment(gym.Env):
             cumulative_ns += ns_value
             elapsed_seconds.append(cumulative_ns / 1e9)
 
+        # Fleet-size tracking: current_solution == best_solution exactly at the
+        # iteration where a new best is accepted (see engine.rs's acceptance
+        # branch), so the step's num_vessels_used at that same index is the
+        # best solution's vessel count -- same index-matching pattern as
+        # _time_to_best() uses for solver-time-to-best.
+        global_best_cost = min(best_costs) if best_costs else self.initial_cost
+        best_num_vessels_used = None
+        for step in self.episode_history:
+            if step["best_cost"] <= global_best_cost + 1e-9:
+                best_num_vessels_used = step.get("num_vessels_used")
+                break
+
         return {
             "total_iterations": len(self.episode_history),
             "initial_cost": self.initial_cost,
+            "initial_num_vessels_used": self.initial_num_vessels_used,
             "final_cost": costs[-1] if costs else self.initial_cost,
             "best_cost": min(best_costs) if best_costs else self.initial_cost,
+            "best_num_vessels_used": best_num_vessels_used,
             "best_improvement_abs": self.best_improvement_abs,
             "best_improvement_pct": self.best_improvement_pct,
             "total_improvement_pct": self.total_improvement_pct,
