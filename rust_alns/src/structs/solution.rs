@@ -736,11 +736,11 @@ impl Solution {
         self.schedule.set_need_update(true);
     }
 
-    /// Returns the total cost of the solution.
+    /// Returns (fixed_cost, variable_cost) for the solution.
     ///
     /// fixed cost = number of vessels used * vessel cost
     /// variable cost = sailing_time * fcs * fuel_cost + (wait_time + service_time) * fcw * fuel_cost
-    pub fn cost_with_context(&self, context: &Context) -> f64 {
+    pub fn cost_breakdown_with_context(&self, context: &Context) -> (f64, f64) {
         use std::collections::HashSet;
         let mut vessels_used = HashSet::new();
         let mut fixed_cost = 0.0;
@@ -792,6 +792,13 @@ impl Solution {
             variable_cost,
             fixed_cost + variable_cost
         );
+        (fixed_cost, variable_cost)
+    }
+
+    /// Returns the total cost of the solution (fixed_cost + variable_cost).
+    /// See `cost_breakdown_with_context` for the fixed/variable split.
+    pub fn cost_with_context(&self, context: &Context) -> f64 {
+        let (fixed_cost, variable_cost) = self.cost_breakdown_with_context(context);
         fixed_cost + variable_cost
     }
 

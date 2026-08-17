@@ -16,6 +16,8 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
     let dict = PyDict::new(py);
     let solution_dict = PyDict::new(py);
     solution_dict.set_item("total_cost", metrics.total_cost)?;
+    solution_dict.set_item("fixed_cost", metrics.fixed_cost)?;
+    solution_dict.set_item("variable_cost", metrics.variable_cost)?;
     solution_dict.set_item("is_complete", metrics.is_complete)?;
     solution_dict.set_item("is_feasible", metrics.is_feasible)?;
     solution_dict.set_item("num_voyages", metrics.num_voyages)?;
@@ -612,6 +614,7 @@ impl RustALNSInterface {
         let is_complete = current_solution.is_complete_solution();
         let structure_metrics =
             compute_solution_structure_metrics(current_solution, &engine.context);
+        let (fixed_cost, variable_cost) = current_solution.cost_breakdown_with_context(&engine.context);
 
         let destroy_success_rates: Vec<f64> = engine
             .alns_context
@@ -650,6 +653,8 @@ impl RustALNSInterface {
 
         let dict = PyDict::new(py);
         dict.set_item("total_cost", current_solution.total_cost)?;
+        dict.set_item("fixed_cost", fixed_cost)?;
+        dict.set_item("variable_cost", variable_cost)?;
         dict.set_item("is_complete", is_complete)?;
         dict.set_item("is_feasible", is_feasible)?;
         dict.set_item("num_voyages", structure_metrics.num_voyages)?;

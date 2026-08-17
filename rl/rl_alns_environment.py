@@ -273,6 +273,8 @@ class ALNSEnvironment(gym.Env):
         self.iteration = 0
         self.initial_cost = None
         self.initial_num_vessels_used = None
+        self.initial_fixed_cost = None
+        self.initial_variable_cost = None
         self.current_episode_best = None
         self.episode_history = []
         self.best_improvement_pct = 0.0
@@ -514,6 +516,8 @@ class ALNSEnvironment(gym.Env):
             # Store initial cost for reward computation
             self.initial_cost = init_result["total_cost"]
             self.initial_num_vessels_used = init_result.get("num_vessels_used")
+            self.initial_fixed_cost = init_result.get("fixed_cost")
+            self.initial_variable_cost = init_result.get("variable_cost")
             self.current_episode_best = self.initial_cost
             self.last_current_cost = float(self.initial_cost)
             self.last_best_cost = float(self.initial_cost)
@@ -1021,6 +1025,8 @@ class ALNSEnvironment(gym.Env):
                 "elapsed_ns": result.get("elapsed_ns", 0),
                 "operator_elapsed_ms": result.get("elapsed_ms", 0),
                 "num_vessels_used": (result.get("solution_metrics") or {}).get("num_vessels_used"),
+                "fixed_cost": (result.get("solution_metrics") or {}).get("fixed_cost"),
+                "variable_cost": (result.get("solution_metrics") or {}).get("variable_cost"),
                 "baseline_improvement_triggered": baseline_improvement_triggered,
                 "raw_action_index": action,
                 "improvement_only_action": improvement_only,
@@ -1241,18 +1247,26 @@ class ALNSEnvironment(gym.Env):
         # _time_to_best() uses for solver-time-to-best.
         global_best_cost = min(best_costs) if best_costs else self.initial_cost
         best_num_vessels_used = None
+        best_fixed_cost = None
+        best_variable_cost = None
         for step in self.episode_history:
             if step["best_cost"] <= global_best_cost + 1e-9:
                 best_num_vessels_used = step.get("num_vessels_used")
+                best_fixed_cost = step.get("fixed_cost")
+                best_variable_cost = step.get("variable_cost")
                 break
 
         return {
             "total_iterations": len(self.episode_history),
             "initial_cost": self.initial_cost,
             "initial_num_vessels_used": self.initial_num_vessels_used,
+            "initial_fixed_cost": self.initial_fixed_cost,
+            "initial_variable_cost": self.initial_variable_cost,
             "final_cost": costs[-1] if costs else self.initial_cost,
             "best_cost": min(best_costs) if best_costs else self.initial_cost,
             "best_num_vessels_used": best_num_vessels_used,
+            "best_fixed_cost": best_fixed_cost,
+            "best_variable_cost": best_variable_cost,
             "best_improvement_abs": self.best_improvement_abs,
             "best_improvement_pct": self.best_improvement_pct,
             "total_improvement_pct": self.total_improvement_pct,

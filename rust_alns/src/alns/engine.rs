@@ -33,6 +33,8 @@ pub enum ALNSRunMode {
 #[derive(Clone)]
 pub struct ALNSMetrics {
     pub total_cost: f64,
+    pub fixed_cost: f64,
+    pub variable_cost: f64,
     pub best_cost: f64,
     pub accepted: bool,
     pub is_new_best: bool,
@@ -444,6 +446,8 @@ impl ALNSEngine {
     fn create_default_metrics(&self) -> ALNSMetrics {
         ALNSMetrics {
             total_cost: self.current_solution.total_cost,
+            fixed_cost: 0.0,
+            variable_cost: 0.0,
             best_cost: self.best_solution.total_cost,
             accepted: false,
             is_new_best: false,
@@ -980,6 +984,7 @@ impl ALNSEngine {
         let is_complete = current_solution.is_complete_solution();
 
         let structure_metrics = compute_solution_structure_metrics(current_solution, &self.context);
+        let (fixed_cost, variable_cost) = current_solution.cost_breakdown_with_context(&self.context);
 
         let destroy_success_rates: Vec<f64> = self
             .alns_context
@@ -1018,6 +1023,8 @@ impl ALNSEngine {
 
         Ok(ALNSMetrics {
             total_cost: current_solution.total_cost,
+            fixed_cost,
+            variable_cost,
             best_cost: best_solution.total_cost,
             accepted,
             is_new_best,
@@ -1239,6 +1246,7 @@ impl ALNSEngine {
         let is_complete = current_solution.is_complete_solution();
 
         let structure_metrics = compute_solution_structure_metrics(current_solution, &self.context);
+        let (fixed_cost, variable_cost) = current_solution.cost_breakdown_with_context(&self.context);
 
         let destroy_success_rates: Vec<f64> = self
             .alns_context
@@ -1277,6 +1285,8 @@ impl ALNSEngine {
 
         Ok(ALNSMetrics {
             total_cost: current_solution.total_cost,
+            fixed_cost,
+            variable_cost,
             best_cost: best_solution.total_cost,
             accepted,
             is_new_best,
