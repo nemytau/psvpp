@@ -134,8 +134,28 @@ numbers are in.
   see above.
 
   </details>
-- **Sample size target for the later RL "bigger proof" eval (Phase 3)**: still open — revisit once
-  Phase 1 baseline/Kisialiou results are in.
+- **Sample size target for the later RL "bigger proof" eval (Phase 3)**: **direction resolved
+  2026-08-18** (during Exp 0 rerun discussion), exact numbers still open. Relative to the current
+  5-datasets × 5-seeds convention, prefer **more test instances per size, fewer eval seeds** —
+  not the reverse. Reasoning:
+  - Each eval episode already runs 100+ restarts internally for baseline/RL, each with a fully
+    distinct RNG seed (`restart_seed = eval_seed + restart_idx * 1009`, see
+    `scripts/run_experiment_rl_improvement_mvp.py`'s `_restart_seed()`). A single eval seed's
+    "best of restarts" is already a near-converged per-instance estimate — extra eval seeds
+    mostly re-explore the same territory and tighten noise around an already-stable number.
+  - What eval seeds do *not* cover is structural variation between problem instances (topology,
+    demand pattern, vessel mix) — that's what the paper's "generalizes across the instance
+    population" claims actually depend on, and it's exactly what more distinct test instances add.
+  - **Asymmetry to flag**: this reasoning is strongest for baseline/RL. Kisialiou only completes
+    2-5 restarts per episode (each restart is expensive — full improvement chain every iteration),
+    so its per-(dataset, seed) result is much noisier and benefits more from seed replication than
+    baseline/RL's. The eval script currently shares one `--eval-seeds` list across all three modes
+    (baseline, kisialiou, RL), so seed count can't be cut per-mode without a script change — don't
+    reduce seed count all the way to 1 for this reason; keep a floor of ~2-3 seeds.
+  - Exact final numbers (e.g. "12 datasets × 3 seeds") are intentionally not picked yet — wait
+    until Exp 0's current rerun (small/medium/large, 5 datasets × 5 seeds each) finishes and those
+    results are in hand, per this bullet's original "revisit once Phase 1 results are in"
+    condition. This entry captures the *direction* only, so it isn't lost in the meantime.
 
 ## 5. Immediate next action (as of 2026-07-30)
 
@@ -184,8 +204,8 @@ average advantage, not a uniform improvement.
 
 **Update 2026-08-07 — see section 7 for the trustworthy replacement of all of the above.** The
 immediate next actions are now the open follow-ups listed at the end of section 7, not the list
-that used to be here. Phase 0 housekeeping (`git status` cleanup) is still outstanding and still
-worth doing before more runs pile up.
+that used to be here. Phase 0 housekeeping is now done (`git status` no longer shows the stale
+`benchmark_small5_tb120s_*` deletions as of 2026-08-14).
 
 ## 6. Known issue — AdaptiveWeightedActionSpace pool-restriction bug (found 2026-08-07)
 
@@ -293,6 +313,6 @@ unaffected.
    operator-quality signal or a remaining calibration artifact.
 4. `docs/EXPERIMENTS.md`'s Exp 3 "expected finding" text has been updated to match the actual
    result (done 2026-08-07).
-5. Phase 0 housekeeping (`git status` cleanup) is still outstanding, independent of the above.
+5. ✅ Phase 0 housekeeping done (git tree clean of the old stale deletions as of 2026-08-14).
 6. Training-regime open decision (section 4) is still open and still blocks Phase 2 (RL
    retraining) — none of today's fixes touch that question.
