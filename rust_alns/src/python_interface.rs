@@ -69,7 +69,7 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
     dict.set_item("accepted", metrics.accepted)?;
     dict.set_item("is_new_best", metrics.is_new_best)?;
     dict.set_item("is_better_than_current", metrics.is_better_than_current)?;
-    dict.set_item("candidate_cost", metrics.total_cost)?;
+    dict.set_item("candidate_cost", metrics.candidate_cost)?;
     dict.set_item("current_cost", metrics.total_cost)?;
     dict.set_item("best_cost", metrics.best_cost)?;
     dict.set_item("temperature", metrics.temperature)?;

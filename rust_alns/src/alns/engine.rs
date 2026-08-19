@@ -33,6 +33,7 @@ pub enum ALNSRunMode {
 #[derive(Clone)]
 pub struct ALNSMetrics {
     pub total_cost: f64,
+    pub candidate_cost: f64,
     pub fixed_cost: f64,
     pub variable_cost: f64,
     pub best_cost: f64,
@@ -446,6 +447,7 @@ impl ALNSEngine {
     fn create_default_metrics(&self) -> ALNSMetrics {
         ALNSMetrics {
             total_cost: self.current_solution.total_cost,
+            candidate_cost: self.current_solution.total_cost,
             fixed_cost: 0.0,
             variable_cost: 0.0,
             best_cost: self.best_solution.total_cost,
@@ -1023,6 +1025,7 @@ impl ALNSEngine {
 
         Ok(ALNSMetrics {
             total_cost: current_solution.total_cost,
+            candidate_cost,
             fixed_cost,
             variable_cost,
             best_cost: best_solution.total_cost,
@@ -1285,6 +1288,7 @@ impl ALNSEngine {
 
         Ok(ALNSMetrics {
             total_cost: current_solution.total_cost,
+            candidate_cost,
             fixed_cost,
             variable_cost,
             best_cost: best_solution.total_cost,

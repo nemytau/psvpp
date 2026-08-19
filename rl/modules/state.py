@@ -324,3 +324,56 @@ class ImprovementOnlyStateEncoderV2(BaseStateEncoder):
         )[:43]
         obs_array = np.array(obs_values, dtype=np.float32)
         return np.nan_to_num(obs_array, nan=0.0, posinf=1e6, neginf=-1e6)
+
+
+@register_state("features_improvement_v3")
+class ImprovementOnlyStateEncoderV3(BaseStateEncoder):
+    """features_improvement_v1 plus an explicit SA accept/reject signal.
+
+    The reward is partly a function of SA's stochastic accept/reject decision
+    (see delta_cost_v3's acceptance_bonus and delta_cost_v4's no_progress
+    flattening), but until now the policy had no way to *observe* that
+    decision -- temperature and stagnation_count are exposed, but not
+    `accepted` or `acceptance_type`, even though both are already computed
+    every step (see rl_alns_environment.py's step(), which sets
+    result["accepted"]/result["acceptance_type"] before reward/state are
+    computed). Without this, the policy can't distinguish "this operator's
+    candidate was rejected by SA randomness" from "this operator's candidate
+    was actually a bad move" purely from the observation.
+
+    Adds 4 dims on top of features_improvement_v1's 41: `accepted` (bool) and
+    a 3-way one-hot for acceptance_type collapsed from the six raw values
+    (`improvement`/`annealing`/`rejected` -- `rejected_no_change` and
+    `infeasible` fold into `rejected`; `unknown`, seen only before the first
+    step, is the implicit all-zero case).
+    """
+
+    version = "improvement-3.0"
+
+    _ACCEPTANCE_BUCKETS = ("improvement", "annealing", "rejected")
+    _ACCEPTANCE_TYPE_TO_BUCKET = {
+        "improvement": "improvement",
+        "annealing": "annealing",
+        "rejected": "rejected",
+        "rejected_no_change": "rejected",
+        "infeasible": "rejected",
+    }
+
+    def __init__(self) -> None:
+        self._base_encoder = ImprovementOnlyStateEncoderV1()
+        self._space = spaces.Box(low=-np.inf, high=np.inf, shape=(45,), dtype=np.float32)
+
+    def space(self) -> spaces.Box:
+        return self._space
+
+    def encode(self, result: Optional[Dict[str, Any]], env: Any) -> np.ndarray:
+        base_obs = self._base_encoder.encode(result, env).tolist()
+
+        accepted = bool(result.get("accepted", False)) if result else False
+        raw_acceptance_type = str(result.get("acceptance_type", "unknown")) if result else "unknown"
+        bucket = self._ACCEPTANCE_TYPE_TO_BUCKET.get(raw_acceptance_type)
+        one_hot = [1.0 if bucket == b else 0.0 for b in self._ACCEPTANCE_BUCKETS]
+
+        obs_values = base_obs + [1.0 if accepted else 0.0] + one_hot
+        obs_array = np.array(obs_values[:45], dtype=np.float32)
+        return np.nan_to_num(obs_array, nan=0.0, posinf=1e6, neginf=-1e6)

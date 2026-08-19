@@ -112,3 +112,56 @@ class DeltaCostStepDeltaReward(BaseRewardFunction):
             reward -= 0.05
 
         return float(np.clip(reward, -5.0, 20.0))
+
+
+@register_reward("delta_cost_v5")
+class DeltaCostCandidateReward(BaseRewardFunction):
+    """Reward from the candidate solution's own cost, independent of SA's
+    stochastic accept/reject decision.
+
+    delta_cost_v3's acceptance_bonus and delta_cost_v4's no_progress
+    flattening both make reward magnitude partly a function of SA's random
+    accept/reject coin flip rather than purely the proposed move's quality --
+    a rejected candidate that nearly matched the current solution gets the
+    exact same flat penalty as one that made things drastically worse, so the
+    operator gets no gradient telling those two cases apart.
+
+    This variant reads `result["candidate_cost"]` -- the solution's cost
+    *before* SA's accept/reject decision runs (engine.rs computed this all
+    along but never exposed it; the same key used to be silently aliased to
+    the post-decision current_cost, see python_interface.rs) -- and computes
+    reward purely from how that candidate compares to the previous current
+    and best costs, regardless of what SA actually did with it. No
+    accepted/acceptance_type branching at all.
+    """
+
+    version = "5.0"
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        initial = env.initial_cost or result.get("initial_cost", 0.0) or 1.0
+
+        prev_cur = float(getattr(env, "last_current_cost", initial))
+        prev_best = float(getattr(env, "last_best_cost", initial))
+
+        candidate = float(result.get("candidate_cost", result.get("current_cost", prev_cur)))
+
+        denom_cur = max(abs(prev_cur), 1e-9)
+        denom_best = max(abs(prev_best), 1e-9)
+
+        delta_vs_current = (prev_cur - candidate) / denom_cur
+        delta_vs_best = (prev_best - candidate) / denom_best
+
+        # Same asymmetric dampening as delta_cost_v4: soften the downside so a
+        # single bad candidate doesn't swamp the signal, without hiding it
+        # entirely (unlike v4's no_progress flattening).
+        if delta_vs_current < 0.0:
+            delta_vs_current *= 0.3
+        if delta_vs_best < 0.0:
+            delta_vs_best *= 0.3
+
+        reward = 10.0 * delta_vs_current + 30.0 * delta_vs_best
+
+        if result.get("improvement_only_action") or result.get("improvement_operator_idx") is not None:
+            reward -= 0.05
+
+        return float(np.clip(reward, -5.0, 20.0))
