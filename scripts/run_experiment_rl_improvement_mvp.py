@@ -1182,8 +1182,8 @@ def main() -> None:
                     log_dir=log_dir,
                     mode_label="kisialiou",
                     size_label=dataset_size_label,
-                    action_module=args.action_module,
-                    state_module=args.state_module,
+                    action_module=args.baseline_action_module,
+                    state_module=args.baseline_state_module,
                     reward_module=args.reward_module,
                     target_runtime_seconds=(
                         args.eval_runtime_budget_seconds
