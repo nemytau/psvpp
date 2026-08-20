@@ -20,6 +20,13 @@ Four experiments are already defined and have been run once, on the **small** da
   which improvement operator to chain in (up to 3 in a row) before a forced backbone step.
 - **Exp 3** — fixed-pair benchmark (no RL), sanity check that adaptive selection beats any single
   fixed destroy/repair pair.
+- **Exp 4** (planned, 2026-08-19) — RL gets full control of the search: destroy/repair pair choice,
+  improvement operator choice, and when to switch between them, with no scripted backbone engine
+  and no fixed forced-return cap. See section 8 for the full design.
+- **Exp 5** (planned, 2026-08-19) — not an RL experiment: numerically quantify whether a given
+  operator application explored or exploited, using partition-distance (Adjusted Rand Index /
+  Variation of Information on voyage membership) and per-operator fitness-landscape/autocorrelation
+  characterization. Feeds into Exp 4's state/reward design. See section 9.
 
 Baselines are `adaptive_weighted_v1` (adaptive weighted ALNS, no improvement) and `kisialiou` (fixed
 improvement sequence after every step). As of `ada50ff` (2026-06-08), baseline and Kisialiou are
@@ -316,3 +323,203 @@ unaffected.
 5. ✅ Phase 0 housekeeping done (git tree clean of the old stale deletions as of 2026-08-14).
 6. Training-regime open decision (section 4) is still open and still blocks Phase 2 (RL
    retraining) — none of today's fixes touch that question.
+
+## 8. Exp 4 — full RL control of explore/exploit (planned 2026-08-19)
+
+**Motivation.** Exp 2 (`improvement_chain_v1`) is being kept exactly as implemented — its D×R
+phase is always the fixed adaptive-weighted backbone, and the forced-return-to-backbone trigger is
+a flat count cap (`chain_max_consecutive_improvements=3`), not stagnation-driven. Exp 4 is the
+natural next step after Exp 2: give RL full control of the entire decision — which destroy/repair
+pair to explore with, which improvement operator to exploit with, and when to switch between the
+two — instead of delegating the "explore" side to a scripted engine. Framing (2026-08-19
+discussion): ALNS destroy/repair = diversification, `voyage_number_reduction`/`deep_relocation`/
+`deep_swap` = intensification, `fleet_and_cost_reduction` = dual-purpose (both); a well-trained
+policy shouldn't converge to a single operator or pair, it should alternate
+explore→exploit→escape-on-stagnation→exploit, mirroring the diversification/intensification
+balance in classical metaheuristics — structurally close to Variable Neighborhood Search's
+shake/local-search loop.
+
+**Risk flagged up front.** A naive reward (raw cost-reduction / time) is expected to collapse to a
+single operator or fixed sequence — not hypothetical, it's what already happened in Exp 0
+(`op_pair_v1` converged to `random_visit_removal_kisialiou_*` on small/medium and
+`worst_visit_removal_kisialiou_large_v1` on large; see the 2026-08-19 Exp0 findings in
+`docs/experiments/diary_entry_sa_reward_decoupling_exp0_lock.md` and the matching Notion page).
+Exp 4's design has to actively counter this, not just hope RL finds the right balance on its own.
+
+**Diagnostics to run first (cheap, no new training needed):**
+1. `PPO(...)` in `rl/train_alns_rl.py:388` is called with no `ent_coef` — Stable-Baselines3 defaults
+   this to `0.0`, i.e. zero entropy regularization during training currently. Sweep `ent_coef` in
+   `{0.01, 0.02, 0.05}` — cheapest, highest-leverage lever against collapse, and applicable to
+   existing experiments too, not just Exp 4.
+2. Eval defaults to `deterministic=True` everywhere (`rl/cli/common.py`, `evaluate.py`, `train.py`).
+   `evaluate.py` already supports `--stochastic`. Rerun eval on an existing Exp0/1/2 model with
+   `--stochastic` to check whether "collapse" is a training-time reality or an eval-time argmax
+   artifact, before building anything new.
+3. `rl_alns_environment.py` already tracks `_latest_policy_entropy` / `set_policy_statistics()` —
+   check what's already logged (training callback CSV/TensorBoard) before building new
+   instrumentation; the collapse diagnosis may already be sitting in old run logs.
+
+**Architecture options (increasing effort):**
+1. *Flat unified action space* — union `op_pair_v1`'s 9 D×R actions with the 4 improvement
+   operators into one 13-way discrete action, no forced backbone, no cap. Minimal code change
+   (combine two existing action registries). No explicit "phase" signal — inferred after the fact
+   from which of the 13 actions got picked.
+2. *Hierarchical/two-level policy* — a high-level head picks a mode (explore/exploit, or a
+   continuous intensity in [0,1]) each step, a low-level head picks the operator conditioned on
+   that mode (options framework, Sutton/Precup/Singh). More engineering, but the high-level head is
+   effectively a *learned* exploration/exploitation score, rather than one hand-defined from
+   cost/time (which is expected to collapse, per Exp 0).
+
+**Reward/credit fixes (needed regardless of architecture — this is the core of what prevents
+collapse):**
+- *Segment-level credit assignment* — mirrors the classical RW/Kisialiou segment scoring (σ1/σ2/σ3,
+  Ropke & Pisinger; Eq 1 in Johnn et al. 2024, already reviewed this session) already familiar from
+  this project's calibration work: accumulate credit over a K-step window and attribute a fraction
+  of the segment's best improvement back to the step that opened it, including explore steps that
+  themselves show zero immediate ΔF. Fixes the structural bias against explore actions under a
+  purely myopic per-step reward.
+- *Sliding-window diversity/entropy bonus* — `reward += λ · H(action distribution over last N
+  steps)`. Not a new idea — already proposed once in this project's early Notion brainstorm
+  ("Diversity bonus: entropy of recent actions"), just not yet built.
+- *Stagnation-coupled shaping* — let the marginal value of another exploit step decay with
+  `stagnation_count` (already computed in the env) while an explore step's value rises
+  correspondingly. Middle ground between "hope raw reward discovers switching on its own" (the
+  flagged risk above) and "hand-script the switch" (Exp 2's fixed cap, which stays as-is).
+
+**Proposed build order (cheapest first):**
+0. Diagnostics above — `ent_coef` sweep + `--stochastic` eval rerun on an existing model. No new
+   experiment infrastructure needed; may already reframe or resolve the collapse concern.
+1. Flat 13-way action space + entropy bonus + segment-level credit — two independent,
+   well-understood levers, still simple to ablate separately.
+2. Hierarchical mode/operator split — only if (1) still collapses despite both fixes.
+3. Intrinsic novelty bonus on solution-structure (RND/count-based novelty) — research-grade, likely
+   out of scope for Paper 1 unless (1)/(2) both fail.
+
+**Status:** planned, not started. Exp 2 stays exactly as currently implemented — Exp 4 is
+additive, not a replacement.
+
+## 9. Exp 5 — quantifying exploration vs. exploitation numerically (planned 2026-08-19)
+
+**Quick recap — read this first if you've forgotten the details.** Two separate tools, answering
+two different questions, plus 3 ways to use either one:
+
+- **Tool A — "how different are two solutions?"** Look at which voyage each installation is
+  assigned to, before vs. after a move (ignore visit *order* within a voyage — see why below).
+  Count how much that assignment changed, using a standard metric from cluster comparison
+  (Adjusted Rand Index). Big change = the operator explored (reshuffled the packing). Tiny/no
+  change = the operator exploited (polished within the existing packing).
+- **Tool B — "how disruptive is an operator, on average?"** Apply one operator over and over from
+  the same starting solution and watch the cost value: does it jump around a lot, or settle into a
+  smooth trend? Jumpy cost = explorative operator. Smooth cost = exploitative operator. Only needs
+  cost numbers, nothing about solution structure — simpler to build, and not affected by the
+  sequence issue below.
+- **Why not also compare visit order within a voyage:** there's an always-on step that
+  re-optimizes order after every change (a mini TSP solve), so order ends up near-optimal no matter
+  which operator caused the change — comparing order wouldn't tell you anything new beyond what
+  Tool A already shows.
+- **3 ways to use either tool, easiest first:**
+  1. *Just look* — run it on data you already have (Exp0/1/2 results). No coding into RL. Purest
+     sanity check: does it confirm the 4 operator groups (explore / dual / exploit) from the
+     2026-08-19 discussion?
+  2. *Feed it to RL as input* — give the policy a number like "how far am I from my best solution
+     right now," replacing the current time-based `stagnation_count`.
+  3. *Reward RL for it* — small bonus when the policy makes a genuinely different move (per Tool A),
+     instead of small, useless tweaks.
+
+Full detail below.
+
+**Motivation.** Exp 4 wants RL to balance explore/exploit itself, but "which operator got picked"
+(action-choice entropy, as floated in Exp 4's build order) is only a weak proxy for whether the
+*solution* actually moved through the search space — an agent could pick one operator index every
+time and still explore heavily if that operator is inherently disruptive, or vary its operator
+choice while producing near-identical solutions. Exp 5 is a numeric, literature-grounded way to
+measure the real thing: how far a solution moved, and how disruptive a given operator is on
+average. Two complementary approaches, both adjusted below after a same-day follow-up discussion
+caught a real issue with the first one.
+
+**Correction to the initial framing.** The project's voyage-improvement step re-optimizes visit
+order within a voyage (a small TSP) after every membership change — confirmed in code
+(`rust_alns/src/utils/tsp_solver.rs`) — pushing in-voyage sequence to near-optimal regardless of
+which operator caused the change. Consequence: sequence/order-based distance metrics (Hamming
+distance, Positional Jaccard distance, Kendall's Tau distance — the family that would normally
+cover the "within-voyage ordering" layer) are likely **not an independent signal** in this system —
+sequence distance is mostly a downstream, near-deterministic consequence of the partition (which
+installations ended up in which voyage), not something operators independently fight over.
+**Demoted to an optional diagnostic only** (e.g. to check whether the TSP sub-solver itself lands in
+different local optima for the same customer set — a narrow, separate question, not the main point
+of Exp 5).
+
+**Primary metric: partition/assignment distance.** The real independent degree of freedom in this
+solution representation is installation→voyage(+vessel) membership — unaffected by the
+sequence-reoptimization issue above. Compare two solutions via Adjusted Rand Index (Hubert &
+Arabie, 1985, "Comparing Partitions," *Journal of Classification*) or Variation of Information
+(Meilă, 2003, "Comparing Clusterings by the Variation of Information") on that membership
+assignment. Directly measures "did the packing structure change" — the testable prediction is that
+`voyage_number_reduction`/`fleet_and_cost_reduction` should move this a lot and
+`deep_swap`/`deep_relocation` should barely touch it; not yet verified.
+
+**Secondary approach: fitness-landscape/autocorrelation characterization — robust to the whole
+representation question above.** Weinberger (1990, "Correlated and Uncorrelated Fitness Landscapes
+and How to Tell the Difference," *Biological Cybernetics*); Reeves (1999, "Landscapes, Operators
+and Heuristic Search," *Annals of Operations Research* — does essentially this exact study, six
+operators/four distance metrics, for a different scheduling problem); Merz & Freisleben
+(2000/2001, fitness-landscape + memetic-algorithm papers for TSP/QAP). Method: apply one operator
+repeatedly from a fixed starting solution, record only the resulting objective-value (cost) trace
+— never touches solution structure directly — and compute its autocorrelation / correlation
+length. Short correlation length = disruptive/explorative operator; long correlation length =
+smooth/exploitative operator. Because this only needs the cost trace, the sequence-reoptimization
+concern above doesn't apply to it at all — safe to build first, and needs no RL/training
+infrastructure, just the existing Rust engine called in a loop.
+
+**Three ways to actually use either metric — additive, not a replacement for existing state
+features, and not mutually exclusive:**
+1. *Pure offline analysis on already-completed runs* — no training/pipeline changes at all. If
+   per-iteration solution snapshots (voyage membership) are already logged for Exp0/1/2 runs,
+   compute ARI-distance-per-step and correlation-length-per-operator directly on existing data, to
+   test the 4-group operator taxonomy (from the 2026-08-19 explore/exploit discussion) empirically
+   before deciding whether to wire anything into training. **Cheapest starting point** — check
+   first whether existing logs capture full voyage membership per iteration or only scalar
+   cost/operator-id metrics (per-iteration logging infrastructure exists —
+   `scripts/run_experiment_rl_improvement_mvp.py`, `rl/rl_alns_environment.py` — but whether it
+   stores full solution snapshots needs confirming before assuming this is free).
+2. *State feature* — e.g. "ARI-distance from the last accepted-best solution" as a richer,
+   structurally-grounded replacement/supplement for the purely iteration-count-based
+   `stagnation_count` already in `features_improvement_v1`/`v3`.
+3. *Reward shaping* — a bonus proportional to genuine structural novelty (ARI-distance-based),
+   refining the cruder action-choice-entropy bonus floated in Exp 4; or a stagnation-triggered
+   bonus toward operators with a known-short correlation length (from the offline landscape
+   characterization) once the search is stuck.
+
+**Proposed order:** (1) offline analysis on existing Exp0/1/2 data first — cheapest, answers the
+taxonomy question, no new runs, contingent on confirming solution snapshots are actually logged;
+(2) standalone per-operator correlation-length characterization — new but training-free; (3) only
+if (1)-(2) show a strong, useful signal, wire ARI-distance into Exp 4's state/reward design.
+
+**Status:** planned, not started.
+
+## 10. Known issue — train/eval iteration-scaling mismatch in `progress`/`normalized_stagnation`
+(found 2026-08-20, during Exp1 analysis)
+
+`rl/modules/state.py:77,217` compute `progress` and `normalized_stagnation` as
+`raw_count / env.max_iterations`. Training runs use `max_iterations=50`; evaluation runs
+(`scripts/run_experiment_rl_improvement_mvp.py`, `match_kisialiou` mode) use `300` per restart —
+a 6x different denominator for the same raw iteration count. Concretely: at eval iteration 25,
+`progress=0.083`, but at training iteration 25 (out of a 50-step episode), `progress` was already
+0.5 — the same raw count means something completely different at train vs. eval time. Past
+training's 50-iteration horizon, eval states fall entirely outside anything the policy was ever
+trained on for these two features.
+
+**Found via**: Exp1 (`op_triple_v1`) operator-usage deep dive (2026-08-20) — diagnosed as the root
+cause of why the trained policy makes one early decision (destroy/repair/improvement bundle) and
+then repeats it mechanically for the rest of a 300-iteration restart regardless of whether it's
+working. Full mechanism and evidence in
+`docs/experiments/diary_entry_exp1_op_triple_results_and_operator_usage.md`, section 8 and Overall
+conclusion.
+
+**Not Exp1-specific.** Affects every experiment using `features_improvement_v1`/`v3` state
+encoders whenever train `max_iterations` ≠ eval `restart_max_iterations` — i.e. Exp0-2 as trained
+so far, and would affect Exp 4/5 too if built on the same state modules without a fix.
+
+**Status: not yet fixed.** Flagged by the Exp1 analysis as the single highest-leverage next step —
+fix before further retraining, since a policy trained under this mismatch structurally cannot learn
+reliable long-run-stagnation behavior at eval timescales.
