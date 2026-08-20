@@ -57,6 +57,7 @@ class ALNSEnvironment(gym.Env):
         problem_instance: str = "SMALL_1",
         seed: int = 42,
         max_iterations: int = 100,
+        progress_horizon: Optional[int] = None,
         temperature: float = 500.0,
         theta: float = 7.0,
         weight_update_interval: Optional[int] = None,
@@ -92,6 +93,12 @@ class ALNSEnvironment(gym.Env):
             problem_instance: Name of the problem instance to solve
             seed: Random seed for reproducibility
             max_iterations: Maximum number of ALNS iterations per episode
+            progress_horizon: Denominator for the `progress`/`normalized_stagnation` state
+                features (rl/modules/state.py). Defaults to max_iterations. Set explicitly to
+                the same value in both training and eval env construction whenever
+                max_iterations legitimately differs between them (e.g. training episodes vs.
+                match_kisialiou eval restarts), so the same raw iteration count means the same
+                thing to the policy in both contexts.
             temperature: Initial simulated annealing temperature
             theta: Temperature cooling factor
             weight_update_interval: Iterations between operator weight updates
@@ -127,6 +134,13 @@ class ALNSEnvironment(gym.Env):
         self.current_problem_instance = self.problem_instance
         self.seed = seed
         self.max_iterations = max_iterations
+        # progress/normalized_stagnation state features (rl/modules/state.py) are computed as
+        # raw_count / progress_horizon. Kept independent from max_iterations (which sets the
+        # actual episode/restart length and legitimately differs between training and
+        # match_kisialiou eval restarts) so the same raw iteration count normalizes to the same
+        # feature value in both contexts -- see docs/PAPER1_ACTION_SPACE_PLAN.md section 10.
+        # Defaults to max_iterations for full backward compatibility when not set explicitly.
+        self.progress_horizon = progress_horizon if progress_horizon is not None else max_iterations
         self.temperature = temperature
         self.theta = theta
         # delta (weight-update interval): 50 if rho<500, 100 if rho>=500,

@@ -321,6 +321,7 @@ def train_ppo_agent(
     seed: int = 42,
     train_instance_paths: Optional[Sequence[str]] = None,
     max_iterations: int = 100,
+    progress_horizon: Optional[int] = None,
     sampling_strategy: str = "random",
     action_module: Optional[str] = None,
     state_module: Optional[str] = None,
@@ -363,6 +364,8 @@ def train_ppo_agent(
             "problem_instance_paths": train_instances,
             "problem_sampling_strategy": sampling_strategy,
         }
+        if progress_horizon is not None:
+            env_kwargs["progress_horizon"] = progress_horizon
         if action_module:
             env_kwargs["action_module"] = action_module
         if state_module:

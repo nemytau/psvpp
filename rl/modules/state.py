@@ -74,7 +74,13 @@ class OperatorFeatureStateEncoder(BaseStateEncoder):
         obs_values.append(float(metrics.get("temperature", 0.0)))
         obs_values.append(float(metrics.get("stagnation_count", 0.0)))
         obs_values.append(float(metrics.get("iteration", env.iteration)))
-        progress = env.iteration / max(env.max_iterations, 1)
+        # Use progress_horizon (falls back to max_iterations if unset) rather than
+        # max_iterations directly -- max_iterations legitimately differs between training
+        # episodes and match_kisialiou eval restarts, which would otherwise make the same raw
+        # iteration count normalize to different values in each context. See
+        # docs/PAPER1_ACTION_SPACE_PLAN.md section 10.
+        horizon = getattr(env, "progress_horizon", None) or env.max_iterations
+        progress = env.iteration / max(horizon, 1)
         obs_values.append(progress)
 
         # Solution structure metrics
@@ -213,8 +219,8 @@ class ImprovementOnlyStateEncoderV1(BaseStateEncoder):
             normalized_improvement_type_id = 0.0
 
         stagnation = float(getattr(env, "stagnation_count", 0.0))
-        max_iterations = float(max(int(getattr(env, "max_iterations", 1)), 1))
-        normalized_stagnation = float(np.clip(stagnation / max_iterations, 0.0, 1.0))
+        horizon = float(max(int(getattr(env, "progress_horizon", None) or getattr(env, "max_iterations", 1)), 1))
+        normalized_stagnation = float(np.clip(stagnation / horizon, 0.0, 1.0))
 
         last_reward = float(getattr(env, "last_reward", 0.0))
         clipped_last_reward = float(np.clip(last_reward / 20.0, -1.0, 1.0))
@@ -292,8 +298,8 @@ class ImprovementOnlyStateEncoderV2(BaseStateEncoder):
         normalized_prev_type = self._normalize_type_id(prev_improvement_type_id)
 
         chain_streak = float(max(int(getattr(env, "chain_improvement_streak", 0)), 0))
-        max_iterations = float(max(int(getattr(env, "max_iterations", 1)), 1))
-        normalized_chain_streak = float(np.clip(chain_streak / max_iterations, 0.0, 1.0))
+        horizon = float(max(int(getattr(env, "progress_horizon", None) or getattr(env, "max_iterations", 1)), 1))
+        normalized_chain_streak = float(np.clip(chain_streak / horizon, 0.0, 1.0))
 
         last_reward = float(getattr(env, "last_reward", 0.0))
         clipped_last_reward = float(np.clip(last_reward / 20.0, -1.0, 1.0))

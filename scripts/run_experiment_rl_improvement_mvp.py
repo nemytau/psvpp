@@ -273,6 +273,21 @@ def parse_args() -> argparse.Namespace:
         help="Maximum iterations per single restart during evaluation before moving to next restart",
     )
     parser.add_argument(
+        "--progress-horizon",
+        type=int,
+        default=None,
+        help=(
+            "Denominator for the policy's progress/normalized_stagnation state features "
+            "(rl/modules/state.py), shared identically between training and eval so the same "
+            "raw iteration count means the same thing in both contexts -- training episodes "
+            "(--max-iterations) and match_kisialiou eval restarts (--eval-restart-max-iterations) "
+            "legitimately run to different lengths, but previously each env normalized against "
+            "its own max_iterations, corrupting the feature across that mismatch (see "
+            "docs/PAPER1_ACTION_SPACE_PLAN.md section 10). Defaults to "
+            "--eval-restart-max-iterations."
+        ),
+    )
+    parser.add_argument(
         "--eval-runtime-reference-restarts",
         type=int,
         default=5,
@@ -409,6 +424,7 @@ def run_policy_episode(
     policy_deterministic: bool = True,
     target_runtime_seconds: Optional[float] = None,
     restart_limit: Optional[int] = None,
+    progress_horizon: Optional[int] = None,
 ) -> tuple[EpisodeSummary, List[object], List[Dict[str, object]]]:
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
     effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
@@ -431,6 +447,7 @@ def run_policy_episode(
         env = ALNSEnvironment(
             problem_instance=dataset_path,
             max_iterations=restart_cap,
+            progress_horizon=progress_horizon,
             seed=restart_seed,
             problem_instance_paths=[dataset_path],
             problem_sampling_strategy="round_robin",
@@ -549,6 +566,7 @@ def run_baseline_episode(
     restart_max_iterations: int,
     target_runtime_seconds: Optional[float] = None,
     restart_limit: Optional[int] = None,
+    progress_horizon: Optional[int] = None,
 ) -> tuple[EpisodeSummary, List[Dict[str, object]]]:
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
     effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
@@ -570,6 +588,7 @@ def run_baseline_episode(
         env = ALNSEnvironment(
             problem_instance=dataset_path,
             max_iterations=restart_cap,
+            progress_horizon=progress_horizon,
             seed=restart_seed,
             problem_instance_paths=[dataset_path],
             problem_sampling_strategy="round_robin",
@@ -747,6 +766,7 @@ def _build_run_manifest(
     exact_command: str,
     action_space_trace: Dict[str, Any],
     training_operator_usage: Dict[str, Any],
+    progress_horizon: int,
 ) -> Dict[str, Any]:
     train_env_kwargs = {
         "problem_sampling_strategy": "random",
@@ -807,6 +827,7 @@ def _build_run_manifest(
             "eval_seeds": eval_seeds,
             "eval_iteration_cap": eval_iteration_cap,
             "eval_restart_max_iterations": args.eval_restart_max_iterations,
+            "progress_horizon": progress_horizon,
             "train_paths": train_paths,
             "test_paths": test_paths,
             "train_env_kwargs": train_env_kwargs,
@@ -848,6 +869,7 @@ def run_kisialiou_episode(
     target_runtime_seconds: Optional[float] = None,
     chain_max_consecutive_improvements: Optional[int] = None,
     reference_restarts: Optional[int] = None,
+    progress_horizon: Optional[int] = None,
 ) -> tuple[EpisodeSummary, List[Dict[str, object]]]:
     """
     Run Kisialiou deterministic ALNS algorithm with operator logging.
@@ -884,6 +906,7 @@ def run_kisialiou_episode(
         env = ALNSEnvironment(
             problem_instance=dataset_path,
             max_iterations=restart_cap,
+            progress_horizon=progress_horizon,
             seed=restart_seed,
             problem_instance_paths=[dataset_path],
             problem_sampling_strategy="round_robin",
@@ -1040,10 +1063,19 @@ def main() -> None:
         )
     size_bucket = "small" if sizes == ["small"] else "large"
 
+    # Shared training/eval normalization horizon for progress/normalized_stagnation state
+    # features -- see the --progress-horizon flag's help text and
+    # docs/PAPER1_ACTION_SPACE_PLAN.md section 10. Computed once so training and every eval
+    # episode function below use the identical value.
+    progress_horizon = (
+        int(args.progress_horizon) if args.progress_horizon is not None else int(args.eval_restart_max_iterations)
+    )
+
     exact_command = _build_exact_command()
     reference_train_env = ALNSEnvironment(
         problem_instance=train_paths[0],
         max_iterations=int(args.max_iterations),
+        progress_horizon=progress_horizon,
         seed=int(args.seed),
         problem_instance_paths=list(train_paths),
         problem_sampling_strategy="random",
@@ -1072,6 +1104,7 @@ def main() -> None:
         exact_command=exact_command,
         action_space_trace=action_space_trace,
         training_operator_usage={},
+        progress_horizon=progress_horizon,
     )
     manifest_path = out_dir / "run_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -1099,6 +1132,7 @@ def main() -> None:
             seed=args.seed,
             train_instance_paths=train_paths,
             max_iterations=args.max_iterations,
+            progress_horizon=progress_horizon,
             sampling_strategy="random",
             action_module=args.action_module,
             state_module=args.state_module,
@@ -1166,6 +1200,7 @@ def main() -> None:
                             else None
                         )
                     ),
+                    progress_horizon=progress_horizon,
                 )
             restart_rows.extend(
                 {
@@ -1200,6 +1235,7 @@ def main() -> None:
                 policy_deterministic=True,
                 target_runtime_seconds=runtime_target_seconds,
                 restart_limit=args.eval_fixed_restarts,
+                progress_horizon=progress_horizon,
             )
             restart_rows.extend(
                 {
@@ -1230,6 +1266,7 @@ def main() -> None:
                     reward_module=args.reward_module,
                     target_runtime_seconds=runtime_target_seconds,
                     restart_limit=args.eval_fixed_restarts,
+                    progress_horizon=progress_horizon,
                 )
             restart_rows.extend(
                 {
@@ -1313,6 +1350,7 @@ def main() -> None:
                     policy_deterministic=False,
                     target_runtime_seconds=runtime_target_seconds,
                     restart_limit=args.eval_fixed_restarts,
+                    progress_horizon=progress_horizon,
                 )
                 restart_rows.extend(
                     {
@@ -1531,6 +1569,7 @@ def main() -> None:
         f"eval_runtime_mode: {args.eval_runtime_mode}",
         f"eval_iteration_cap: {eval_iteration_cap}",
         f"eval_restart_max_iterations: {args.eval_restart_max_iterations}",
+        f"progress_horizon: {progress_horizon}",
         f"eval_runtime_reference_restarts: {args.eval_runtime_reference_restarts}",
         f"eval_runtime_budget_seconds: {args.eval_runtime_budget_seconds}",
         f"eval_fixed_restarts: {args.eval_fixed_restarts}",
