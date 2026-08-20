@@ -645,6 +645,11 @@ impl ALNSEngine {
         registry.add_repair_operator(Box::new(
             crate::operators::repair::k_regret_insertion::KRegretInsertion { k: 3, search_k: 3 },
         ));
+        // Single version: no per-candidate cost ranking, so no parameter to vary the way
+        // search_k/candidate_rank do for the other repair operators above.
+        registry.add_repair_operator(Box::new(
+            crate::operators::repair::first_fit_insertion::FirstFitInsertion,
+        ));
 
         // v1..v5: search_k = 1..5 (candidate voyages considered per visit relocation)
         for search_k in 1..=5 {
@@ -695,6 +700,7 @@ impl ALNSEngine {
         }
         repair_operators.push("k_regret_2".to_string());
         repair_operators.push("k_regret_3".to_string());
+        repair_operators.push("first_fit_insertion_v1".to_string());
 
         let mut improvement_operators = Vec::new();
         for idx in 1..=5 {
