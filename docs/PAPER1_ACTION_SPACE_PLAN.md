@@ -520,6 +520,18 @@ conclusion.
 encoders whenever train `max_iterations` ≠ eval `restart_max_iterations` — i.e. Exp0-2 as trained
 so far, and would affect Exp 4/5 too if built on the same state modules without a fix.
 
-**Status: not yet fixed.** Flagged by the Exp1 analysis as the single highest-leverage next step —
-fix before further retraining, since a policy trained under this mismatch structurally cannot learn
-reliable long-run-stagnation behavior at eval timescales.
+**Status: ✅ fixed 2026-08-20.** Added an explicit `progress_horizon` parameter to
+`ALNSEnvironment`, independent of `max_iterations` (which still legitimately controls actual
+episode/restart length); defaults to `max_iterations` when unset, so nothing changes for any
+existing caller that doesn't set it. Threaded a single shared value (new `--progress-horizon`
+flag in `run_experiment_rl_improvement_mvp.py`, defaulting to `--eval-restart-max-iterations`)
+through the real training env, the diagnostic/reference env, and all three eval episode functions
+(RL, baseline, Kisialiou). Verified: training-shaped (`max_iterations=50`) and eval-shaped
+(`max_iterations=300`) envs with the same `progress_horizon` now produce identical
+`progress`/`normalized_stagnation` values for the same raw iteration/stagnation count; old mismatch
+reproduces exactly when `progress_horizon` is left unset. Full train+eval smoke test passed.
+
+**Does not retroactively fix Exp0/Exp1's already-trained models** — their learned behavior is
+calibrated to the old mismatched scale regardless of this code change. Retraining is required to
+actually realize the fix; this only makes new training/eval runs consistent going forward. Next
+retraining pass (Exp1 large, any Exp2 retrain, Exp 4/5) should use this flag.
