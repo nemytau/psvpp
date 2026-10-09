@@ -345,6 +345,65 @@ experiments planned on this run/config.
 
 ---
 
+## Experiment 9 — State / action / reward design ablation for NORM 2026 (running, launched 2026-10-09)
+
+**Question**: for the talk "State, Action, and Reward Design for RL-Enhanced ALNS in Periodic
+Supply Vessel Planning" — which design choices actually matter? One factor at a time around the
+Experiment 8 reference (`op_triple_v2` / `features_improvement_v3` / `delta_cost_v9`,
+ent_coef 0.01, ph300, 200k PPO steps), plus non-learned controls on the same action spaces.
+Small + medium only (large skipped for time).
+
+| Axis | Variants (reference in bold) |
+|---|---|
+| Action | `improvement_chain_v2` (adaptive D/R, RL picks the improvement; 5) · **`op_triple_v2` (48)** · `op_triple_many_v1` (288 = 6 destroy × 4 repair × 12 improvement) |
+| State | `features_instance_v1` (11, static) · `features_search_v1` (34) · `features_solution_v1` (15) · `features_all_v1` (60, all three) · `features_null_v1` (constant) · **`features_improvement_v3`** |
+| Reward | `alns_score_v1` (Ropke & Pisinger σ 33/9/3 → 1 / 0.27 / 0.09 / 0) · `alns_score_time_v1` (+ 0.002/ms time tax, cap 0.5) · `new_best_v1` (sparse +1) · `best_gain_v1` (% best-cost gain) · **`delta_cost_v9`** |
+| Controls (no training) | uniform random over triple / many; fixed triples random-removal + first-fit + FCR (action 29) and + relocation (action 30) — the triples Exp 8's medium/small policies collapsed to |
+
+**Many-operators action space** (`op_triple_many_v1`, recommendation from the previous
+conference): destroy = Shaw / random / worst × removal ratio {Kisialiou-calibrated, high
+ξ∈[0.30,0.40]} (only ξ differs; other parameters at the Kisialiou calibration); repair as in the
+triple; improvement = 3 intensity levels each: VNR search_k 1/3/5, FCR λmax 8/35/80, relocation
+and swap max_moves 1/10/unlimited. Five new Rust operators (`*_high_v1`, `deep_relocation_m10_v1`,
+`deep_swap_m10_v1`) were appended after all existing ones; a fixed-seed trajectory check confirmed
+byte-identical behaviour of existing operators (triple, chain, adaptive baseline; small + medium),
+so trained models and the baseline/Kisialiou cache stay valid.
+
+**State groups**: *instance* — installations, visits, weekly deck demand, demand in full loads of
+the smallest / largest vessel (the vessel list is only an upper bound on the fleet, so fleet size
+itself is excluded), average / max distance, visits per installation, demand per visit, share of
+installations and of visits with a time window (< 24 h). *Search process* — progress, stagnation,
+temperature ratio, last step accepted / acceptance type / new best / reward, recent acceptance and
+new-best rates, **last used destroy / repair / improvement family** (+ removal-ratio and intensity
+level), repeat streak, last step duration, per-family improvement track record. *Solution* —
+current and best cost vs initial, current-best gap, fixed-cost share, voyages per visit, empty
+voyages, vessels used / fleet, voyage and vessel load / time utilisation, feasibility. All
+normalised (the v3 reference feeds raw costs).
+
+**Protocol**: 50 test instances per size, eval seed 42, `match_kisialiou` wall-time budget against
+the cached Kisialiou/baseline results (per-size slices `runs/baseline_kisialiou_cache/
+cache_{size}_seed42.json`). Training seeds: small 42/43/44 for every trained variant; medium 42
+(reference 42/43/44). The Exp 8 seed-42 models are re-evaluated, not reused, so every variant is
+scored under the same machine load (4 concurrent jobs on the M1's 4 performance cores).
+Evaluation now checkpoints after every instance (`partial_rows.jsonl`, `--resume`) and records
+per-restart action statistics (distinct actions, switches, action histogram).
+
+**Scripts**: `scripts/run_norm2026_ablation.py` (queue, 58 jobs, status in `NORM2026_STATUS.md`),
+`scripts/analyze_norm2026_ablation.py` (ratio-to-best tables, paired Wilcoxon + bootstrap CIs vs
+reference and Kisialiou, policy-behaviour tables). Outputs: `output/norm26__<axis>__<variant>__
+<size>__s<seed>/`, analysis in `output/norm26_analysis/`.
+
+**Data provenance note (found 2026-10-08)**: `data/processed/alns/*` (what the solver, training and
+the cache read) is created once from `data/generated/*` and never refreshed. Test datasets 01–05
+of every size (and large 08), plus 15 medium/large training sets, differ between the two because
+`data/generated` was regenerated on 2026-09-04. All experiments are internally consistent (they
+all read the processed files), but any analysis reading instance properties from
+`data/generated` describes the wrong instances for those datasets — read `data/processed` instead.
+
+**Status**: running.
+
+---
+
 ## Historical experiments (pre-refactor)
 
 Earlier experiments ran with single non-parameterized operators. Bugs fixed

@@ -418,3 +418,100 @@ class DeltaCostTimePenaltyReward(DeltaCostAcceptedNoOpPenaltyReward):
             reward -= time_penalty
 
         return float(np.clip(reward, -5.0, 20.0))
+
+
+# ---------------------------------------------------------------------------
+# NORM 2026 reward-design ablation: simple, ALNS-style rewards.
+# ---------------------------------------------------------------------------
+
+
+def _is_new_best(result: Dict[str, Any], env: Any) -> bool:
+    """True if this step improved the restart's best cost.
+
+    Compared against env.last_best_cost, which the environment still holds at the
+    *previous* best when compute() runs (it is updated right after the reward call).
+    """
+    prev_best = getattr(env, "last_best_cost", None)
+    if prev_best is None:
+        return bool(result.get("is_new_best", False))
+    return float(result.get("best_cost", prev_best)) < float(prev_best) - 1e-9
+
+
+@register_reward("alns_score_v1")
+class AlnsScoreReward(BaseRewardFunction):
+    """Classic ALNS operator score used as the RL reward (Ropke & Pisinger, 2006).
+
+    sigma1 = 33 for a new global best, sigma2 = 9 for a solution better than the current
+    one, sigma3 = 3 for an accepted worse solution (simulated-annealing acceptance), 0 for a
+    rejected one -- rescaled so a new best is worth 1.0. Uses the environment's
+    acceptance_type ("improvement" = accepted and better than current), which is set before
+    the reward is computed.
+    """
+
+    version = "alns-score-1.0"
+
+    NEW_BEST = 1.0
+    BETTER = 9.0 / 33.0
+    ACCEPTED_WORSE = 3.0 / 33.0
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        if _is_new_best(result, env):
+            return self.NEW_BEST
+        acceptance_type = result.get("acceptance_type")
+        if acceptance_type == "improvement":
+            return self.BETTER
+        if acceptance_type == "annealing":
+            return self.ACCEPTED_WORSE
+        return 0.0
+
+
+@register_reward("alns_score_time_v1")
+class AlnsScoreTimeReward(AlnsScoreReward):
+    """alns_score_v1 minus a capped, operator-time tax (same additive design as
+    delta_cost_v9, rescaled to the 0..1 score range).
+
+    0.002 per ms, capped at 0.5: negligible for cheap steps (<1 ms), ~0.3 for an unlimited
+    deep_swap call on medium (~160 ms), so a slow step that finds a new best still nets
+    +0.5 or more, while a slow step that finds nothing is clearly negative.
+    """
+
+    version = "alns-score-time-1.0"
+
+    TIME_PENALTY_PER_MS = 0.002
+    MAX_TIME_PENALTY = 0.5
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        reward = super().compute(result, env)
+        elapsed_ns = result.get("elapsed_ns")
+        if elapsed_ns is not None and elapsed_ns > 0:
+            reward -= min(self.TIME_PENALTY_PER_MS * float(elapsed_ns) / 1e6, self.MAX_TIME_PENALTY)
+        return float(reward)
+
+
+@register_reward("new_best_v1")
+class NewBestReward(BaseRewardFunction):
+    """Sparse: +1 only when a step finds a new best solution (what evaluation measures)."""
+
+    version = "new-best-1.0"
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        return 1.0 if _is_new_best(result, env) else 0.0
+
+
+@register_reward("best_gain_v1")
+class BestGainReward(BaseRewardFunction):
+    """Relative improvement of the best cost, in percent (0 if the best did not improve).
+
+    Magnitude-aware version of new_best_v1; clipped at 20 so the very first steps of a
+    restart (large gains from the constructive solution) cannot dominate.
+    """
+
+    version = "best-gain-1.0"
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        prev_best = getattr(env, "last_best_cost", None)
+        if prev_best is None or float(prev_best) <= 0.0:
+            return 0.0
+        best = float(result.get("best_cost", prev_best))
+        gain = (float(prev_best) - best) / float(prev_best) * 100.0
+        return float(np.clip(gain, 0.0, 20.0))

@@ -32,6 +32,12 @@ def _compute_instance_statistics(problem_instance: str) -> Dict[str, float]:
     total_demand = sum(inst.deck_demand * inst.visit_count for inst in installations)
     num_vessels = len(vessels)
 
+    deck_capacities = [_to_float(v.get("deck_capacity"), default=0.0) for v in vessels]
+    deck_capacities = [c for c in deck_capacities if math.isfinite(c) and c > 0.0]
+    # A time window narrower than the full day, i.e. anything but (0, 24), is a real TW.
+    with_tw = [inst for inst in installations if inst.has_time_window]
+    tw_visits = sum(inst.visit_count for inst in with_tw)
+
     distances = [
         _haversine_km(base_location, inst.location)
         for inst in installations
@@ -47,6 +53,10 @@ def _compute_instance_statistics(problem_instance: str) -> Dict[str, float]:
         "total_deck_demand": float(total_demand),
         "avg_distance_km": avg_distance,
         "max_distance_km": max_distance,
+        "min_deck_capacity": float(min(deck_capacities)) if deck_capacities else 0.0,
+        "max_deck_capacity": float(max(deck_capacities)) if deck_capacities else 0.0,
+        "tw_installation_share": len(with_tw) / num_installations if num_installations else 0.0,
+        "tw_visit_share": tw_visits / total_visits if total_visits else 0.0,
     }
 
 
@@ -148,12 +158,30 @@ def _first_csv(path: Path) -> Path:
 
 
 class _InstallationRecord:
-    __slots__ = ("deck_demand", "visit_count", "location")
+    __slots__ = ("deck_demand", "visit_count", "location", "has_time_window")
 
-    def __init__(self, deck_demand: float, visit_count: float, location: Optional[Tuple[float, float]]) -> None:
+    def __init__(
+        self,
+        deck_demand: float,
+        visit_count: float,
+        location: Optional[Tuple[float, float]],
+        has_time_window: bool = False,
+    ) -> None:
         self.deck_demand = deck_demand
         self.visit_count = visit_count
         self.location = location
+        self.has_time_window = has_time_window
+
+
+def _has_time_window(value: Optional[str]) -> bool:
+    """True for a window narrower than the full day, e.g. "(7, 19)"; False for "(0, 24)"/missing."""
+    if not value:
+        return False
+    try:
+        start, end = ast.literal_eval(value)
+        return (float(end) - float(start)) < 24.0
+    except (ValueError, SyntaxError, TypeError):
+        return False
 
 
 def _read_installations(path: Path):
@@ -163,7 +191,7 @@ def _read_installations(path: Path):
             deck_demand = _to_float(row.get("deck_demand"), default=0.0)
             visit_count = _to_float(row.get("visit_frequency"), default=0.0)
             location = _parse_location(row.get("location"))
-            yield _InstallationRecord(deck_demand, visit_count, location)
+            yield _InstallationRecord(deck_demand, visit_count, location, _has_time_window(row.get("time_window")))
 
 
 def _read_csv_dicts(path: Path):

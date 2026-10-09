@@ -484,6 +484,79 @@ class OpTripleV2ActionSpace(OperatorPairActionSpace):
         return self._d_engine[d_local], self._r_engine[r_local], self._i_engine[i_local]
 
 
+# Parameter levels for the "many operators" action space (NORM 2026): the same operator
+# families as op_triple_v2, each offered at several parameter settings so RL also chooses
+# *how hard* to destroy / improve, not just which family.
+_MANY_IMPROVEMENTS = (
+    "voyage_number_reduction_v1",             # search_k = 1
+    "voyage_number_reduction_v3",             # search_k = 3
+    "voyage_number_reduction_v5",             # search_k = 5
+    "fleet_and_cost_reduction_v1",            # lambda_max = 8
+    "fleet_and_cost_reduction_kisialiou_v1",  # lambda_max = 35 (Kisialiou calibration)
+    "fleet_and_cost_reduction_v10",           # lambda_max = 80
+    "deep_relocation_v1",                     # max_moves = 1
+    "deep_relocation_m10_v1",                 # max_moves = 10
+    "deep_relocation_v10",                    # unlimited
+    "deep_swap_v1",                           # max_moves = 1
+    "deep_swap_m10_v1",                       # max_moves = 10
+    "deep_swap_v10",                          # unlimited
+)
+
+
+@register_action("op_triple_many_v1")
+class OpTripleManyV1ActionSpace(OperatorPairActionSpace):
+    """op_triple_v2 with parameterised operator variants (NORM 2026 action-space ablation).
+
+    Destroy: Shaw / random / worst removal, each at the Kisialiou-calibrated removal ratio
+    (size-bucket dependent) and at a high ratio (xi in [0.30, 0.40]); all other destroy
+    parameters stay at the Kisialiou calibration, so only the ratio differs.
+    Repair: unchanged from op_triple_v2 (greedy, regret-2, regret-3, first-fit).
+    Improvement: 3 intensity levels per family (see _MANY_IMPROVEMENTS).
+
+    Action space: 6 destroy x 4 repair x 12 improvement = 288 actions.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+        size_bucket: str = "large",
+    ) -> None:
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        i_all = list(improvement_operators or [])
+        calibrated_destroy, selected_repair = _base_destroy_repair(d_all, r_all, size_bucket=size_bucket)
+        high_destroy = [
+            "shaw_removal_high_v1",
+            "random_visit_removal_high_v1",
+            "worst_visit_removal_high_v1",
+        ]
+        missing = [n for n in high_destroy + list(_MANY_IMPROVEMENTS) if n not in d_all + i_all]
+        if missing:
+            raise ValueError(f"op_triple_many_v1 needs operators missing from the engine (rebuild rust_alns?): {missing}")
+        selected_destroy = [op for pair in zip(calibrated_destroy, high_destroy) for op in pair]
+        first_fit = _first(r_all, "first_fit_insertion_v1")
+        if first_fit is not None:
+            selected_repair = [*selected_repair, first_fit]
+        selected_improve = list(_MANY_IMPROVEMENTS)
+
+        super().__init__(
+            destroy_operators=selected_destroy,
+            repair_operators=selected_repair,
+            improvement_operators=selected_improve,
+        )
+        self._d_engine = [d_all.index(n) for n in selected_destroy]
+        self._r_engine = [r_all.index(n) for n in selected_repair]
+        self._i_engine = [i_all.index(n) for n in selected_improve]
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        d_local, r_local, i_local = super().id_to_action(action_idx)
+        return self._d_engine[d_local], self._r_engine[r_local], self._i_engine[i_local]
+
+
 @register_action("destroy_repair_many_v1")
 class DestroyRepairManyActionSpace(BaseActionSpace):
     """Discrete actions over a large destroy/repair grid with no improvement phase.

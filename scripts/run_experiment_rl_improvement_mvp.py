@@ -332,7 +332,54 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to existing PPO zip model (required with --skip-training)",
     )
+    parser.add_argument(
+        "--policy",
+        choices=("ppo", "random", "fixed"),
+        default="ppo",
+        help=(
+            "Non-learned control policies evaluated through the exact same RL eval loop: "
+            "'random' samples a uniform action each step, 'fixed' always plays --fixed-action. "
+            "Both skip training and need no --model-path."
+        ),
+    )
+    parser.add_argument(
+        "--fixed-action",
+        type=int,
+        default=None,
+        help="Action index played every step when --policy fixed",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Eval results are checkpointed after every dataset/seed (partial_rows.jsonl, "
+            "partial_restart_rows.jsonl, progress.json in the output dir). With --resume, "
+            "dataset/seed pairs already in partial_rows.jsonl are skipped instead of re-run."
+        ),
+    )
+    parser.add_argument(
+        "--skip-cache-copy",
+        action="store_true",
+        help="Do not write a copy of the full baseline/Kisialiou cache into the output dir",
+    )
     return parser.parse_args()
+
+
+class _ControlPolicy:
+    """Stand-in for a PPO model exposing only `predict`, for random/fixed control policies."""
+
+    def __init__(self, kind: str, n_actions: int, fixed_action: Optional[int], seed: int) -> None:
+        self.kind = kind
+        self.n_actions = int(n_actions)
+        self.fixed_action = fixed_action
+        self._rng = np.random.default_rng(seed)
+        if kind == "fixed" and (fixed_action is None or not 0 <= fixed_action < self.n_actions):
+            raise RuntimeError(f"--fixed-action must be in [0, {self.n_actions}) for --policy fixed")
+
+    def predict(self, obs, deterministic: bool = True):
+        if self.kind == "fixed":
+            return np.array(self.fixed_action), None
+        return np.array(int(self._rng.integers(self.n_actions))), None
 
 
 def parse_seed_list(raw: str) -> List[int]:
@@ -423,9 +470,19 @@ def run_policy_episode(
         truncated = False
         steps = 0
         restart_elapsed_ms = 0.0
+        # Compact record of how the policy used its actions in this restart (does it switch
+        # operators, or commit to one?) -- far cheaper to analyse than the per-iteration
+        # operator-usage CSVs.
+        action_counts: Counter = Counter()
+        action_switches = 0
+        previous_action: Optional[int] = None
         while not done and not truncated and steps < restart_cap:
             action_raw, _ = model.predict(obs, deterministic=policy_deterministic)
             action = int(action_raw.item()) if hasattr(action_raw, "item") else int(action_raw)
+            action_counts[action] += 1
+            if previous_action is not None and action != previous_action:
+                action_switches += 1
+            previous_action = action
             obs, _, done, truncated, info = env.step(action)
             step_info = info.get("step_info", {}) if isinstance(info, dict) else {}
             step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
@@ -476,6 +533,10 @@ def run_policy_episode(
                 "mode_label": mode_label,
                 "size_label": size_label,
                 "algorithm_mode": "baseline",
+                "policy_steps": steps,
+                "distinct_actions": len(action_counts),
+                "action_switches": action_switches,
+                "action_hist": json.dumps(dict(action_counts)),
             }
         )
 
@@ -890,7 +951,14 @@ def main() -> None:
     model_base_path = out_dir / "model" / "ppo_rl_improvement_mvp"
     model_base_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if args.skip_training:
+    if args.policy != "ppo":
+        model = _ControlPolicy(
+            args.policy,
+            n_actions=int(action_space_trace["space_n"]),
+            fixed_action=args.fixed_action,
+            seed=int(args.seed),
+        )
+    elif args.skip_training:
         if not args.model_path:
             raise RuntimeError("--model-path is required when --skip-training is set")
         model_path = Path(args.model_path)
@@ -951,11 +1019,34 @@ def main() -> None:
     bk_cache_out: Dict[str, Any] = dict(bk_cache_in) if bk_cache_in else {}
 
     rows: List[Dict] = []
+    # Restart-level rows are streamed to partial_restart_rows.jsonl after every dataset/seed
+    # instead of accumulating for the whole run (RAM), and dataset-level rows are
+    # checkpointed to partial_rows.jsonl so a crashed eval can --resume where it stopped.
     restart_rows: List[Dict[str, object]] = []
+    partial_rows_path = out_dir / "partial_rows.jsonl"
+    partial_restart_path = out_dir / "partial_restart_rows.jsonl"
+    progress_path = out_dir / "progress.json"
+    completed_keys: set = set()
+    if args.resume and partial_rows_path.exists():
+        for line in partial_rows_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                rows.append(row)
+                completed_keys.add(_cache_key(str(row["dataset_path"]), int(row["seed"])))
+        print(f"Resuming: {len(completed_keys)} dataset/seed pairs already evaluated.")
+    else:
+        for stale in (partial_rows_path, partial_restart_path):
+            if stale.exists():
+                stale.unlink()
+    eval_started = time.time()
+    total_pairs = len(test_paths) * len(eval_seeds)
     for dataset_path in test_paths:
         dataset_size_label = infer_dataset_size_label(dataset_path)
         for seed in eval_seeds:
             cache_key = _cache_key(dataset_path, seed)
+            if cache_key in completed_keys:
+                continue
+            rows_mark = len(rows)
             cached_entry = bk_cache_in.get(cache_key) if bk_cache_in is not None else None
 
             if cached_entry is None and not args.recompute_baseline_kisialiou:
@@ -1264,8 +1355,34 @@ def main() -> None:
                 }
             )
 
-    bk_cache_path = out_dir / "baseline_kisialiou_cache.json"
-    bk_cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
+            with partial_restart_path.open("a", encoding="utf-8") as handle:
+                for restart_row in restart_rows:
+                    handle.write(json.dumps(restart_row, default=str) + "\n")
+            restart_rows.clear()
+            with partial_rows_path.open("a", encoding="utf-8") as handle:
+                for row in rows[rows_mark:]:
+                    handle.write(json.dumps(row, default=str) + "\n")
+            completed_keys.add(cache_key)
+            rl_done = [r for r in rows if r.get("mode") == "rl_improvement_mvp"]
+            progress = {
+                "done": len(completed_keys),
+                "total": total_pairs,
+                "last": cache_key,
+                "elapsed_seconds_this_session": round(time.time() - eval_started, 1),
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "rl_mean_kisialiou_gap_pct": (
+                    statistics.fmean(float(r["kisialiou_gap_pct"]) for r in rl_done) if rl_done else None
+                ),
+                "rl_wins_vs_kisialiou": sum(1 for r in rl_done if float(r["kisialiou_gap_pct"]) > 1e-9),
+                "rl_losses_vs_kisialiou": sum(1 for r in rl_done if float(r["kisialiou_gap_pct"]) < -1e-9),
+            }
+            tmp_progress = progress_path.with_suffix(".json.tmp")
+            tmp_progress.write_text(json.dumps(progress, indent=2), encoding="utf-8")
+            tmp_progress.replace(progress_path)
+
+    if not args.skip_cache_copy:
+        bk_cache_path = out_dir / "baseline_kisialiou_cache.json"
+        bk_cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
     if args.recompute_baseline_kisialiou:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
@@ -1281,11 +1398,22 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    if restart_rows:
-        with restart_csv.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(restart_rows[0].keys()))
+    if partial_restart_path.exists():
+        # Two streaming passes over the jsonl (union of keys, then rows) so the full
+        # restart table is never held in memory at once.
+        fieldnames: List[str] = []
+        seen_fields: set = set()
+        with partial_restart_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                for key in json.loads(line):
+                    if key not in seen_fields:
+                        seen_fields.add(key)
+                        fieldnames.append(key)
+        with restart_csv.open("w", newline="", encoding="utf-8") as out_handle, partial_restart_path.open(encoding="utf-8") as handle:
+            writer = csv.DictWriter(out_handle, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(restart_rows)
+            for line in handle:
+                writer.writerow(json.loads(line))
 
     by_mode: Dict[str, List[Dict]] = {}
     for row in rows:

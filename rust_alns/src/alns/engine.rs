@@ -629,6 +629,34 @@ impl ALNSEngine {
                 p: 100.0,
             },
         ));
+        // High removal ratio (xi in [0.30,0.40], ~2x the calibrated ranges above) with every
+        // other parameter at the Kisialiou calibration, so only the removal ratio differs from
+        // the *_kisialiou_* variants. Used by the "many operators" RL action space
+        // (op_triple_many_v1). Appended after all existing destroy operators so existing
+        // engine indices -- and therefore trained models and cached results -- are unchanged.
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::shaw_removal::ShawRemoval {
+                xi_min: 0.30,
+                xi_max: 0.40,
+                p: 100.0,
+                alpha: 0.6,
+                beta: 0.4,
+                phi: 0.3,
+            },
+        ));
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::random_visit_removal_in_voyages::RandomVisitRemovalInVoyages {
+                xi_min: 0.30,
+                xi_max: 0.40,
+            },
+        ));
+        registry.add_destroy_operator(Box::new(
+            crate::operators::destroy::worst_visit_removal_in_voyages::WorstVisitRemovalInVoyages {
+                xi_min: 0.30,
+                xi_max: 0.40,
+                p: 100.0,
+            },
+        ));
         // v1..v5: candidate_rank 1..5 (rank of insertion position selected per visit)
         for candidate_rank in 1..=5 {
             registry.add_repair_operator(Box::new(
@@ -673,6 +701,11 @@ impl ALNSEngine {
             let max_moves = if idx < 9 { Some(idx + 1) } else { None };
             registry.add_improvement_operator(Box::new(DeepSwap { max_moves }));
         }
+        // max_moves = 10 for relocation/swap (between v9 = 9 moves and v10 = unlimited), for the
+        // 1 / 10 / unlimited intensity levels of op_triple_many_v1. Appended last so existing
+        // improvement indices are unchanged.
+        registry.add_improvement_operator(Box::new(DeepRelocation { max_moves: Some(10) }));
+        registry.add_improvement_operator(Box::new(DeepSwap { max_moves: Some(10) }));
     }
 
     /// Get operator information for external interfaces
@@ -693,6 +726,9 @@ impl ALNSEngine {
         }
         destroy_operators.push("worst_visit_removal_kisialiou_small_v1".to_string());
         destroy_operators.push("worst_visit_removal_kisialiou_large_v1".to_string());
+        destroy_operators.push("shaw_removal_high_v1".to_string());
+        destroy_operators.push("random_visit_removal_high_v1".to_string());
+        destroy_operators.push("worst_visit_removal_high_v1".to_string());
 
         let mut repair_operators = Vec::new();
         for idx in 1..=5 {
@@ -716,6 +752,8 @@ impl ALNSEngine {
         for idx in 1..=10 {
             improvement_operators.push(format!("deep_swap_v{}", idx));
         }
+        improvement_operators.push("deep_relocation_m10_v1".to_string());
+        improvement_operators.push("deep_swap_m10_v1".to_string());
 
         (destroy_operators, repair_operators, improvement_operators)
     }
