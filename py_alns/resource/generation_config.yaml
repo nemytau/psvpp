@@ -104,6 +104,266 @@ inst_generation_params:
       departure_spread: 1
       deck_service_speed: 11
 
+  SMALL_TRAIN_TW1:
+    - type: drill
+      num: 2
+      time_windows: 0
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 4
+      time_windows: 0
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_TW2:
+    - type: drill
+      num: 3
+      time_windows: 1
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 5
+      time_windows: 1
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_TW3:
+    - type: drill
+      num: 3
+      time_windows: 2
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 6
+      time_windows: 3
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_TW4:
+    - type: drill
+      num: 4
+      time_windows: 3
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 7
+      time_windows: 5
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_TW5:
+    - type: drill
+      num: 4
+      time_windows: 4
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 8
+      time_windows: 8
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_DF1:
+    - type: drill
+      num: 2
+      time_windows: 1
+      demand_mu: 18
+      demand_sigma: 4
+      frequencies:
+        values: [3, 4]
+        probs: [0.4, 0.6]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 0
+      deck_service_speed: 9
+    - type: prod
+      num: 4
+      time_windows: 1
+      demand_mu: 14
+      demand_sigma: 3
+      frequencies:
+        values: [3, 4]
+        probs: [0.4, 0.6]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 0
+      deck_service_speed: 10
+
+  SMALL_TRAIN_DF2:
+    - type: drill
+      num: 3
+      time_windows: 1
+      demand_mu: 24
+      demand_sigma: 5
+      frequencies:
+        values: [2, 3, 4]
+        probs: [0.2, 0.3, 0.5]
+      name_prefix: 'd'
+      default_time_window: 6, 20
+      departure_spread: 0
+      deck_service_speed: 9
+    - type: prod
+      num: 5
+      time_windows: 2
+      demand_mu: 19
+      demand_sigma: 4
+      frequencies:
+        values: [2, 3, 4]
+        probs: [0.2, 0.3, 0.5]
+      name_prefix: 'p'
+      default_time_window: 6, 20
+      departure_spread: 0
+      deck_service_speed: 10
+
+  SMALL_TRAIN_DF3:
+    - type: drill
+      num: 3
+      time_windows: 1
+      demand_mu: 30
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'd'
+      default_time_window: 8, 18
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 6
+      time_windows: 2
+      demand_mu: 24
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'p'
+      default_time_window: 8, 18
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_DF4:
+    - type: drill
+      num: 4
+      time_windows: 1
+      demand_mu: 37
+      demand_sigma: 8
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.4, 0.4, 0.2]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 7
+      time_windows: 2
+      demand_mu: 30
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.4, 0.4, 0.2]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 10
+
+  SMALL_TRAIN_DF5:
+    - type: drill
+      num: 4
+      time_windows: 1
+      demand_mu: 45
+      demand_sigma: 10
+      frequencies:
+        values: [1, 2]
+        probs: [0.7, 0.3]
+      name_prefix: 'd'
+      default_time_window: 6, 20
+      departure_spread: 1
+      deck_service_speed: 9
+    - type: prod
+      num: 8
+      time_windows: 2
+      demand_mu: 38
+      demand_sigma: 9
+      frequencies:
+        values: [1, 2]
+        probs: [0.7, 0.3]
+      name_prefix: 'p'
+      default_time_window: 6, 20
+      departure_spread: 1
+      deck_service_speed: 10
+
   MEDIUM_TRAIN_1:
     - type: drill
       num: 7
@@ -205,6 +465,266 @@ inst_generation_params:
         probs: [0.25, 0.45, 0.3]
       name_prefix: 'p'
       default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_TW1:
+    - type: drill
+      num: 4
+      time_windows: 0
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 8
+      time_windows: 0
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_TW2:
+    - type: drill
+      num: 5
+      time_windows: 1
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 9
+      time_windows: 2
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_TW3:
+    - type: drill
+      num: 6
+      time_windows: 3
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 10
+      time_windows: 5
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_TW4:
+    - type: drill
+      num: 6
+      time_windows: 4
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 12
+      time_windows: 9
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_TW5:
+    - type: drill
+      num: 7
+      time_windows: 7
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 13
+      time_windows: 13
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_DF1:
+    - type: drill
+      num: 4
+      time_windows: 1
+      demand_mu: 18
+      demand_sigma: 4
+      frequencies:
+        values: [3, 4]
+        probs: [0.4, 0.6]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 0
+      deck_service_speed: 8
+    - type: prod
+      num: 8
+      time_windows: 2
+      demand_mu: 14
+      demand_sigma: 3
+      frequencies:
+        values: [3, 4]
+        probs: [0.4, 0.6]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 0
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_DF2:
+    - type: drill
+      num: 5
+      time_windows: 2
+      demand_mu: 24
+      demand_sigma: 5
+      frequencies:
+        values: [2, 3, 4]
+        probs: [0.2, 0.3, 0.5]
+      name_prefix: 'd'
+      default_time_window: 6, 20
+      departure_spread: 0
+      deck_service_speed: 8
+    - type: prod
+      num: 9
+      time_windows: 3
+      demand_mu: 19
+      demand_sigma: 4
+      frequencies:
+        values: [2, 3, 4]
+        probs: [0.2, 0.3, 0.5]
+      name_prefix: 'p'
+      default_time_window: 6, 20
+      departure_spread: 0
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_DF3:
+    - type: drill
+      num: 6
+      time_windows: 2
+      demand_mu: 30
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'd'
+      default_time_window: 8, 18
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 10
+      time_windows: 3
+      demand_mu: 24
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'p'
+      default_time_window: 8, 18
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_DF4:
+    - type: drill
+      num: 6
+      time_windows: 2
+      demand_mu: 37
+      demand_sigma: 8
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.4, 0.4, 0.2]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 12
+      time_windows: 4
+      demand_mu: 30
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.4, 0.4, 0.2]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 9
+
+  MEDIUM_TRAIN_DF5:
+    - type: drill
+      num: 7
+      time_windows: 2
+      demand_mu: 45
+      demand_sigma: 10
+      frequencies:
+        values: [1, 2]
+        probs: [0.7, 0.3]
+      name_prefix: 'd'
+      default_time_window: 6, 20
+      departure_spread: 1
+      deck_service_speed: 8
+    - type: prod
+      num: 13
+      time_windows: 4
+      demand_mu: 38
+      demand_sigma: 9
+      frequencies:
+        values: [1, 2]
+        probs: [0.7, 0.3]
+      name_prefix: 'p'
+      default_time_window: 6, 20
       departure_spread: 1
       deck_service_speed: 9
 
@@ -311,6 +831,266 @@ inst_generation_params:
       default_time_window: 7, 19
       departure_spread: 1
       deck_service_speed: 7
+
+  LARGE_TRAIN_TW1:
+    - type: drill
+      num: 7
+      time_windows: 0
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 13
+      time_windows: 0
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_TW2:
+    - type: drill
+      num: 9
+      time_windows: 2
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 16
+      time_windows: 4
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_TW3:
+    - type: drill
+      num: 10
+      time_windows: 5
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 20
+      time_windows: 10
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_TW4:
+    - type: drill
+      num: 12
+      time_windows: 9
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 23
+      time_windows: 17
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_TW5:
+    - type: drill
+      num: 14
+      time_windows: 14
+      demand_mu: 28
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 26
+      time_windows: 26
+      demand_mu: 22
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.3, 0.4, 0.3]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_DF1:
+    - type: drill
+      num: 7
+      time_windows: 2
+      demand_mu: 18
+      demand_sigma: 4
+      frequencies:
+        values: [3, 4]
+        probs: [0.4, 0.6]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 0
+      deck_service_speed: 7
+    - type: prod
+      num: 13
+      time_windows: 4
+      demand_mu: 14
+      demand_sigma: 3
+      frequencies:
+        values: [3, 4]
+        probs: [0.4, 0.6]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 0
+      deck_service_speed: 8
+
+  LARGE_TRAIN_DF2:
+    - type: drill
+      num: 9
+      time_windows: 3
+      demand_mu: 24
+      demand_sigma: 5
+      frequencies:
+        values: [2, 3, 4]
+        probs: [0.2, 0.3, 0.5]
+      name_prefix: 'd'
+      default_time_window: 6, 20
+      departure_spread: 0
+      deck_service_speed: 7
+    - type: prod
+      num: 16
+      time_windows: 5
+      demand_mu: 19
+      demand_sigma: 4
+      frequencies:
+        values: [2, 3, 4]
+        probs: [0.2, 0.3, 0.5]
+      name_prefix: 'p'
+      default_time_window: 6, 20
+      departure_spread: 0
+      deck_service_speed: 8
+
+  LARGE_TRAIN_DF3:
+    - type: drill
+      num: 10
+      time_windows: 3
+      demand_mu: 30
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'd'
+      default_time_window: 8, 18
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 20
+      time_windows: 6
+      demand_mu: 24
+      demand_sigma: 5
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.2, 0.4, 0.4]
+      name_prefix: 'p'
+      default_time_window: 8, 18
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_DF4:
+    - type: drill
+      num: 12
+      time_windows: 4
+      demand_mu: 37
+      demand_sigma: 8
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.4, 0.4, 0.2]
+      name_prefix: 'd'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 23
+      time_windows: 7
+      demand_mu: 30
+      demand_sigma: 7
+      frequencies:
+        values: [1, 2, 3]
+        probs: [0.4, 0.4, 0.2]
+      name_prefix: 'p'
+      default_time_window: 7, 19
+      departure_spread: 1
+      deck_service_speed: 8
+
+  LARGE_TRAIN_DF5:
+    - type: drill
+      num: 14
+      time_windows: 4
+      demand_mu: 45
+      demand_sigma: 10
+      frequencies:
+        values: [1, 2]
+        probs: [0.7, 0.3]
+      name_prefix: 'd'
+      default_time_window: 6, 20
+      departure_spread: 1
+      deck_service_speed: 7
+    - type: prod
+      num: 26
+      time_windows: 8
+      demand_mu: 38
+      demand_sigma: 9
+      frequencies:
+        values: [1, 2]
+        probs: [0.7, 0.3]
+      name_prefix: 'p'
+      default_time_window: 6, 20
+      departure_spread: 1
+      deck_service_speed: 8
 
   SMALL_1:
     - type: drill
@@ -669,6 +1449,106 @@ fleet_generation_params:
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 150000
+  SMALL_TRAIN_TW1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_TW2:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_TW3:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_TW4:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_TW5:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_DF1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_DF2:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_DF3:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_DF4:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  SMALL_TRAIN_DF5:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
   MEDIUM_TRAIN_1:
     - type: vtype1
@@ -710,6 +1590,106 @@ fleet_generation_params:
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 150000
+  MEDIUM_TRAIN_TW1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_TW2:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_TW3:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_TW4:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_TW5:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_DF1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_DF2:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_DF3:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_DF4:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  MEDIUM_TRAIN_DF5:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 9
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
 
   LARGE_TRAIN_1:
     - type: vtype1
@@ -742,6 +1722,106 @@ fleet_generation_params:
       bulk_capacity: 1000
       cost: 150000
   LARGE_TEST_1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_TW1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_TW2:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_TW3:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_TW4:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_TW5:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_DF1:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_DF2:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_DF3:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_DF4:
+    - type: vtype1
+      name_prefix: 'v'
+      num: 14
+      speed: 12
+      fcs: 0.43
+      fcw: 0.26
+      deck_capacity: 100
+      bulk_capacity: 1000
+      cost: 150000
+  LARGE_TRAIN_DF5:
     - type: vtype1
       name_prefix: 'v'
       num: 14

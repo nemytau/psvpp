@@ -535,3 +535,279 @@ reproduces exactly when `progress_horizon` is left unset. Full train+eval smoke 
 calibrated to the old mismatched scale regardless of this code change. Retraining is required to
 actually realize the fix; this only makes new training/eval runs consistent going forward. Next
 retraining pass (Exp1 large, any Exp2 retrain, Exp 4/5) should use this flag.
+
+## 11. Known issue — Kisialiou episode logic duplicated across two scripts, one copy stale
+(found & fixed 2026-08-20)
+
+`scripts/run_experiment_rl_improvement_mvp.py`'s `run_kisialiou_episode` and
+`scripts/alns_mode_benchmark.py`'s `run_episode` each independently built the `ALNSEnvironment`
+for a Kisialiou episode. They drifted: the mvp script's copy passed `action_module=args.
+action_module` (whichever RL model it was being compared against) into Kisialiou's env
+construction, so Kisialiou's destroy/repair pair got fixed to whatever index 0 of the RL model's
+action space decoded to, for the whole episode — non-adaptive, silently wrong. `alns_mode_
+benchmark.py`'s copy always used `action_module="adaptive_weighted_v1"` regardless of any RL
+model, and was never affected. This is exactly the failure mode of having the same logic
+implemented twice: one copy can regress while the other stays correct, with nothing forcing them
+back in sync.
+
+**Fix**: extracted the shared baseline/Kisialiou episode-running logic (`EpisodeSummary`,
+`run_baseline_episode`, `run_kisialiou_episode`, cache helpers, restart-stat helpers) into
+`rl/episode_runner.py`. `run_experiment_rl_improvement_mvp.py` now imports from there instead of
+defining its own copies; its call site was also fixed to pass `args.baseline_action_module`/
+`args.baseline_state_module` into `run_kisialiou_episode`, decoupling Kisialiou's operator
+selection from whichever RL model it's being compared against. `alns_mode_benchmark.py` was left
+as-is (different single-run, no-restart-loop design feeding the actively-running Phase 1
+benchmark/`operator_usage_analysis.py` pipeline with its own established log-filename
+convention) — it was already correct and never had this bug, so unifying it too would add risk
+without fixing a live defect; worth revisiting if it drifts in the future.
+
+**Also changed, per explicit instruction**: cache-only comparison is now the *default* for
+`--run-eval`, not an opt-in flag. `run_experiment_rl_improvement_mvp.py` gained:
+- `--baseline-kisialiou-only` — runs just the baseline+Kisialiou loop over the resolved test
+  datasets × `--eval-seeds` (no PPO training/model at all) and writes/updates the cache. This is
+  the "run it once" entry point.
+- A canonical shared cache path (`runs/baseline_kisialiou_cache/cache.json`) used whenever
+  `--baseline-kisialiou-cache` isn't explicitly given.
+- `--run-eval` now requires a cache to already exist at that path and errors out immediately (before
+  training starts, not after) if it's missing or missing a needed dataset/seed entry, instead of
+  silently recomputing baseline/Kisialiou per experiment.
+- `--recompute-baseline-kisialiou` — explicit escape hatch to compute missing entries on the fly
+  and merge them back into the canonical cache, for when cache-only isn't wanted.
+
+Practical effect: baseline/Kisialiou must be benchmarked once via `--baseline-kisialiou-only`
+across every size/dataset/seed the RL experiments will use; every subsequent Exp0/1/2/4/5
+`--run-eval` invocation reads from that single cache rather than re-running Kisialiou/baseline
+per model, so numbers stay directly comparable across experiments and can't silently diverge from
+a code change landing in only one of two implementations.
+
+## 12. `op_triple_v2`/`op_pair_v2` (first-fit) + entropy-collapse diagnosis and fix (2026-08-21/24)
+
+Full detail in `docs/experiments/diary_entry_ph300_fix_and_op_triple_v2_firstfit_results.md`
+(four dated sections). Summary:
+
+- Added a new cheap, non-cost-ranked repair operator, `first_fit_insertion_v1`
+  (`rust_alns/src/operators/repair/first_fit_insertion.rs`), tested in two new action modules:
+  `op_triple_v2` (full D×R×I + first-fit) and `op_pair_v2` (flat D×R only + first-fit, no
+  improvement phase).
+- Found nearly every `ph300`-trained model (progress_horizon-fixed) totally collapses to one fixed
+  destroy/repair/improvement triple for every iteration of every restart, **with or without**
+  first-fit — so first-fit isn't the root cause. Root cause: PPO's entropy collapses to near-zero
+  during training (`entropy_loss` → -0.02 to -0.3) regardless of action-space size or contents,
+  well before training ends.
+- The flat `op_pair_v2` control (no improvement phase) performs statistically identically to
+  uniform-random baseline on both sizes (0/25 wins vs Kisialiou, matching baseline's mean/stdev) —
+  confirms the improvement-operator dimension is where 100% of RL's value over random search comes
+  from; take it away and RL is just expensive random search.
+- **Fix**: `delta_cost_v6` reward (bounded 1x→2x late-restart weighting, using the same
+  `progress_horizon`-normalized `progress` value as the state features) + a new `--ent-coef` flag
+  (SB3 PPO entropy-bonus coefficient, threaded through `train_ppo_agent`), tested together at
+  `ent_coef=0.01` on `op_triple_v2`. Entropy now plateaus (~-0.8 to -1.8) instead of collapsing.
+  Win rate vs Kisialiou: small 4%→40%, medium 32%→**56%** (RL now wins outright more often than
+  not on medium). Best result of the investigation so far.
+- Still open: whether higher `ent_coef` produces genuine multi-switch adaptive behavior (current
+  fix still converges to one or two fixed choices per restart, just better ones); no large-size
+  run yet for any of these variants.
+
+## 13. Exp 6/7 — weight-collapse mechanism confirmed + RL's large-size policy matches Exp 7's
+weakest fixed sequence (2026-09-02)
+
+Full detail: `docs/experiments/diary_entry_fixed_seq_ablation_and_weight_evolution.md`.
+
+**Exp 6 (adaptive weight evolution).** Directly instrumented `destroy_weights`/`repair_weights`
+per iteration (30 restarts, small/medium, baseline+kisialiou). Confirms the no-weight-floor EMA
+update (`update_operator_weights`, `rust_alns/src/alns/context.rs`) really does let a destroy
+operator's weight collapse near zero within a single restart (`shaw_removal`/`worst_visit_removal`
+per-restart minimums as low as 0.004-0.03) — the weight-floor hypothesis flagged back in Phase 1
+(section 3) was real, not just theoretical. `random_visit_removal` dominates consistently
+(mean ~18-20, low variance) across every combo tested. Large not yet run.
+
+**Exp 7 (fixed-sequence improvement ablation).** Isolated the improvement-chain cost problem
+(deep_swap eating 81.56% of Kisialiou's large-instance budget, section 7 above) by testing 4 fixed
+single/double-operator improvement sequences (VNR-only, FCR-only, relocation-only, VNR+relocation)
+against baseline/kisialiou_original, same protocol as Exp0 (15 datasets/size, matched time
+budgets). **Result: on large, kisialiou_original is the worst of all 6 modes tested** (mean
+ratio-to-best 1.1325, 2/15 wins) — beaten by baseline and 3 of the 4 trivial fixed sequences.
+`FCR-only` wins on mean (1.0051) purely via restart volume (37,048 restarts vs. kisialiou's 37 —
+the same "quantity beats quality" mechanism as section 7's Finding 2, pushed further by dropping
+adaptive-weighting overhead too). `VNR+relocation` wins the most datasets outright (9/15, median
+1.0000) with far fewer restarts (369) — clearing structure with VNR before relocating makes each
+attempt meaningfully stronger, the first evidence in this project of two operators in sequence
+beating either alone. On small/medium, kisialiou_original still leads (small: clear; medium: still
+ahead but by a much smaller margin than at small).
+
+**The finding that matters for the paper.** RL's large-size policy (from the widened 15-dataset/
+1-seed re-eval of the existing `op_triple_v2`+`delta_cost_v6`+`ent_coef` checkpoint — same
+recipe as section 12, run ids `rl_improvement_mvp_20260902_{213050,213730,223958}__
+exp_reward_v6_entcoef_op_triple_v2_{small,medium,large}_ph300_15ds1seed`) is, on large,
+100% `deep_relocation_v10` with random-removal+first-fit destroy/repair — **exactly** Exp 7's
+`fixed_random_ff_relocation_only` configuration. Merging RL's actual per-dataset `best_cost` into
+the same 15-dataset ratio-to-best field as Exp 7's table gives a genuine 7-way comparison:
+
+| Mode | Mean | Median | Wins/15 |
+|---|---|---|---|
+| baseline | 1.1069 | 1.1310 | 0 |
+| kisialiou_original | 1.1325 | 1.1237 | 2 |
+| fixed VNR-only | 1.0219 | 1.0056 | 0 |
+| **fixed FCR-only** | **1.0051** | 1.0062 | 4 |
+| fixed relocation-only | 1.1072 | 1.1186 | 0 |
+| **fixed VNR+relocation** | 1.0324 | **1.0000** | **9** |
+| **RL (learned policy)** | **1.0825** | 1.1170 | 0 |
+
+RL's mean (1.0825) sits almost on top of `fixed_random_ff_relocation_only`'s (1.1072) — RL did not
+discover a clever operator combination through training on large instances; it converged on
+precisely the configuration Exp 7 tested explicitly and found tied for weakest of six. Two cheap,
+already-available alternatives in the same action space (FCR-only, VNR+relocation) score
+meaningfully better. On small/medium, by contrast, the widened re-eval shows RL's policy
+strengthening past both baselines (small: mean 1.0001, 11/15 wins; medium: mean 1.0018, 10/15
+wins) — the large-size gap is a scale-specific problem, not a general failure of the approach.
+
+**Read as headroom, not a ceiling.** Exp 7 shows a policy that used VNR+relocation (or even
+FCR-only) on large would land in a materially stronger tier. Leading hypothesis: the reward signal
+rewards `deep_relocation`'s larger raw per-call ΔF more than VNR's (which mostly enables later
+moves rather than banking cost itself), actively steering the policy toward relocation-only rather
+than training simply running out of budget on large's expensive iterations — see section 14 for
+the proposed decisive test of this hypothesis.
+
+## 14. Decisive test — time-scaled reward as a falsification test for "RL learns adaptive
+sequencing" (proposed 2026-09-04, approved for logging by user same day)
+
+**Context.** Responding to section 13's finding, the user's read: RL's large-size policy is not a
+weak version of adaptive search — it's the same greedy single-operator collapse RL has shown at
+every scale since Exp 0/1, and it "wins" over kisialiou_original only because kisialiou_original is
+itself a poorly-tuned fixed sequence (deep_swap alone eating 81.56% of its budget, section 7/13) —
+a comparison that says more about Kisialiou's construction than about RL's search quality. Per the
+user directly: "RL is doing just some job, but pretty badly... it performs kinda better than
+Kisialiou just because Kisialiou is poorly constructed, few modifications would improve it greatly
+and it can be done without RL."
+
+**Why this isn't fully settled yet, and what would settle it.** The reward signal has never been
+made aware of wall-clock/solver-time cost per operator call (flagged as a possible confound in
+section 13's "read as headroom" note) — `deep_relocation`'s bigger raw ΔF-per-call could be
+winning the policy over `voyage_number_reduction`'s smaller-but-structure-enabling ΔF purely
+because the reward doesn't discount for how expensive each call is, not because relocation is
+actually the better choice once restart economics (the dominant effect established in section 7's
+Finding 2 and Exp 7) are accounted for. A **time-scaled reward** (ΔF per unit of solver-time spent
+on that call, rather than raw ΔF) directly tests this.
+
+**Why time-scaling is a legitimate correction, not overfitting to the known answer.** The user's
+own worry, raised in the same discussion, was that scaling reward by time is just "pushing RL
+towards picking FCR/VNR" because those happen to look good in Exp 7 — i.e., hard-coding the
+answer under a different name. Counter-argument logged here as the reasoning to revisit if this
+gets challenged later: eval is already wall-clock/restart-budget-fair (`match_kisialiou` mode,
+section 7), so *ignoring* time in the reward while being scored on a time-fair metric is the actual
+mis-specification — the policy is being optimized for a quantity (raw ΔF per call) that the eval
+protocol doesn't reward. Time-scaling aligns training-objective and eval-objective; it does not
+tell the policy which operator to prefer, only that a call's cost matters, same as it already does
+at eval time. This is corroborated independently by section 7's Finding 2 (restart count, not
+per-restart quality, is established as the dominant driver of large-scale performance for
+kisialiou vs. baseline) — the reward not seeing this at all is a real, structural gap, discovered
+before the argument for fixing it.
+
+**The decisive test — pre-committed success criterion, checked in this order:**
+1. **Converges toward `voyage_number_reduction` + `deep_relocation` switching mid-restart**
+   (VNR to clear structure, relocation to exploit it — matching Exp 7's actual best-median mode,
+   `fixed_random_ff_vnr_relocation`, 9/15 wins) → strong positive evidence: this requires the
+   policy to alternate between two different operators depending on search state, something RL has
+   never done in any run to date (Exp 0 through Exp 7-follow-up all show single-operator collapse
+   at large). This is the first result that would count as genuine adaptive sequencing, not just a
+   better fixed point.
+2. **Converges to `fleet_and_cost_reduction`-only** (matching Exp 7's best-mean mode) → still a
+   single-operator collapse, just a relocated, better one (mean 1.0051 vs. relocation-only's
+   1.1072) — evidence that the reward mis-specification explains *which* fixed point training finds
+   (consistent with section 12's ent_coef finding: "what changed is which fixed point training
+   converges to," not whether it's still a fixed point), but not evidence that RL is capable of
+   adaptive, multi-operator behavior. Weak/mixed result.
+3. **No material change, or converges to something worse** → the reward mis-specification wasn't
+   masking real adaptive capability; strong evidence for the user's negative read.
+
+**Two candidate paper framings, contingent on outcome:**
+- **If (1):** "RL adds real value once the reward is properly time-aware" — RL's action-space
+  design (Paper 1's core scope) is validated once a genuine training/eval-objective mismatch is
+  fixed; contrast with Johnn et al. 2024's positive RL results on classic VRP variants, framed as
+  "the same operator-selection RL approach transfers to PSVPP, but needed a domain-specific reward
+  correction (time-awareness) that a generic ΔF reward misses once operator cost is heterogeneous."
+- **If (2) or (3):** an honest negative-result framing — RL is highly sensitive to action-space
+  granularity and reward shape, consistently learns a static/greedy per-scale choice rather than
+  genuinely adaptive search even after the entropy-collapse fix (section 12) and this reward fix,
+  and Exp 7's near-free enumeration of fixed sequences matches or beats both Kisialiou and RL at
+  the scale (large) that matters most for the real-world problem — contrasted explicitly with
+  Johnn et al. 2024's positive findings on classic VRP variants as a question of *why* PSVPP's
+  structure (restart economics dominating at scale, section 7 Finding 2; intra-voyage sequence
+  always TSP-reoptimized so RL's real decision space is narrower than raw action-count suggests)
+  makes this problem less RL-friendly than the classic VRP settings Johnn et al. studied.
+
+**Status: superseded by section 15 (2026-09-04, same day).** The "implement a time-scaled
+reward variant" next step below turned out to already be done — `delta_cost_v9` (found on
+disk, undocumented until now) is exactly this, just built and calibrated on 2026-08-25/26
+against a different action module (`improvement_chain_v2`, never run at large). Section 15
+has the finalized launch plan (dataset scope, exact commands) reusing `delta_cost_v9` on
+`op_triple_v2` at large, which is what this section's criteria are actually about.
+
+~~Next concrete step: implement a time-scaled reward variant (ΔF ÷ solver-time-for-that-call,
+bounded/normalized the same deliberate way `delta_cost_v6` bounds its progress ramp — see
+section 12 — rather than a raw division, to avoid blow-up on very cheap calls) and rerun the
+large-size `op_triple_v2` training/eval with it, then check outcome 1 vs. 2 vs. 3 above before
+touching anything else.~~
+
+## 15. Decisive-test launch — dataset scope, config additions, exact commands (2026-09-04)
+
+Full detail: `docs/experiments/diary_entry_decisive_time_scaled_reward_test_launch.md`.
+
+**Reward**: reuse `delta_cost_v9` (already exists, see above) — no new reward code needed.
+Point it at `op_triple_v2` (not `improvement_chain_v2`, which is what its only prior runs
+used) so the result is directly comparable to Exp 7's 7-way table (section 13).
+
+**Dataset scope, decided this session**:
+- Test sets grown 15 → **50/size** (`--only-split test`, deterministic seeds keep 1-15
+  identical) — biggest lever on statistical power for the paper's headline claim (section 3
+  Phase 3).
+- Train sets: **superseded same day** — replaced the initial 2-config-per-size add
+  (`TRAIN_4`/`_5`) with a systematic 10-config-per-size scheme after the user asked for
+  "much more configs for variety": a **TW axis** (`{SIZE}_TRAIN_TW1..TW5`, time-window
+  density 0%→100% of installations) and a **DF axis** (`{SIZE}_TRAIN_DF1..DF5`,
+  demand+frequency spectrum from small-demand+frequent to large-demand+infrequent, 3 mixes
+  between), each axis's 5 configs spread across the size tier's requested install-count
+  range (small 6-12, medium 12-20, large 20-40). 13 train configs/size total (was 3). Full
+  parameter tables in the diary entry linked below. This is the "retrain on more variable
+  training data" idea from earlier this session, previously flagged as not yet run.
+
+**Execution note**: the Cowork sandbox this was authored in has no `conda`/Rust
+toolchain/built extension — code/config changes were made directly against the real repo
+files, but the actual generation/training/eval commands (in the diary entry above) need to
+run in a real `py312` environment (Claude Code session or terminal), detached via
+`nohup`/`tmux` per the "Long-running jobs" note at the top of this file — a 50-dataset large
+run will take hours.
+
+**Status**: config/code changes complete and verified 2026-09-04. Commands not yet launched.
+
+## 16. Planned — test-side TW-density sweep, eval-only, no retraining (planned 2026-09-11, target: next week)
+
+**Motivation**: while grouping Experiment 8's results (`docs/EXPERIMENTS.md`) by dataset
+characteristics, found the current test sets (`{SIZE}_TEST_1`) have **zero time-window
+variation to group by** — every one of the 50 generated instances per size has *exactly* the
+same tight-window fraction (measured: 0.300 for every single large instance, no exceptions).
+This isn't sampling noise: `time_windows: N` in `generation_config.yaml` is a literal count of
+how many installations (out of that block's `num`) get assigned a tight window, not a
+probability — so every draw from one scenario config produces the same tight/loose
+composition by construction. Demand and visit-frequency, by contrast, are drawn from
+distributions and do vary instance-to-instance (see Experiment 8's demand/frequency grouped
+breakdown).
+
+The train side already has exactly the density axis we're missing on test:
+`{SIZE}_TRAIN_TW1..TW5` (section 15's dataset-scope note; configs at
+`generation_config.yaml` lines ~835-965 for large, similarly for medium/small) sweep tight-window
+density from 0% (`TW1`) through ~50% (`TW3`) to 100% (`TW5`) by setting `time_windows: N` as a
+fraction of each block's `num`. No test-side equivalent exists yet.
+
+**Plan**: mirror that mechanism on the test side — new `{SIZE}_TEST_TW0`, `_TW50`, `_TW75`,
+`_TW100` scenario configs (density points as requested; could instead reuse train's exact
+5-point 0/~25/50/~75/100 scheme for consistency — open decision, pick when implementing),
+generate datasets from them (`scripts/generate_datasets.py --only-split test`), and then run
+**eval-only** (`--skip-training --model-path ...`, no retraining) using the **already-trained
+Experiment 8 models** (`op_triple_v2` / `features_improvement_v3` / `delta_cost_v9` / ph300 — one
+model per size, same ones used for Exp 8) against these new TW-density-controlled test sets.
+Goal: see whether RL's operator collapse pattern and its win rate vs. Kisialiou/baseline shift as
+TW tightness moves from 0% to 100%, holding demand/frequency distribution fixed. Cheap relative to
+retraining — this only needs new datasets + eval runs, not new PPO training.
+
+**Status**: planned only, not implemented. Target: next week.

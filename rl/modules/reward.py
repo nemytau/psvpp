@@ -165,3 +165,256 @@ class DeltaCostCandidateReward(BaseRewardFunction):
             reward -= 0.05
 
         return float(np.clip(reward, -5.0, 20.0))
+
+
+@register_reward("delta_cost_v6")
+class DeltaCostLateWeightedReward(BaseRewardFunction):
+    """delta_cost_v5 with a bounded late-restart weighting multiplier.
+
+    Motivation: operator-usage analysis (Exp1, op_triple_v2/op_pair_v2,
+    2026-08-20/21) found PPO's entropy collapsing to near-zero early in
+    training regardless of which operators are available or how large the
+    action space is -- the policy settles on one action within the first
+    1-2 iterations of a restart and never reconsiders it for the remaining
+    ~298, even when that choice is barely improving anything (~1% over 300
+    iterations for the dominant "stuck" branch observed on op_triple_v2
+    medium, vs ~22% for the branch that happened to switch away from it).
+    The flat per-step reward gives the policy no signal that continuing to
+    search has more value late in a restart than early -- a fixed-size
+    improvement at iteration 5 and the same improvement at iteration 295
+    score identically, even though intensification only pays off if the
+    policy is still willing to search for it late.
+
+    This multiplies delta_cost_v5's improvement-driven terms by a weight
+    that ramps from 1x (restart start) to 2x (restart end), using the same
+    progress_horizon-normalized `progress` value the state features already
+    use (rl/modules/state.py), so training and eval agree on what "late in
+    the restart" means. Deliberately a bounded multiplicative ramp, not a
+    division by iterations-left -- dividing blows up to infinity as a
+    restart ends, letting the last few steps dominate the loss with reward
+    spikes; multiplying by (1 + progress) only ever doubles the incentive,
+    never lets late steps swamp everything else.
+    """
+
+    version = "6.0"
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        initial = env.initial_cost or result.get("initial_cost", 0.0) or 1.0
+
+        prev_cur = float(getattr(env, "last_current_cost", initial))
+        prev_best = float(getattr(env, "last_best_cost", initial))
+
+        candidate = float(result.get("candidate_cost", result.get("current_cost", prev_cur)))
+
+        denom_cur = max(abs(prev_cur), 1e-9)
+        denom_best = max(abs(prev_best), 1e-9)
+
+        delta_vs_current = (prev_cur - candidate) / denom_cur
+        delta_vs_best = (prev_best - candidate) / denom_best
+
+        if delta_vs_current < 0.0:
+            delta_vs_current *= 0.3
+        if delta_vs_best < 0.0:
+            delta_vs_best *= 0.3
+
+        horizon = getattr(env, "progress_horizon", None) or getattr(env, "max_iterations", 1)
+        progress = min(max(float(getattr(env, "iteration", 0)) / max(float(horizon), 1.0), 0.0), 1.0)
+        late_weight = 1.0 + progress
+
+        reward = late_weight * (10.0 * delta_vs_current + 30.0 * delta_vs_best)
+
+        if result.get("improvement_only_action") or result.get("improvement_operator_idx") is not None:
+            reward -= 0.05
+
+        return float(np.clip(reward, -5.0, 20.0))
+
+
+@register_reward("delta_cost_v7")
+class DeltaCostLateWeightedNoOpPenaltyReward(DeltaCostLateWeightedReward):
+    """delta_cost_v6 plus a penalty for *repeating* an improvement operator that just
+    found nothing -- not for improvement-only steps finding nothing in general.
+
+    Motivation: `improvement_chain_v2` operator-usage analysis (2026-08-25) found the
+    trained policy always chains exactly `chain_max_consecutive_improvements` calls to
+    the same run-to-convergence operator (`deep_relocation_v10`) before being forced
+    back to a backbone step -- and positions 2+ in every single chain (98,550/98,550)
+    produced literally zero cost change, since a run-to-convergence operator has
+    nothing left to find on an unchanged solution. The flat `-0.05` improvement-action
+    tax `delta_cost_v6` already applies doesn't distinguish "found nothing" from "found
+    something," so the policy had no signal telling it repeating a just-converged
+    operator is pointless.
+
+    Important distinction: this should only punish the *foreseeable* waste of calling
+    the same operator again right after it already ran (whether or not that prior call
+    itself succeeded -- a run-to-convergence operator exhausts its neighborhood in one
+    call regardless), not every no-op improvement-only step. Trying VNR after a fresh
+    backbone step and finding nothing is a legitimate, unpredictable outcome of
+    exploration and should not be punished the same as mechanically repeating the
+    operator that just ran. So the gate is "same operator index as the immediately
+    preceding step AND this call found nothing" -- not "found nothing" alone.
+
+    `result["improvement_operator_idx"]` is already present in the raw result at
+    reward-computation time (confirmed directly: it comes from the Rust engine's own
+    return value, not later Python enrichment). `env.last_improvement_idx` still holds
+    the *previous* step's operator index when `compute()` runs -- the environment only
+    updates it to the current step's value afterward -- and defaults to -1.0 whenever
+    the previous step wasn't a pure improvement-only step at all (e.g. a backbone step
+    just ran), so a fresh attempt right after backbone is never treated as a repeat.
+
+    `result["action_type"]` (set by the environment before reward computation runs) is
+    `"chain_improvement_only"` or `"improvement_only"` only when a step ran an
+    improvement operator with *no* destroy/repair at all -- i.e. only the
+    improvement_chain_v1/v2-style pure-improvement steps this diagnosis is about.
+    (`result["improvement_only_action"]` looks like the right field for this but is a
+    trap: the environment sets it *after* calling the reward function, so it is never
+    actually populated yet when `compute()` runs -- confirmed by the first version of
+    this reward silently never firing at all.) `op_triple_v2`-style steps always carry
+    an explicit destroy/repair pair, so `action_type` is never one of these two values
+    there and this penalty never fires -- a D×R×I step where the improvement component
+    happens to find nothing (destroy/repair already did the real work) is not the same
+    failure mode and shouldn't be punished the same way.
+
+    Penalty is a flat -1.0, matching the rough magnitude of a genuine success's reward
+    in this reward's own scale (~+1.0 for a real improving candidate) -- "repeat the
+    same operator and get nothing" should read as clearly bad as "call an operator and
+    get a real gain" reads as good, so switching away is a clear improvement rather
+    than a marginal one.
+    """
+
+    version = "7.0"
+
+    NO_OP_IMPROVEMENT_PENALTY = 1.0
+
+    def _no_progress(self, result: Dict[str, Any], env: Any) -> bool:
+        """True if this improvement-only step made no real progress.
+
+        v7's definition: the proposed candidate is numerically identical to the
+        previous current/best cost. This catches a true run-to-convergence no-op
+        (e.g. deep_relocation_v10 finding nothing at all) but misses an operator
+        that proposes a *different*, cost-increasing candidate that then gets
+        rejected -- see v8, which fixes this using `accepted` directly.
+        """
+        initial = env.initial_cost or result.get("initial_cost", 0.0) or 1.0
+        prev_cur = float(getattr(env, "last_current_cost", initial))
+        prev_best = float(getattr(env, "last_best_cost", initial))
+        candidate = float(result.get("candidate_cost", result.get("current_cost", prev_cur)))
+        return abs(prev_cur - candidate) < 1e-9 and abs(prev_best - candidate) < 1e-9
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        reward = super().compute(result, env)
+
+        if result.get("action_type") in ("chain_improvement_only", "improvement_only"):
+            current_op_idx = result.get("improvement_operator_idx")
+            prev_op_idx = getattr(env, "last_improvement_idx", -1.0)
+            same_operator_as_last_step = (
+                current_op_idx is not None
+                and prev_op_idx is not None
+                and prev_op_idx >= 0.0
+                and int(current_op_idx) == int(prev_op_idx)
+            )
+
+            if same_operator_as_last_step and self._no_progress(result, env):
+                reward -= self.NO_OP_IMPROVEMENT_PENALTY
+
+        return float(np.clip(reward, -5.0, 20.0))
+
+
+@register_reward("delta_cost_v8")
+class DeltaCostAcceptedNoOpPenaltyReward(DeltaCostLateWeightedNoOpPenaltyReward):
+    """delta_cost_v7 with a corrected "no progress" definition.
+
+    Analysis of v7's own results (2026-08-25) found `voyage_number_reduction_v1`
+    (VNR) repeats slipping past the penalty even though they were just as wasteful
+    as `deep_relocation_v10`'s repeats: VNR's Rust implementation
+    (voyage_number_reduction.rs) applies its "best" relocation as soon as it's
+    *feasible*, without checking that the resulting cost_increase is actually
+    negative -- so VNR can propose eliminating a voyage at a net cost increase.
+    The environment correctly rejects that candidate (`accepted=False`), so the
+    real solution never changes -- but v7's no-progress check compared the
+    *candidate's* cost to the previous cost, and a rejected-but-different
+    candidate reads as "progress" under that check even though it changed
+    nothing real. Traced one concrete case: the identical cost_before=334066.05
+    -> cost_after=336291.65 pair (a cost *increase*) recurred at iterations 6,
+    7, 10, 11 of one restart, rejected every single time -- the same losing
+    trade proposed over and over, exactly the pattern this reward exists to
+    penalize, but v7 missed it.
+
+    Fix: use `result["accepted"]` directly instead of comparing candidate cost
+    to previous cost. The environment already computes this correctly for
+    exactly this purpose -- a literally-unchanged candidate is explicitly
+    downgraded to `accepted=False` too (see rl_alns_environment.py's
+    `rejected_no_change` handling), so `not accepted` covers both a true no-op
+    and a rejected-worse-candidate symmetrically, for any operator.
+    """
+
+    version = "8.0"
+
+    def _no_progress(self, result: Dict[str, Any], env: Any) -> bool:
+        return not bool(result.get("accepted", False))
+
+
+@register_reward("delta_cost_v9")
+class DeltaCostTimePenaltyReward(DeltaCostAcceptedNoOpPenaltyReward):
+    """delta_cost_v8 plus a flat time-cost tax, independent of the step's outcome.
+
+    Motivation: operator-timing samples (2026-08-25, both sizes) found an
+    enormous spread in wall-clock cost per operator call -- e.g.
+    `fleet_and_cost_reduction_kisialiou_v1` averages ~0.31ms on medium while
+    `deep_swap_v10` averages ~159ms, roughly 500x slower, for whatever quality
+    gain it happens to produce. Nothing in the reward so far accounts for
+    this at all -- delta_cost_v3 through v8 are purely a function of solution
+    quality, so a policy has no reason to prefer a fast operator over a slow
+    one that delivers the same cost improvement.
+
+    This is deliberately additive (`reward - k * elapsed_ms`), not
+    multiplicative (`reward * reference_ms / elapsed_ms`). A multiplicative
+    scaling has a sign problem: for a *negative* reward (a failure, or the
+    no-op penalty from v7/v8), multiplying by a small time-weight for a slow
+    operator would *shrink* the penalty -- a slow failure would read as less
+    bad than a fast one, which is backwards. Subtracting a flat time cost
+    keeps speed as an independent axis: a fast success keeps almost all of
+    its positive reward; a slow failure is punished by both the existing
+    failure penalty *and* the added time tax, and a slow success has its
+    reward reduced but not inverted.
+
+    `k = 0.005` (per millisecond), with the time penalty itself capped at 3.0,
+    calibrated against real timing samples -- and one live check that caught
+    the first calibration attempt (k=0.01, uncapped) being badly miscalibrated:
+    `deep_swap_v10`'s runtime is highly variable (2+ orders of magnitude across
+    calls, not just across operators), and one genuinely successful call
+    (accepted=True, cost improved, v8's own reward = +0.31) took 644ms --
+    4x the ~159ms average sampled on medium. At k=0.01 uncapped that alone
+    produced a penalty of ~6.4, driving the reward to the -5.0 clip floor and
+    completely erasing the fact that the move succeeded -- indistinguishable
+    from a slow *failure*. That teaches "never use this operator," not "use it
+    only when the gain justifies the cost."
+
+    With k=0.005 and a 3.0 cap: negligible (<=0.005) for anything under ~1ms
+    (first_fit_insertion, fleet_and_cost_reduction, most destroy/repair
+    pairs), modest (~0.05-0.13) for deep_relocation_v10, meaningful but not
+    overwhelming (~0.8, comparable to a typical success reward rather than
+    dwarfing it) for deep_swap_v10's ~159ms average on medium, and the same
+    644ms outlier case now lands around 0.31 - 3.0 = -2.69 -- clearly bad, but
+    distinguishable from a failed-and-slow case rather than identical to it.
+
+    Uses `result["elapsed_ns"]`, confirmed present at reward-compute time and
+    equal to the operator's own execution time for both backbone steps
+    (destroy+repair combined) and pure improvement-only steps, so no separate
+    handling is needed per action type.
+    """
+
+    version = "9.0"
+
+    TIME_PENALTY_PER_MS = 0.005
+    MAX_TIME_PENALTY = 3.0
+
+    def compute(self, result: Dict[str, Any], env: Any) -> float:
+        reward = super().compute(result, env)
+
+        elapsed_ns = result.get("elapsed_ns")
+        if elapsed_ns is not None and elapsed_ns > 0:
+            elapsed_ms = float(elapsed_ns) / 1e6
+            time_penalty = min(self.TIME_PENALTY_PER_MS * elapsed_ms, self.MAX_TIME_PENALTY)
+            reward -= time_penalty
+
+        return float(np.clip(reward, -5.0, 20.0))

@@ -58,6 +58,7 @@ def run_episode(
     mode_label: Optional[str] = None,
     size_label: Optional[str] = None,
     fixed_pair_idx: Optional[int] = None,
+    fixed_pair_action_module: str = "op_pair_v1",
 ) -> Dict[str, Any]:
     # Extract dataset filename for operator logging
     dataset_name = Path(problem_path).stem if problem_path else None
@@ -89,7 +90,9 @@ def run_episode(
         # Force one specific destroy/repair pair for every iteration of the run
         # (no adaptive weighting, no random pair switching) -- Exp 3, testing
         # whether a single well-chosen pair matches or beats adaptive selection.
-        env_kwargs["action_module"] = "op_pair_v1"
+        # op_pair_v1's repair pool doesn't include first_fit_insertion_v1; use
+        # op_pair_v2 when that pair is needed (see OpPairV2ActionSpace).
+        env_kwargs["action_module"] = fixed_pair_action_module
     elif algorithm_mode in ("baseline", "kisialiou"):
         # Both modes must use the adaptive weighted engine for destroy/repair
         # selection (see rl/modules/actions.py:AdaptiveWeightedActionSpace).
@@ -180,6 +183,16 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Force one specific destroy/repair pair (0-8, op_pair_v1 indexing) for "
             "every iteration instead of adaptive/random selection (Exp 3)."
+        ),
+    )
+    parser.add_argument(
+        "--fixed-pair-action-module",
+        type=str,
+        default="op_pair_v1",
+        help=(
+            "Action module used to resolve --fixed-pair-idx (default: op_pair_v1). "
+            "Use op_pair_v2 to reach pairs involving first_fit_insertion_v1, which "
+            "op_pair_v1's repair pool excludes."
         ),
     )
     parser.add_argument(
@@ -289,6 +302,7 @@ def main() -> None:
             mode_label=mode_label,
             size_label=size,
             fixed_pair_idx=args.fixed_pair_idx,
+            fixed_pair_action_module=args.fixed_pair_action_module,
         )
         wall_time = time.perf_counter() - start_time
 

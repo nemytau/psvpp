@@ -23,6 +23,7 @@ class ModeSpec:
     algorithm_mode: str
     kisialiou_improvement_sequence: Optional[List[str]] = None
     fixed_pair_idx: Optional[int] = None
+    fixed_pair_action_module: str = "op_pair_v1"
 
 
 def safe_float(value) -> float:
@@ -177,6 +178,43 @@ def get_mode_specs() -> List[ModeSpec]:
     ] + [
         ModeSpec(mode_label=label, algorithm_mode="baseline", fixed_pair_idx=idx)
         for idx, label in enumerate(FIXED_PAIR_LABELS)
+    ] + [
+        # Fixed-sequence ablation: destroy/repair pinned to random-removal +
+        # first-fit-insertion (op_pair_v2 pair index 7 -- see OpPairV2ActionSpace
+        # in rl/modules/actions.py: destroy pool [shaw(0), random_visit(1),
+        # worst_visit(2)] x repair pool [deep_greedy_rank_1(0), k_regret_2(1),
+        # k_regret_3(2), first_fit_insertion_v1(3)], pair_idx = 1*4+3 = 7) for
+        # every iteration, varying only the improvement sequence. Isolates each
+        # improvement operator's contribution independent of adaptive
+        # destroy/repair selection.
+        ModeSpec(
+            mode_label="fixed_random_ff_vnr_only",
+            algorithm_mode="kisialiou",
+            kisialiou_improvement_sequence=["voyage_number_reduction_v1"],
+            fixed_pair_idx=7,
+            fixed_pair_action_module="op_pair_v2",
+        ),
+        ModeSpec(
+            mode_label="fixed_random_ff_fcr_only",
+            algorithm_mode="kisialiou",
+            kisialiou_improvement_sequence=["fleet_and_cost_reduction_kisialiou_v1"],
+            fixed_pair_idx=7,
+            fixed_pair_action_module="op_pair_v2",
+        ),
+        ModeSpec(
+            mode_label="fixed_random_ff_relocation_only",
+            algorithm_mode="kisialiou",
+            kisialiou_improvement_sequence=["deep_relocation_v10"],
+            fixed_pair_idx=7,
+            fixed_pair_action_module="op_pair_v2",
+        ),
+        ModeSpec(
+            mode_label="fixed_random_ff_vnr_relocation",
+            algorithm_mode="kisialiou",
+            kisialiou_improvement_sequence=["voyage_number_reduction_v1", "deep_relocation_v10"],
+            fixed_pair_idx=7,
+            fixed_pair_action_module="op_pair_v2",
+        ),
     ]
 
 
@@ -269,6 +307,7 @@ def run_mode_size_with_time_budget(
 
         if mode.fixed_pair_idx is not None:
             cmd.extend(["--fixed-pair-idx", str(mode.fixed_pair_idx)])
+            cmd.extend(["--fixed-pair-action-module", mode.fixed_pair_action_module])
 
         remaining = time_budget - elapsed
         

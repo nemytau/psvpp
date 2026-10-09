@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -26,124 +25,27 @@ if str(REPO_ROOT) not in sys.path:
 from rl.dataset_manager import GeneratedDatasetManager
 from rl.rl_alns_environment import ALNSEnvironment
 from rl.train_alns_rl import train_ppo_agent
+from rl.episode_runner import (
+    EpisodeSummary,
+    _restart_seed,
+    _time_to_best,
+    _episode_time_to_best,
+    _episode_vessel_stats,
+    _episode_structure_stats,
+    _cache_key,
+    _episode_summary_to_cache,
+    _episode_summary_from_cache,
+    run_baseline_episode,
+    run_kisialiou_episode,
+    run_policy_and_baseline_episodes,
+)
 
-
-@dataclass
-class EpisodeSummary:
-    initial_cost: float
-    best_cost: float
-    solver_runtime_seconds: float
-    wall_runtime_seconds: float
-
-    @property
-    def improvement_pct(self) -> float:
-        if self.initial_cost <= 1e-12:
-            return 0.0
-        return max(0.0, (self.initial_cost - self.best_cost) / self.initial_cost * 100.0)
-
-    @property
-    def runtime_seconds(self) -> float:
-        return self.wall_runtime_seconds
-
-
-def _restart_seed(base_seed: int, restart_idx: int) -> int:
-    return int(base_seed + restart_idx * 1009)
-
-
-def _time_to_best(stats: Dict) -> tuple:
-    """Return (solver_seconds_to_best, iterations_to_best) within a single restart.
-
-    Uses the cumulative elapsed_seconds from episode_history.  If the episode
-    produced no usable data both values are 0.
-    """
-    best_cost_history = stats.get("best_cost_history") or []
-    elapsed_seconds = stats.get("elapsed_seconds") or []
-    if not best_cost_history:
-        return 0.0, 0
-    global_best = min(best_cost_history)
-    for i, cost in enumerate(best_cost_history):
-        if cost <= global_best + 1e-9:
-            t = float(elapsed_seconds[i]) if i < len(elapsed_seconds) else 0.0
-            return t, i
-    return 0.0, 0
-
-
-def _episode_time_to_best(restart_records: list) -> float:
-    """Compute cumulative solver seconds until the global best was first found.
-
-    Sums full solver time of restarts that completed before the best-finding
-    restart, then adds the time-to-best within that restart.
-    """
-    if not restart_records:
-        return 0.0
-    global_best = min(r["best_cost"] for r in restart_records)
-    cumulative_solver = 0.0
-    for rec in restart_records:
-        if rec["best_cost"] <= global_best + 1e-9:
-            return cumulative_solver + float(rec.get("time_to_best_solver_seconds", 0.0))
-        cumulative_solver += float(rec.get("solver_runtime_seconds", 0.0))
-    return cumulative_solver
-
-
-def _episode_vessel_stats(restart_records: list) -> tuple:
-    """Return (initial_num_vessels_used, best_num_vessels_used) for an episode.
-
-    initial is taken from the first restart (representative of the constructive
-    heuristic's fleet size before search); best is the vessel count of whichever
-    restart achieved the episode's global-best cost.
-    """
-    if not restart_records:
-        return None, None
-    initial_vessels = restart_records[0].get("initial_num_vessels_used")
-    best_record = min(restart_records, key=lambda r: r["best_cost"])
-    return initial_vessels, best_record.get("best_num_vessels_used")
-
-
-def _episode_structure_stats(restart_records: list) -> Dict[str, Any]:
-    """Return initial/best num_voyages and avg_vessel_load_utilization for an episode.
-
-    Same aggregation convention as _episode_vessel_stats: initial from the first
-    restart, best from whichever restart hit the episode's global-best cost.
-    """
-    if not restart_records:
-        return {
-            "initial_num_voyages": None,
-            "best_num_voyages": None,
-            "initial_avg_vessel_load_utilization": None,
-            "best_avg_vessel_load_utilization": None,
-        }
-    first = restart_records[0]
-    best_record = min(restart_records, key=lambda r: r["best_cost"])
-    return {
-        "initial_num_voyages": first.get("initial_num_voyages"),
-        "best_num_voyages": best_record.get("best_num_voyages"),
-        "initial_avg_vessel_load_utilization": first.get("initial_avg_vessel_load_utilization"),
-        "best_avg_vessel_load_utilization": best_record.get("best_avg_vessel_load_utilization"),
-    }
-
-
-def _cache_key(dataset_path: str, seed: int) -> str:
-    return f"{Path(dataset_path).name}__seed{seed}"
-
-
-def _episode_summary_to_cache(stats: "EpisodeSummary", restart_rows: list) -> Dict[str, Any]:
-    return {
-        "initial_cost": stats.initial_cost,
-        "best_cost": stats.best_cost,
-        "solver_runtime_seconds": stats.solver_runtime_seconds,
-        "wall_runtime_seconds": stats.wall_runtime_seconds,
-        "restart_rows": restart_rows,
-    }
-
-
-def _episode_summary_from_cache(entry: Dict[str, Any]) -> tuple:
-    stats = EpisodeSummary(
-        initial_cost=entry["initial_cost"],
-        best_cost=entry["best_cost"],
-        solver_runtime_seconds=entry["solver_runtime_seconds"],
-        wall_runtime_seconds=entry["wall_runtime_seconds"],
-    )
-    return stats, entry["restart_rows"]
+# Canonical shared location for the baseline/Kisialiou cache: one file, reused across every
+# RL experiment/model comparison, so baseline and Kisialiou are computed once (via
+# --baseline-kisialiou-only) rather than re-run per experiment. Cache keys already encode
+# dataset filename + eval seed (see _cache_key), and dataset filenames are unique across
+# sizes, so a single shared file safely covers small/medium/large together.
+DEFAULT_BASELINE_KISIALIOU_CACHE_RELPATH = "runs/baseline_kisialiou_cache/cache.json"
 
 
 def parse_size_list(size_arg: str) -> List[str]:
@@ -317,14 +219,40 @@ def parse_args() -> argparse.Namespace:
         "--baseline-kisialiou-cache",
         default=None,
         help=(
-            "Path to a baseline_kisialiou_cache.json produced by a prior --run-eval invocation "
-            "(written automatically to <out_dir>/baseline_kisialiou_cache.json whenever baseline/"
-            "Kisialiou are actually computed). When set, baseline and Kisialiou eval episodes are "
-            "loaded from this file instead of recomputed -- only the RL model's episodes run fresh. "
-            "Saves the (often dominant) cost of re-running baseline+Kisialiou for every new RL "
-            "model comparison against the same test set/seeds. Cached entries are keyed by "
-            "dataset filename + eval seed, so the cache is reusable across different RL models/"
-            "experiments as long as --eval-seeds and the test set are unchanged."
+            "Path to a baseline_kisialiou_cache.json (produced by --baseline-kisialiou-only, or "
+            "automatically written to <out_dir>/baseline_kisialiou_cache.json by any prior "
+            "--run-eval invocation). Defaults to the canonical shared path "
+            f"'{DEFAULT_BASELINE_KISIALIOU_CACHE_RELPATH}' under the repo root when unset. Baseline "
+            "and Kisialiou eval episodes are loaded from this file instead of recomputed -- only "
+            "the RL model's episodes run fresh, by default (see --recompute-baseline-kisialiou). "
+            "Cached entries are keyed by dataset filename + eval seed, so the cache is reusable "
+            "across different RL models/experiments as long as --eval-seeds and the test set are "
+            "unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--recompute-baseline-kisialiou",
+        action="store_true",
+        help=(
+            "Opt out of cache-only comparison: recompute any baseline/Kisialiou episode missing "
+            "from the cache instead of raising an error, and write the merged result back to the "
+            "cache file (in addition to <out_dir>/baseline_kisialiou_cache.json). Without this "
+            "flag (the default), a cache miss is a hard error -- baseline/Kisialiou must be "
+            "generated once via --baseline-kisialiou-only and never silently re-run per RL "
+            "experiment, so results stay directly comparable and the two code paths that run a "
+            "Kisialiou episode can't drift apart again (see docs/PAPER1_ACTION_SPACE_PLAN.md)."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-kisialiou-only",
+        action="store_true",
+        help=(
+            "Run ONLY the baseline+Kisialiou benchmark loop across the resolved test datasets x "
+            "--eval-seeds (no PPO training, no model loading, no RL episodes) and write/update the "
+            "baseline/Kisialiou cache at --baseline-kisialiou-cache (or the canonical default path). "
+            "This is the intended 'run it once' entry point -- run this after growing the test set "
+            "or changing --eval-seeds, then every subsequent RL experiment's --run-eval reads from "
+            "the resulting cache instead of recomputing baseline/Kisialiou for itself."
         ),
     )
     parser.add_argument(
@@ -363,6 +291,19 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Reward penalty applied when the same improvement operator is repeated without finding a new best",
+    )
+    parser.add_argument(
+        "--ent-coef",
+        type=float,
+        default=None,
+        help=(
+            "PPO entropy-bonus coefficient (SB3 default: 0.0, no exploration bonus). "
+            "Operator-usage analysis found policy entropy collapsing to near-zero early "
+            "in training regardless of action space, causing the policy to commit to one "
+            "action per restart and never reconsider it. A small positive value (e.g. "
+            "0.01) keeps exploration alive longer during training. Default (None) "
+            "preserves SB3's own default."
+        ),
     )
     parser.add_argument(
         "--stochastic-check",
@@ -425,6 +366,7 @@ def run_policy_episode(
     target_runtime_seconds: Optional[float] = None,
     restart_limit: Optional[int] = None,
     progress_horizon: Optional[int] = None,
+    collect_snapshots: bool = True,
 ) -> tuple[EpisodeSummary, List[object], List[Dict[str, object]]]:
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
     effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
@@ -469,7 +411,13 @@ def run_policy_episode(
         )
 
         obs, _ = env.reset(seed=restart_seed, options={"problem_path": dataset_path})
-        restart_snapshots.append(env.get_initial_snapshot())
+        # Snapshotting clones the whole engine state per restart; skip it when the caller
+        # (e.g. a cached-baseline dataset, or the stochastic-check sanity run) has no use
+        # for matched-restart snapshots -- on large instances this is the main memory cost
+        # of this loop, and collecting up to `effective_restart_limit` of them for nothing
+        # is what OOM-killed the 2026-09-06 large-size eval run.
+        if collect_snapshots:
+            restart_snapshots.append(env.get_initial_snapshot())
 
         done = False
         truncated = False
@@ -549,156 +497,6 @@ def run_policy_episode(
         restart_snapshots,
         restart_records,
     )
-
-
-def run_baseline_episode(
-    *,
-    dataset_path: str,
-    seed: int,
-    max_iterations: int,
-    log_dir: Path,
-    mode_label: str,
-    size_label: str,
-    initial_snapshots: Optional[List[object]],
-    action_module: str,
-    state_module: str,
-    reward_module: str,
-    restart_max_iterations: int,
-    target_runtime_seconds: Optional[float] = None,
-    restart_limit: Optional[int] = None,
-    progress_horizon: Optional[int] = None,
-) -> tuple[EpisodeSummary, List[Dict[str, object]]]:
-    restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
-    effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
-    solver_elapsed_ms_total = 0.0
-    total_solver_runtime_seconds = 0.0
-    total_wall_runtime_seconds = 0.0
-    initial_cost: Optional[float] = None
-    best_candidates: List[float] = []
-    restart_idx = 0
-    restart_records: List[Dict[str, object]] = []
-
-    while restart_idx < effective_restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
-            break
-
-        restart_seed = _restart_seed(seed, restart_idx)
-        restart_wall_start = time.perf_counter()
-
-        env = ALNSEnvironment(
-            problem_instance=dataset_path,
-            max_iterations=restart_cap,
-            progress_horizon=progress_horizon,
-            seed=restart_seed,
-            problem_instance_paths=[dataset_path],
-            problem_sampling_strategy="round_robin",
-            enable_operator_logging=True,
-            operator_logging_mode="baseline",
-            operator_logging_mode_label=mode_label,
-            operator_logging_size=size_label,
-            operator_logging_dataset_name=f"{Path(dataset_path).name}__seed{seed}",
-            operator_logging_restart_id=restart_idx,
-            operator_logging_stable_filename=True,
-            operator_logging_dir=str(log_dir),
-            action_module=action_module,
-            state_module=state_module,
-            reward_module=reward_module,
-            force_baseline_improvement=False,
-            baseline_improvement_idx=None,
-            chain_max_consecutive_improvements=None,
-            anti_repeat_penalty=0.0,
-            algorithm_mode="baseline",
-            size_bucket="small" if size_label == "small" else "large",
-        )
-
-        reset_options: Dict[str, Any] = {"problem_path": dataset_path}
-        if initial_snapshots and restart_idx < len(initial_snapshots):
-            reset_options["initial_snapshot"] = initial_snapshots[restart_idx]
-
-        obs, _ = env.reset(seed=restart_seed, options=reset_options)
-
-        done = False
-        truncated = False
-        steps = 0
-        rng = np.random.default_rng(restart_seed)
-        restart_elapsed_ms = 0.0
-
-        if not hasattr(env.action_impl, "num_pairs"):
-            raise RuntimeError(
-                f"Baseline action module '{action_module}' does not expose pair-only actions; "
-                "use 'op_pair_v1' for baseline isolation"
-            )
-
-        while not done and not truncated and steps < restart_cap:
-            num_pairs = int(env.action_impl.num_pairs())
-            action = int(rng.integers(0, num_pairs)) if num_pairs > 0 else int(env.action_space.sample())
-            obs, _, done, truncated, info = env.step(action)
-            step_info = info.get("step_info", {}) if isinstance(info, dict) else {}
-            step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
-            restart_elapsed_ms += step_ms
-            solver_elapsed_ms_total += step_ms
-            steps += 1
-
-        stats = env.get_episode_statistics()
-        env.close()
-
-        restart_initial = float(stats.get("initial_cost") or 0.0)
-        restart_best = float(stats.get("best_cost") or restart_initial)
-        restart_initial_vessels = stats.get("initial_num_vessels_used")
-        restart_best_vessels = stats.get("best_num_vessels_used")
-        restart_initial_voyages = stats.get("initial_num_voyages")
-        restart_best_voyages = stats.get("best_num_voyages")
-        restart_initial_load_util = stats.get("initial_avg_vessel_load_utilization")
-        restart_best_load_util = stats.get("best_avg_vessel_load_utilization")
-        if initial_cost is None:
-            initial_cost = restart_initial
-        best_candidates.append(restart_best)
-
-        elapsed_seq = stats.get("elapsed_seconds") or []
-        restart_solver_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
-        restart_wall_runtime = time.perf_counter() - restart_wall_start
-        total_solver_runtime_seconds += restart_solver_runtime
-        total_wall_runtime_seconds += restart_wall_runtime
-        ttb_solver, ttb_iters = _time_to_best(stats)
-        restart_records.append(
-            {
-                "restart_id": restart_idx,
-                "seed": seed,
-                "restart_seed": restart_seed,
-                "solver_runtime_seconds": restart_solver_runtime,
-                "wall_runtime_seconds": restart_wall_runtime,
-                "time_to_best_solver_seconds": ttb_solver,
-                "iterations_to_best": ttb_iters,
-                "initial_cost": restart_initial,
-                "best_cost": restart_best,
-                "initial_num_vessels_used": restart_initial_vessels,
-                "best_num_vessels_used": restart_best_vessels,
-                "initial_num_voyages": restart_initial_voyages,
-                "best_num_voyages": restart_best_voyages,
-                "initial_avg_vessel_load_utilization": restart_initial_load_util,
-                "best_avg_vessel_load_utilization": restart_best_load_util,
-                "iterations": int(stats.get("total_iterations", steps)),
-                "dataset_path": dataset_path,
-                "mode_label": mode_label,
-                "size_label": size_label,
-                "algorithm_mode": "baseline",
-            }
-        )
-
-        restart_idx += 1
-        if target_runtime_seconds is None:
-            break
-
-    if initial_cost is None:
-        initial_cost = 0.0
-    global_best = min(best_candidates) if best_candidates else 0.0
-
-    return EpisodeSummary(
-        initial_cost=float(initial_cost),
-        best_cost=float(global_best),
-        solver_runtime_seconds=float(total_solver_runtime_seconds),
-        wall_runtime_seconds=float(total_wall_runtime_seconds),
-    ), restart_records
 
 
 def _safe_git_output(repo: Path, args: List[str]) -> Optional[str]:
@@ -854,157 +652,105 @@ def _build_run_manifest(
     }
 
 
-def run_kisialiou_episode(
+def _run_baseline_kisialiou_only(
     *,
-    dataset_path: str,
-    seed: int,
-    max_iterations: int,
+    args: argparse.Namespace,
+    repo: Path,
+    test_paths: List[str],
+    eval_seeds: List[int],
+    eval_iteration_cap: int,
     log_dir: Path,
-    mode_label: str,
-    size_label: str,
-    action_module: str,
-    state_module: str,
-    reward_module: str,
-    restart_max_iterations: int,
-    target_runtime_seconds: Optional[float] = None,
-    chain_max_consecutive_improvements: Optional[int] = None,
-    reference_restarts: Optional[int] = None,
-    progress_horizon: Optional[int] = None,
-) -> tuple[EpisodeSummary, List[Dict[str, object]]]:
+    progress_horizon: int,
+) -> None:
+    """Run only the baseline+Kisialiou benchmark loop (no PPO training/model, no RL episodes).
+
+    This is the intended 'run it once' entry point: --run-eval invocations of this script
+    default to cache-only comparison (see --baseline-kisialiou-cache/--recompute-baseline-
+    kisialiou), so baseline/Kisialiou results must already exist here for every dataset/seed
+    an RL experiment will later evaluate against.
     """
-    Run Kisialiou deterministic ALNS algorithm with operator logging.
-    
-     IMPORTANT: We use step-by-step execution (env.reset() + env.step() loop) rather than
-     env.run_with_restarts() to ensure operator usage is logged for each iteration.
-     The run_with_restarts() method executes entirely in Rust without calling Python's
-     step function, which bypasses the operator logging pipeline.
-    
-     By using Gym-compatible step-by-step execution with algorithm_mode="kisialiou",
-     the Rust backend still implements the deterministic Kisialiou operator selection
-     strategy, but each iteration is recorded in the operators logs (CSV files).
-    
-     This ensures consistency with other evaluation modes (baseline, RL) which also
-     use step-by-step execution and produce detailed operator logs for analysis.
-     """
-    restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
-    solver_elapsed_ms_total = 0.0
-    total_solver_runtime_seconds = 0.0
-    total_wall_runtime_seconds = 0.0
-    initial_cost: Optional[float] = None
-    best_candidates: List[float] = []
-    restart_idx = 0
-    restart_limit = max(1, int(reference_restarts)) if reference_restarts is not None else int(max_iterations)
-    restart_records: List[Dict[str, object]] = []
+    cache_path = Path(args.baseline_kisialiou_cache) if args.baseline_kisialiou_cache else Path(DEFAULT_BASELINE_KISIALIOU_CACHE_RELPATH)
+    if not cache_path.is_absolute():
+        cache_path = (repo / cache_path).resolve()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    while restart_idx < restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
-            break
+    bk_cache_out: Dict[str, Any] = {}
+    if cache_path.exists():
+        bk_cache_out = json.loads(cache_path.read_text(encoding="utf-8"))
+        print(f"Extending existing cache at {cache_path} ({len(bk_cache_out)} entries already present).")
 
-        restart_seed = _restart_seed(seed, restart_idx)
-        restart_wall_start = time.perf_counter()
+    total = len(test_paths) * len(eval_seeds)
+    done = 0
+    for dataset_path in test_paths:
+        dataset_size_label = infer_dataset_size_label(dataset_path)
+        for seed in eval_seeds:
+            done += 1
+            cache_key = _cache_key(dataset_path, seed)
+            if cache_key in bk_cache_out:
+                print(f"[{done}/{total}] baseline+kisialiou size={dataset_size_label} dataset={Path(dataset_path).name} seed={seed} -- already cached, skipping")
+                continue
+            print(f"[{done}/{total}] baseline+kisialiou size={dataset_size_label} dataset={Path(dataset_path).name} seed={seed}")
 
-        env = ALNSEnvironment(
-            problem_instance=dataset_path,
-            max_iterations=restart_cap,
-            progress_horizon=progress_horizon,
-            seed=restart_seed,
-            problem_instance_paths=[dataset_path],
-            problem_sampling_strategy="round_robin",
-            enable_operator_logging=True,
-            operator_logging_mode="kisialiou",
-            operator_logging_mode_label=mode_label,
-            operator_logging_size=size_label,
-            operator_logging_dataset_name=f"{Path(dataset_path).name}__seed{seed}",
-            operator_logging_restart_id=restart_idx,
-            operator_logging_stable_filename=True,
-            operator_logging_dir=str(log_dir),
-            action_module=action_module,
-            state_module=state_module,
-            reward_module=reward_module,
-            algorithm_mode="kisialiou",
-            chain_max_consecutive_improvements=chain_max_consecutive_improvements,
-            size_bucket="small" if size_label == "small" else "large",
-        )
+            kisialiou_stats, kisialiou_restart_rows = run_kisialiou_episode(
+                dataset_path=dataset_path,
+                seed=seed,
+                max_iterations=eval_iteration_cap,
+                restart_max_iterations=args.eval_restart_max_iterations,
+                log_dir=log_dir,
+                mode_label="kisialiou",
+                size_label=dataset_size_label,
+                action_module=args.baseline_action_module,
+                state_module=args.baseline_state_module,
+                reward_module=args.reward_module,
+                target_runtime_seconds=(
+                    args.eval_runtime_budget_seconds
+                    if args.eval_fixed_restarts is None and args.eval_runtime_mode == "match_kisialiou"
+                    else None
+                ),
+                chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
+                reference_restarts=(
+                    max(1, int(args.eval_fixed_restarts))
+                    if args.eval_fixed_restarts is not None
+                    else (
+                        max(1, int(args.eval_runtime_reference_restarts))
+                        if args.eval_runtime_mode == "match_kisialiou"
+                        else None
+                    )
+                ),
+                progress_horizon=progress_horizon,
+            )
 
-        obs, _ = env.reset(seed=restart_seed, options={"problem_path": dataset_path})
+            runtime_target_seconds: Optional[float] = None
+            if args.eval_runtime_mode == "match_kisialiou" and args.eval_fixed_restarts is None:
+                runtime_target_seconds = max(float(kisialiou_stats.wall_runtime_seconds), 1e-6)
 
-        done = False
-        truncated = False
-        steps = 0
-        restart_elapsed_ms = 0.0
+            baseline_stats, baseline_restart_rows = run_baseline_episode(
+                dataset_path=dataset_path,
+                seed=seed,
+                max_iterations=eval_iteration_cap,
+                restart_max_iterations=args.eval_restart_max_iterations,
+                log_dir=log_dir,
+                mode_label="baseline",
+                size_label=dataset_size_label,
+                initial_snapshots=None,
+                action_module=args.baseline_action_module,
+                state_module=args.baseline_state_module,
+                reward_module=args.reward_module,
+                target_runtime_seconds=runtime_target_seconds,
+                restart_limit=args.eval_fixed_restarts,
+                progress_horizon=progress_horizon,
+            )
 
-        # Run step-by-step to enable operator logging
-        while not done and not truncated and steps < restart_cap:
-            # For Kisialiou, let the environment handle action selection via the algorithm_mode
-            # We use a dummy action (0) since Kisialiou is deterministic and handled by Rust
-            action = 0
-            obs, _, done, truncated, info = env.step(action)
-            step_info = info.get("step_info", {}) if isinstance(info, dict) else {}
-            step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
-            restart_elapsed_ms += step_ms
-            solver_elapsed_ms_total += step_ms
-            steps += 1
-
-        stats = env.get_episode_statistics()
-        env.close()
-
-        restart_initial = float(stats.get("initial_cost") or 0.0)
-        restart_best = float(stats.get("best_cost") or restart_initial)
-        restart_initial_vessels = stats.get("initial_num_vessels_used")
-        restart_best_vessels = stats.get("best_num_vessels_used")
-        restart_initial_voyages = stats.get("initial_num_voyages")
-        restart_best_voyages = stats.get("best_num_voyages")
-        restart_initial_load_util = stats.get("initial_avg_vessel_load_utilization")
-        restart_best_load_util = stats.get("best_avg_vessel_load_utilization")
-        if initial_cost is None:
-            initial_cost = restart_initial
-        best_candidates.append(restart_best)
-
-        elapsed_seq = stats.get("elapsed_seconds") or []
-        restart_solver_runtime = float(elapsed_seq[-1]) if elapsed_seq else (restart_elapsed_ms / 1000.0)
-        restart_wall_runtime = time.perf_counter() - restart_wall_start
-        total_solver_runtime_seconds += restart_solver_runtime
-        total_wall_runtime_seconds += restart_wall_runtime
-        ttb_solver, ttb_iters = _time_to_best(stats)
-        restart_records.append(
-            {
-                "restart_id": restart_idx,
-                "seed": seed,
-                "restart_seed": restart_seed,
-                "solver_runtime_seconds": restart_solver_runtime,
-                "wall_runtime_seconds": restart_wall_runtime,
-                "time_to_best_solver_seconds": ttb_solver,
-                "iterations_to_best": ttb_iters,
-                "initial_cost": restart_initial,
-                "best_cost": restart_best,
-                "initial_num_vessels_used": restart_initial_vessels,
-                "best_num_vessels_used": restart_best_vessels,
-                "initial_num_voyages": restart_initial_voyages,
-                "best_num_voyages": restart_best_voyages,
-                "initial_avg_vessel_load_utilization": restart_initial_load_util,
-                "best_avg_vessel_load_utilization": restart_best_load_util,
-                "iterations": int(stats.get("total_iterations", steps)),
-                "dataset_path": dataset_path,
-                "mode_label": mode_label,
-                "size_label": size_label,
-                "algorithm_mode": "kisialiou",
+            bk_cache_out[cache_key] = {
+                "kisialiou": _episode_summary_to_cache(kisialiou_stats, kisialiou_restart_rows),
+                "baseline": _episode_summary_to_cache(baseline_stats, baseline_restart_rows),
             }
-        )
+            # Write after every dataset/seed pair, not just at the end -- this loop can run
+            # for hours across small/medium/large, and a crash partway through should not
+            # lose already-computed entries.
+            cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
 
-        restart_idx += 1
-        if target_runtime_seconds is None and reference_restarts is None:
-            break
-
-    if initial_cost is None:
-        initial_cost = 0.0
-    global_best = min(best_candidates) if best_candidates else 0.0
-
-    return EpisodeSummary(
-        initial_cost=float(initial_cost),
-        best_cost=float(global_best),
-        solver_runtime_seconds=float(total_solver_runtime_seconds),
-        wall_runtime_seconds=float(total_wall_runtime_seconds),
-    ), restart_records
+    print(f"Wrote baseline/Kisialiou cache to {cache_path} ({len(bk_cache_out)} dataset/seed entries).")
 
 
 def main() -> None:
@@ -1054,12 +800,14 @@ def main() -> None:
     if not train_paths or not test_paths:
         raise RuntimeError("Dataset manager returned empty train/test paths")
 
-    if sizes != ["small"] and "small" in sizes:
+    if not args.baseline_kisialiou_only and sizes != ["small"] and "small" in sizes:
         raise RuntimeError(
             "size_bucket (Kisialiou-calibrated destroy-operator variants) is fixed per training "
             "run and only correct for a single-size run; a joint run mixing 'small' with "
             "medium/large would need size_bucket resolved dynamically per-episode, which is not "
-            "implemented. Train small separately, or extend size_bucket handling before mixing sizes."
+            "implemented. Train small separately, or extend size_bucket handling before mixing sizes. "
+            "(--baseline-kisialiou-only is exempt: it resolves size_bucket per dataset/seed episode "
+            "internally, so mixing sizes in one invocation is safe there.)"
         )
     size_bucket = "small" if sizes == ["small"] else "large"
 
@@ -1070,6 +818,34 @@ def main() -> None:
     progress_horizon = (
         int(args.progress_horizon) if args.progress_horizon is not None else int(args.eval_restart_max_iterations)
     )
+
+    if args.baseline_kisialiou_only:
+        _run_baseline_kisialiou_only(
+            args=args,
+            repo=repo,
+            test_paths=test_paths,
+            eval_seeds=eval_seeds,
+            eval_iteration_cap=eval_iteration_cap,
+            log_dir=log_dir,
+            progress_horizon=progress_horizon,
+        )
+        return
+
+    if args.run_eval and not args.recompute_baseline_kisialiou:
+        # Fail fast, before spending training time: cache-only comparison is the default, so
+        # there is no point training a model only to discover at eval time that no
+        # baseline/Kisialiou cache exists yet.
+        precheck_cache_path = Path(args.baseline_kisialiou_cache) if args.baseline_kisialiou_cache else Path(DEFAULT_BASELINE_KISIALIOU_CACHE_RELPATH)
+        if not precheck_cache_path.is_absolute():
+            precheck_cache_path = (repo / precheck_cache_path).resolve()
+        if not precheck_cache_path.exists():
+            raise RuntimeError(
+                f"Cache-only comparison is the default (see docs/PAPER1_ACTION_SPACE_PLAN.md) and "
+                f"no baseline/Kisialiou cache was found at {precheck_cache_path}. Generate it once "
+                "with --baseline-kisialiou-only (covering every size/dataset/seed you plan to "
+                "evaluate) before training, or pass --recompute-baseline-kisialiou to compute "
+                "everything fresh for this run instead."
+            )
 
     exact_command = _build_exact_command()
     reference_train_env = ALNSEnvironment(
@@ -1142,6 +918,7 @@ def main() -> None:
             chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
             anti_repeat_penalty=args.anti_repeat_penalty,
             size_bucket=size_bucket,
+            ent_coef=args.ent_coef,
         )
         vec_env.close()
 
@@ -1151,17 +928,27 @@ def main() -> None:
     if not args.run_eval:
         return
 
+    cache_path = Path(args.baseline_kisialiou_cache) if args.baseline_kisialiou_cache else Path(DEFAULT_BASELINE_KISIALIOU_CACHE_RELPATH)
+    if not cache_path.is_absolute():
+        cache_path = (repo / cache_path).resolve()
+
     bk_cache_in: Optional[Dict[str, Any]] = None
-    if args.baseline_kisialiou_cache:
-        cache_path = Path(args.baseline_kisialiou_cache)
-        if not cache_path.is_absolute():
-            cache_path = (repo / cache_path).resolve()
-        if not cache_path.exists():
-            raise RuntimeError(f"--baseline-kisialiou-cache path not found: {cache_path}")
+    if cache_path.exists():
         bk_cache_in = json.loads(cache_path.read_text(encoding="utf-8"))
-        print(f"Loaded baseline/Kisialiou cache from {cache_path} ({len(bk_cache_in)} dataset/seed entries) "
-              f"-- baseline and Kisialiou will NOT be re-run.")
-    bk_cache_out: Dict[str, Any] = {}
+        print(f"Loaded baseline/Kisialiou cache from {cache_path} ({len(bk_cache_in)} dataset/seed entries).")
+    elif not args.recompute_baseline_kisialiou:
+        raise RuntimeError(
+            f"Cache-only comparison is the default (see docs/PAPER1_ACTION_SPACE_PLAN.md) and no "
+            f"baseline/Kisialiou cache was found at {cache_path}. Generate it once with "
+            "--baseline-kisialiou-only (covering every size/dataset/seed you plan to evaluate), "
+            "then re-run this command -- or pass --recompute-baseline-kisialiou to compute "
+            "everything fresh for this run instead and seed the cache for next time."
+        )
+    else:
+        print(f"No cache found at {cache_path}; --recompute-baseline-kisialiou is set, computing everything fresh.")
+        bk_cache_in = {}
+
+    bk_cache_out: Dict[str, Any] = dict(bk_cache_in) if bk_cache_in else {}
 
     rows: List[Dict] = []
     restart_rows: List[Dict[str, object]] = []
@@ -1170,6 +957,14 @@ def main() -> None:
         for seed in eval_seeds:
             cache_key = _cache_key(dataset_path, seed)
             cached_entry = bk_cache_in.get(cache_key) if bk_cache_in is not None else None
+
+            if cached_entry is None and not args.recompute_baseline_kisialiou:
+                raise RuntimeError(
+                    f"No cached baseline/Kisialiou entry for '{cache_key}' in {cache_path}. "
+                    "Cache-only comparison is the default -- regenerate the cache with "
+                    "--baseline-kisialiou-only so it covers this dataset/seed, or pass "
+                    "--recompute-baseline-kisialiou to compute missing entries on the fly."
+                )
 
             if cached_entry is not None:
                 kisialiou_stats, kisialiou_restart_rows = _episode_summary_from_cache(cached_entry["kisialiou"])
@@ -1218,25 +1013,64 @@ def main() -> None:
             if args.eval_runtime_mode == "match_kisialiou" and args.eval_fixed_restarts is None:
                 runtime_target_seconds = max(float(kisialiou_stats.wall_runtime_seconds), 1e-6)
 
-            rl_stats, snapshot, rl_restart_rows = run_policy_episode(
-                model=model,
-                dataset_path=dataset_path,
-                seed=seed,
-                max_iterations=eval_iteration_cap,
-                restart_max_iterations=args.eval_restart_max_iterations,
-                log_dir=log_dir,
-                mode_label="rl_improvement_mvp",
-                size_label=dataset_size_label,
-                action_module=args.action_module,
-                state_module=args.state_module,
-                reward_module=args.reward_module,
-                chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
-                anti_repeat_penalty=args.anti_repeat_penalty,
-                policy_deterministic=True,
-                target_runtime_seconds=runtime_target_seconds,
-                restart_limit=args.eval_fixed_restarts,
-                progress_horizon=progress_horizon,
-            )
+            if cached_entry is not None:
+                # Baseline is already cached, so it will never consume RL's per-restart
+                # snapshots -- skip collecting them (collect_snapshots=False) rather than
+                # deep-cloning the engine state for up to `effective_restart_limit`
+                # restarts and then throwing every one of them away unused. This was the
+                # actual cause of the 2026-09-06 large-size eval OOM: that run's baseline
+                # results were already cached, so run_baseline_episode below was never
+                # even going to be called, yet the RL loop was still building the full
+                # snapshot list for nothing.
+                rl_stats, _snapshot, rl_restart_rows = run_policy_episode(
+                    model=model,
+                    dataset_path=dataset_path,
+                    seed=seed,
+                    max_iterations=eval_iteration_cap,
+                    restart_max_iterations=args.eval_restart_max_iterations,
+                    log_dir=log_dir,
+                    mode_label="rl_improvement_mvp",
+                    size_label=dataset_size_label,
+                    action_module=args.action_module,
+                    state_module=args.state_module,
+                    reward_module=args.reward_module,
+                    chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
+                    anti_repeat_penalty=args.anti_repeat_penalty,
+                    policy_deterministic=True,
+                    target_runtime_seconds=runtime_target_seconds,
+                    restart_limit=args.eval_fixed_restarts,
+                    progress_horizon=progress_horizon,
+                    collect_snapshots=False,
+                )
+                baseline_stats, baseline_restart_rows = _episode_summary_from_cache(cached_entry["baseline"])
+            else:
+                # No cached baseline: baseline restart i needs RL restart i's matched
+                # initial snapshot, so run the two restart loops interleaved (one RL
+                # restart, then immediately its matched baseline restart) instead of the
+                # full RL sweep followed by the full baseline sweep -- that way at most
+                # one duplicated engine snapshot is ever live in memory, instead of one
+                # per restart held for the whole RL sweep. Restart counts/budgets for
+                # each mode are unchanged; only the memory lifetime of the snapshots is.
+                rl_stats, rl_restart_rows, baseline_stats, baseline_restart_rows = run_policy_and_baseline_episodes(
+                    model=model,
+                    dataset_path=dataset_path,
+                    seed=seed,
+                    max_iterations=eval_iteration_cap,
+                    restart_max_iterations=args.eval_restart_max_iterations,
+                    log_dir=log_dir,
+                    size_label=dataset_size_label,
+                    action_module=args.action_module,
+                    state_module=args.state_module,
+                    reward_module=args.reward_module,
+                    baseline_action_module=args.baseline_action_module,
+                    baseline_state_module=args.baseline_state_module,
+                    chain_max_consecutive_improvements=args.chain_max_consecutive_improvements,
+                    anti_repeat_penalty=args.anti_repeat_penalty,
+                    policy_deterministic=True,
+                    target_runtime_seconds=runtime_target_seconds,
+                    restart_limit=args.eval_fixed_restarts,
+                    progress_horizon=progress_horizon,
+                )
             restart_rows.extend(
                 {
                     **row,
@@ -1248,26 +1082,6 @@ def main() -> None:
                 }
                 for row in rl_restart_rows
             )
-
-            if cached_entry is not None:
-                baseline_stats, baseline_restart_rows = _episode_summary_from_cache(cached_entry["baseline"])
-            else:
-                baseline_stats, baseline_restart_rows = run_baseline_episode(
-                    dataset_path=dataset_path,
-                    seed=seed,
-                    max_iterations=eval_iteration_cap,
-                    restart_max_iterations=args.eval_restart_max_iterations,
-                    log_dir=log_dir,
-                    mode_label="baseline",
-                    size_label=dataset_size_label,
-                    initial_snapshots=snapshot,
-                    action_module=args.baseline_action_module,
-                    state_module=args.baseline_state_module,
-                    reward_module=args.reward_module,
-                    target_runtime_seconds=runtime_target_seconds,
-                    restart_limit=args.eval_fixed_restarts,
-                    progress_horizon=progress_horizon,
-                )
             restart_rows.extend(
                 {
                     **row,
@@ -1351,6 +1165,7 @@ def main() -> None:
                     target_runtime_seconds=runtime_target_seconds,
                     restart_limit=args.eval_fixed_restarts,
                     progress_horizon=progress_horizon,
+                    collect_snapshots=False,
                 )
                 restart_rows.extend(
                     {
@@ -1451,8 +1266,10 @@ def main() -> None:
 
     bk_cache_path = out_dir / "baseline_kisialiou_cache.json"
     bk_cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
-    if bk_cache_in is None:
-        print(f"Saved baseline/Kisialiou cache to {bk_cache_path} for reuse via --baseline-kisialiou-cache.")
+    if args.recompute_baseline_kisialiou:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(bk_cache_out, indent=2), encoding="utf-8")
+        print(f"Updated baseline/Kisialiou cache at {cache_path} with any freshly recomputed entries.")
 
     results_json = out_dir / "results.json"
     results_csv = out_dir / "results.csv"

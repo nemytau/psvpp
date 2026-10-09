@@ -23,17 +23,33 @@ from py_alns.data_generator import (
 )
 
 
+def _train_configs(size_prefix: str) -> list:
+    """Original 3 hand-tuned configs + the TW1-5/DF1-5 variety axes added 2026-09-04.
+
+    TW1-5: time-window density axis (0%, 25%, 50%, 75%, 100% of installations get a
+    real time window), install count spread across the size tier's requested range.
+    DF1-5: demand+frequency spectrum (small-demand+frequent -> large-demand+infrequent,
+    3 mixes between), same install-count spread. See
+    py_alns/resource/generation_config.yaml and
+    docs/experiments/diary_entry_decisive_time_scaled_reward_test_launch.md.
+    """
+    base = [f"{size_prefix}_TRAIN_{i}" for i in (1, 2, 3)]
+    tw = [f"{size_prefix}_TRAIN_TW{i}" for i in range(1, 6)]
+    df = [f"{size_prefix}_TRAIN_DF{i}" for i in range(1, 6)]
+    return base + tw + df
+
+
 DATASET_CONFIGS: Dict[str, Dict[str, Iterable[str]]] = {
     "small": {
-        "train": ["SMALL_TRAIN_1", "SMALL_TRAIN_2", "SMALL_TRAIN_3"],
+        "train": _train_configs("SMALL"),
         "test": ["SMALL_TEST_1"],
     },
     "medium": {
-        "train": ["MEDIUM_TRAIN_1", "MEDIUM_TRAIN_2", "MEDIUM_TRAIN_3"],
+        "train": _train_configs("MEDIUM"),
         "test": ["MEDIUM_TEST_1"],
     },
     "large": {
-        "train": ["LARGE_TRAIN_1", "LARGE_TRAIN_2", "LARGE_TRAIN_3"],
+        "train": _train_configs("LARGE"),
         "test": ["LARGE_TEST_1"],
     },
 }

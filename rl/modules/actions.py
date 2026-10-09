@@ -333,6 +333,71 @@ class OpPairV1ActionSpace(BaseActionSpace):
         return 0
 
 
+@register_action("op_pair_v2")
+class OpPairV2ActionSpace(BaseActionSpace):
+    """Same as op_pair_v1, plus `first_fit_insertion_v1` as a 4th repair choice.
+
+    Flat destroy x repair control (no improvement phase at all) -- isolates
+    whether first_fit_insertion_v1's effect on training dynamics depends on
+    the larger D x R x I action space (op_triple_v2), or shows up already in
+    the simplest possible action space.
+
+    Action space: 3 destroy x 4 repair = 12 actions.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+        size_bucket: str = "large",
+    ) -> None:
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        selected_destroy, selected_repair = _base_destroy_repair(d_all, r_all, size_bucket=size_bucket)
+        first_fit = _first(r_all, "first_fit_insertion_v1")
+        if first_fit is not None:
+            selected_repair = [*selected_repair, first_fit]
+
+        self.destroy_operators = selected_destroy
+        self.repair_operators = selected_repair
+        self.improvement_operators: list = []
+        self._num_destroy = len(selected_destroy)
+        self._num_repair = len(selected_repair)
+        self._pairs = [(d, r) for d in range(self._num_destroy) for r in range(self._num_repair)]
+        self._space = spaces.Discrete(len(self._pairs))
+        self._d_engine = [d_all.index(n) for n in selected_destroy]
+        self._r_engine = [r_all.index(n) for n in selected_repair]
+
+    def gym_space(self) -> spaces.Discrete:
+        return self._space
+
+    def n(self) -> int:
+        return int(self._space.n)
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        if not self._space.contains(action_idx):
+            raise ValueError(f"Action index {action_idx} out of range [0, {self._space.n})")
+        d_local, r_local = self._pairs[action_idx]
+        return self._d_engine[d_local], self._r_engine[r_local], None
+
+    def action_to_id(self, destroy_idx, repair_idx, improvement_idx=None) -> int:
+        local_d = self._d_engine.index(int(destroy_idx))
+        local_r = self._r_engine.index(int(repair_idx))
+        return local_d * self._num_repair + local_r
+
+    def sample(self) -> int:
+        return int(self._space.sample())
+
+    def num_pairs(self) -> int:
+        return len(self._pairs)
+
+    def num_improvement(self) -> int:
+        return 0
+
+
 @register_action("op_triple_v1")
 class OpTripleV1ActionSpace(OperatorPairActionSpace):
     """D×R×I action space using one base (v1) operator per family.
@@ -353,6 +418,56 @@ class OpTripleV1ActionSpace(OperatorPairActionSpace):
         r_all = list(repair_operators)
         i_all = list(improvement_operators or [])
         selected_destroy, selected_repair = _base_destroy_repair(d_all, r_all, size_bucket=size_bucket)
+        selected_improve = [n for n in _BASE_IMPROVEMENTS if n in i_all]
+
+        super().__init__(
+            destroy_operators=selected_destroy,
+            repair_operators=selected_repair,
+            improvement_operators=selected_improve,
+        )
+        self._d_engine = [d_all.index(n) for n in selected_destroy]
+        self._r_engine = [r_all.index(n) for n in selected_repair]
+        self._i_engine = [i_all.index(n) for n in selected_improve]
+
+    def id_to_action(self, action_idx: int) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        d_local, r_local, i_local = super().id_to_action(action_idx)
+        return self._d_engine[d_local], self._r_engine[r_local], self._i_engine[i_local]
+
+
+@register_action("op_triple_v2")
+class OpTripleV2ActionSpace(OperatorPairActionSpace):
+    """Same as op_triple_v1, plus `first_fit_insertion_v1` as a 4th repair choice.
+
+    Destroy and improvement operator selection is identical to op_triple_v1
+    (Kisialiou-calibrated destroy triplet, same 4-operator improvement set).
+    Adds the cheap, non-cost-ranked FirstFitInsertion repair operator (see
+    rust_alns/src/operators/repair/first_fit_insertion.rs) to the repair pool,
+    to test whether RL benefits from having a fast fallback repair available
+    alongside the cost-ranked DeepGreedyInsertion/KRegretInsertion operators.
+
+    Not used by baseline or Kisialiou -- those stay on op_pair_v1/
+    adaptive_weighted_v1's original 3-operator repair pool, deliberately
+    unchanged, so they remain a fixed reference point.
+
+    Action space: 3 destroy x 4 repair x 4 improvement = 48 actions.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+        size_bucket: str = "large",
+    ) -> None:
+        d_all = list(destroy_operators)
+        r_all = list(repair_operators)
+        i_all = list(improvement_operators or [])
+        selected_destroy, selected_repair = _base_destroy_repair(d_all, r_all, size_bucket=size_bucket)
+        first_fit = _first(r_all, "first_fit_insertion_v1")
+        if first_fit is not None:
+            selected_repair = [*selected_repair, first_fit]
         selected_improve = [n for n in _BASE_IMPROVEMENTS if n in i_all]
 
         super().__init__(
@@ -633,6 +748,47 @@ class ImprovementChainActionSpace(BaseActionSpace):
 
     def num_improvement(self) -> int:
         return len(self._improvement_indices)
+
+
+@register_action("improvement_chain_v2")
+class ImprovementChainV2ActionSpace(ImprovementChainActionSpace):
+    """Same as improvement_chain_v1, plus `first_fit_insertion_v1` in the backbone's repair pool.
+
+    RL's action space is unchanged (still 1 backbone + 4 improvement-operator
+    choices) -- the backbone destroy/repair pair is always resolved by the
+    engine's own adaptive-weighted roulette (mode="weighted"), never chosen
+    explicitly by RL, for both v1 and v2. What changes is which repair
+    operators that roulette is allowed to pick from: v1 restricts to the 3
+    standard cost-ranked operators (deep_greedy_rank_1, k_regret_2,
+    k_regret_3); v2 adds first_fit_insertion_v1 as a 4th, cheap option.
+
+    Motivation: the v1 small-eval result (2026-08-24) showed real destroy/
+    repair diversity (the weighted roulette works fine) but a much lower
+    restart count within the same wall-time-matched eval budget than
+    op_triple_v2 achieved (1,241 vs 2,215) -- cost-ranked-only repair is
+    slower per iteration, so fewer restarts fit. This tests whether giving
+    the backbone the same cheap escape hatch op_triple_v2 had closes that
+    gap without needing RL to choose the pair at all.
+    """
+
+    version = "1.0"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+        size_bucket: str = "large",
+    ) -> None:
+        super().__init__(
+            destroy_operators=destroy_operators,
+            repair_operators=repair_operators,
+            improvement_operators=improvement_operators,
+            size_bucket=size_bucket,
+        )
+        first_fit = _first(list(repair_operators), "first_fit_insertion_v1")
+        if first_fit is not None and first_fit not in self.repair_operators:
+            self.repair_operators = [*self.repair_operators, first_fit]
 
 
 @register_action("improvement_many_v1")

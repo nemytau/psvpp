@@ -331,6 +331,7 @@ def train_ppo_agent(
     chain_max_consecutive_improvements: Optional[int] = None,
     anti_repeat_penalty: float = 0.0,
     size_bucket: str = "large",
+    ent_coef: Optional[float] = None,
 ) -> Tuple[PPO, DummyVecEnv]:
     """Train a PPO agent on the ALNS environment using provided datasets."""
 
@@ -388,13 +389,27 @@ def train_ppo_agent(
 
     logger = configure(str(log_dir_path), ["stdout", "csv", "tensorboard"])
 
-    model = PPO(
-        "MlpPolicy",
-        vec_env,
+    ppo_kwargs: Dict[str, Any] = dict(
         learning_rate=learning_rate,
         verbose=1,
         tensorboard_log=str(log_dir_path),
         seed=seed,
+    )
+    if ent_coef is not None:
+        # SB3 defaults ent_coef to 0.0 (no entropy bonus). Operator-usage analysis
+        # (Exp1, 2026-08-20/21) found the policy's entropy collapsing to near-zero
+        # within the first ~1/3 of training regardless of action space, well before
+        # training ends -- it commits to one action and never reconsiders it. A
+        # small positive ent_coef keeps the entropy bonus alive longer, so the
+        # policy retains enough exploration to actually discover and reinforce
+        # state-dependent switching behavior (e.g. the late-restart reward shaping
+        # this is paired with) instead of prematurely converging on one action.
+        ppo_kwargs["ent_coef"] = float(ent_coef)
+
+    model = PPO(
+        "MlpPolicy",
+        vec_env,
+        **ppo_kwargs,
     )
 
     callback = ALNSTrainingCallback(log_dir=str(log_dir_path))

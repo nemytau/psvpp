@@ -78,7 +78,7 @@ pub fn construct_initial_solution(context: &Context, rng: &mut impl Rng) -> Solu
                     solution.add_voyage(voyage);
                 } else {
                     warn!(target: "operator::initial", "[InitialSolution] Failed to assign vessel for voyage on day {}", day);
-                    break 'outer;
+                    continue 'outer;
                 }
             }
             if !unassigned.is_empty() {

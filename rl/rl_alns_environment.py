@@ -5,6 +5,7 @@ This module provides a Gymnasium-compatible environment that wraps the Rust ALNS
 library, allowing RL agents to learn optimal operator selection strategies.
 """
 
+import inspect
 import logging
 from collections import deque
 from pathlib import Path
@@ -16,7 +17,9 @@ import rust_alns_py
 from gymnasium import spaces
 
 from rl.instance_stats import get_instance_statistics
+from rl.modules.actions import ImprovementChainActionSpace
 from rl.registries import (
+    ACTION_REGISTRY,
     DEFAULT_ACTION_KEY,
     DEFAULT_REWARD_KEY,
     DEFAULT_STATE_KEY,
@@ -237,13 +240,14 @@ class ALNSEnvironment(gym.Env):
             repair_operators=self.repair_operators,
             improvement_operators=self.improvement_operators,
         )
-        if self.action_module_name in (
-            "adaptive_weighted_v1",
-            "op_pair_v1",
-            "op_triple_v1",
-            "improvement_chain_v1",
-            "improvement_many_v1",
-        ):
+        # Introspect the actual registered class rather than maintaining a name-string
+        # list here: a hardcoded list needs a manual edit for every new action module
+        # that needs size_bucket, and silently keeps the wrong default (size_bucket
+        # never passed) for any variant its author forgot to add -- the same failure
+        # shape as the chain_action_module bug above, just not yet triggered because
+        # every size_bucket-dependent class so far happened to get added to the list.
+        _action_cls = ACTION_REGISTRY.get(self.action_module_name)
+        if _action_cls is not None and "size_bucket" in inspect.signature(_action_cls.__init__).parameters:
             _action_kwargs["size_bucket"] = self.size_bucket
         self.action_impl = create_action_space(self.action_module_name, **_action_kwargs)
         self.action_space = self.action_impl.gym_space()
@@ -649,7 +653,13 @@ class ALNSEnvironment(gym.Env):
         destroy_idx, repair_idx, improvement_idx = self._encode_action(action)
         backbone_controlled = destroy_idx is None and repair_idx is None
         improvement_only = improvement_idx is not None and backbone_controlled
-        chain_action_module = self.action_module_name == "improvement_chain_v1"
+        # isinstance, not a name-string list: this must automatically cover every
+        # subclass of ImprovementChainActionSpace (e.g. improvement_chain_v2), or a
+        # new variant silently loses the improvement-only execution path and the
+        # forced-backbone safety valve -- exactly the bug found 2026-08-25 when
+        # improvement_chain_v2 was added but this check still only matched
+        # "improvement_chain_v1" by exact string equality.
+        chain_action_module = isinstance(self.action_impl, ImprovementChainActionSpace)
 
         selected_improvement_idx: Optional[int] = (
             int(improvement_idx) if improvement_idx is not None else None
@@ -1102,6 +1112,8 @@ class ALNSEnvironment(gym.Env):
                 "action_type": action_type,
                 "acceptance_type": acceptance_type,
                 "instance_stats": dict(self.current_instance_stats),
+                "destroy_weights": result.get("destroy_weights"),
+                "repair_weights": result.get("repair_weights"),
             }
             
             if done:
@@ -1509,6 +1521,15 @@ class ALNSEnvironment(gym.Env):
             "sequence_call_id": None,
         }
 
+        def _weight_at(weights_key: str, idx: Optional[int]) -> Optional[float]:
+            weights = result.get(weights_key)
+            if weights is None or idx is None or not (0 <= idx < len(weights)):
+                return None
+            try:
+                return float(weights[idx])
+            except (TypeError, ValueError):
+                return None
+
         if (
             log_destroy
             and destroy_idx_result is not None
@@ -1529,6 +1550,7 @@ class ALNSEnvironment(gym.Env):
                 "cost_delta": None,
                 "best_cost_delta": None,
                 "operator_elapsed_ms": float(result.get("destroy_elapsed_ns", 0)) / 1e6,
+                "operator_weight": _weight_at("destroy_weights", destroy_idx_result),
             }
             self._queue_operator_log_record(destroy_record, current_best_cost)
 
@@ -1552,6 +1574,7 @@ class ALNSEnvironment(gym.Env):
                 "cost_delta": float(cost_after_repair - cost_after_destroy),
                 "best_cost_delta": _consume_step_best_delta(float(cost_after_repair)),
                 "operator_elapsed_ms": float(result.get("repair_elapsed_ns", 0)) / 1e6,
+                "operator_weight": _weight_at("repair_weights", repair_idx_result),
             }
             self._queue_operator_log_record(repair_record, current_best_cost)
 
