@@ -345,7 +345,107 @@ experiments planned on this run/config.
 
 ---
 
-## Experiment 9 — State / action / reward design ablation for NORM 2026 (running, launched 2026-10-09)
+## Timing protocol and RL decision overhead (analysis for the paper, 2026-10-09)
+
+**Why this matters for the paper.** Exp 8 matched methods on wall-clock time; Exp 9 matches them
+on *search CPU time*. The obvious reviewer question is whether search time is chosen to hide
+RL's overhead. Answer, with the numbers below: the overhead is an implementation artefact of the
+Python prototype; in an optimised implementation RL's per-decision cost is a few microseconds,
+about 1–3% of its search time per decision (median; at most ~5%).
+
+**1. How Exp 8 measured time.** Budget per instance = Kisialiou's *wall-clock* time for its 5
+reference restarts × 300 iterations (`time.perf_counter()` around each restart: environment
+creation → all iterations → close), taken from the cached reference run. RL and the baseline ran
+300-iteration restarts until their own cumulative wall-clock time reached that budget (checked
+between restarts, so the last restart always completed). The engine's own per-iteration timer
+("solver time", wall clock, ns) was reported but not used for budgets; `delta_cost_v9`'s time
+penalty used it per step.
+
+Engine (search) share of wall-clock time in Exp 8, summed over the 50 instances per size
+(from each run's `results.csv`):
+
+| size | Kisialiou | RL | Baseline |
+|---|---|---|---|
+| small | 93% (8.6 of 9.2 min) | 65% (6.2 of 9.5 min) | 54% (5.0 of 9.3 min) |
+| medium | 99% (105.7 of 106.5 min) | **21%** (22.6 of 106.6 min) | 83% (88.9 of 106.7 min) |
+| large | 100% (1681 of 1684 min) | 40% (680 of 1684 min) | 98% (1653 of 1687 min) |
+
+So at equal wall-clock time RL searched only ~1/5 (medium) to ~2/3 (small) as long as Kisialiou
+and still beat it on average — Exp 8's protocol was conservative *against* RL.
+
+**2. Why RL's overhead is the largest.** Per step, medium instance, one job alone, Exp 8 policy:
+
+| method | search | Python in the env step (state, reward, log row, result conversion) | policy inference (SB3 `predict`) | search share |
+|---|---|---|---|---|
+| RL | 0.17 ms | 0.31 ms | 0.22 ms | 24% |
+| Baseline | 1.88 ms | 0.24 ms | — | 89% |
+| Kisialiou | 196 ms | 1.24 ms | — | 99% |
+
+Python costs per step are roughly the same for every method; what differs is how much search one
+step contains. RL's learned medium policy (random removal + first-fit + FCR) is very cheap per
+step — the time-aware reward and restart economics (Exp 7) favour many fast steps — so fixed
+per-step costs dominate exactly for RL.
+
+**3. RL's essential decision cost in an optimised implementation.** At evaluation time only two
+things are needed per decision: building the state vector and the policy forward pass (reward
+computation, operator logging and per-restart environment creation are not).
+- Policy: actor MLP 45 → 64 → 64 → 48 with tanh (~10k multiply-adds). Per decision: SB3
+  `predict` 199 µs; lean PyTorch forward 44 µs; NumPy 12 µs; compiled Rust (arm64, plain scalar
+  loops, M1) **4.3 µs** — all measured.
+- State features: mostly values the engine already computes; native cost estimated at ~2 µs.
+  Conservative upper bound: the engine's current solution-metrics routine called from Python,
+  17 / 25 / 38 µs (small / medium / large) — it clones the solution and re-runs a full
+  feasibility check on every call, which a lean state does not need.
+- Realistic total ≈ **6.3 µs per decision**; conservative bound ≈ 21 / 30 / 43 µs.
+
+**4. Overhead relative to RL's search per decision** (per instance, Exp 8 policies, 150
+instances; RL's search per decision: median 1,120 µs small / 197 µs medium / 431 µs large):
+
+| size | realistic (~6.3 µs/decision) | conservative bound |
+|---|---|---|
+| small | **0.6%** median, 1.9% worst instance | 1.9% median, 6.5% worst |
+| medium | **3.2%** median, 4.9% worst | 15% median, 23% worst |
+| large | **1.5%** median, 1.8% worst | 9.9% median, 12% worst |
+
+For comparison, the current Python implementation spends ~76% of RL's time on medium in overhead.
+
+**Caveats to state.** (a) The ratio depends on the operators the policy chooses: cheaper
+operators mean relatively larger overhead (medium is the worst case here). (b) It depends on the
+network: the 288-action head of `op_triple_many_v1` adds ~50% to the forward pass (still a few
+µs); graph or attention networks over the solution would cost tens to hundreds of µs per decision.
+(c) The comparison methods' own selection logic (roulette wheel, weight updates) runs inside the
+engine and is counted in their search time, whereas RL's decision is not unless it is charged
+explicitly (adding a fixed per-decision charge of ~6 µs to RL's search time is a one-line change).
+(d) Decision frequency vs. operator cost is itself an action-space design consideration: with
+cheap operators, deciding at every step is relatively expensive.
+
+**5. Measurement facts behind the search-CPU protocol (Exp 9).**
+- Search CPU time is measured inside the Rust engine (`search_cpu_ns`, process CPU clock, ns
+  resolution) over exactly the spans the engine already timed: each iteration's destroy, repair,
+  improvement, acceptance and weight update, plus each restart's constructive initial solution
+  (0.13 ms small / 0.31 ms medium). It agrees with the engine's wall-clock timer within 1–3% on an
+  idle machine, and adding it left fixed-seed search trajectories byte-identical.
+- Under Rosetta 2 (x86_64 Python on Apple Silicon) the per-thread CPU clock returns 24 MHz ticks
+  instead of nanoseconds (~41.7× too small); the process clock is correct and equals the thread's
+  CPU time for the single-threaded engine.
+- On the M1 Air, the CPU time a fixed amount of work costs depends on machine load: identical,
+  deterministic Kisialiou work took 2.37 s alone, 3.0–3.3 s with 3 concurrent jobs and 3.8–4.0 s
+  with 4 (with 7 background CPU hogs: +40–48%; marking the process "user-interactive" did not
+  help). Fair budgets therefore need the reference and all evaluations to run under the same load.
+
+**Suggested wording for the paper.** "Methods are compared at equal search time, i.e. CPU time
+spent inside the search engine (operator applications, acceptance and adaptive bookkeeping),
+excluding the interpreter overhead of our Python prototype. In an optimised implementation the
+RL agent's per-decision cost — constructing the state and one forward pass of a 45-64-64-48
+network — is about 6 µs, i.e. 0.6–3.2% of its search time per decision (median over test
+instances; at most 4.9%), measured with a compiled implementation of the policy network."
+
+*Sources: Exp 8 output folders (`results.csv`, `restart_results.csv`); measurement scripts and
+what each one produced: `scripts/timing/` (see its README).*
+
+---
+
+## Experiment 9 — State / action / reward design ablation for NORM 2026 (prepared 2026-10-09)
 
 **Question**: for the talk "State, Action, and Reward Design for RL-Enhanced ALNS in Periodic
 Supply Vessel Planning" — which design choices actually matter? One factor at a time around the
@@ -380,15 +480,48 @@ current and best cost vs initial, current-best gap, fixed-cost share, voyages pe
 voyages, vessels used / fleet, voyage and vessel load / time utilisation, feasibility. All
 normalised (the v3 reference feeds raw costs).
 
-**Protocol**: 50 test instances per size, eval seed 42, `match_kisialiou` wall-time budget against
-the cached Kisialiou/baseline results (per-size slices `runs/baseline_kisialiou_cache/
-cache_{size}_seed42.json`). Training seeds: small 42/43/44 for every trained variant; medium 42
-(reference 42/43/44). The Exp 8 seed-42 models are re-evaluated, not reused, so every variant is
-scored under the same machine load (4 concurrent jobs on the M1's 4 performance cores).
-Evaluation now checkpoints after every instance (`partial_rows.jsonl`, `--resume`) and records
-per-restart action statistics (distinct actions, switches, action histogram).
+**Protocol** (revised 2026-10-09 — first launch stopped after 1 job, see below): first 30 small /
+20 medium test instances, eval seed 42. Training seeds: small 42/43 for every trained variant;
+medium 42; the reference (= Exp 8 configuration) is *retrained* at medium 42/43/44 and small
+42/43, because Exp 8's models were trained with the old wall-clock time penalty.
 
-**Scripts**: `scripts/run_norm2026_ablation.py` (queue, 58 jobs, status in `NORM2026_STATUS.md`),
+*Time budget = search CPU time.* RL and the adaptive baseline get exactly the search CPU time
+Kisialiou needs for its 5 reference restarts on each instance. Search CPU time is measured inside
+the Rust engine (`search_cpu_ns`, process CPU clock, ns) over exactly the spans the engine already
+timed — every iteration's destroy / repair / improvement / acceptance / weight update, plus the
+constructive initial solution of each restart — so Python overhead (policy inference, state
+encoding, operator logging, object creation, GC) no longer counts against any method. Under the
+old wall-clock rule it did: Exp 8's medium RL spent only ~21% of its wall time in the engine.
+The time-aware rewards (`delta_cost_v9`, `alns_score_time_v1`) and the search encoder's
+step-duration feature use the same CPU measurement. The Kisialiou/baseline reference is
+regenerated under this rule inside the run (`runs/baseline_kisialiou_cache/search_cpu_v1/`);
+Kisialiou is deterministic and reproduces the old cache's best costs exactly.
+
+*Constant machine load.* Two measurement findings on this M1 Air (x86_64 Python under Rosetta):
+(1) the per-thread CPU clock is wrong under Rosetta (returns 24 MHz ticks, ~41.7x too small),
+hence the process clock — the engine is single-threaded; (2) the CPU time a fixed amount of
+search costs depends on machine load — identical deterministic Kisialiou work took 2.37 s alone,
+~3.1 s with 3 and ~3.9 s with 4 concurrent jobs (QoS "user-interactive" did not help). So every
+time-budgeted run uses the same load: exactly 4 busy processes whenever a reference or evaluation
+task runs (filler processes cover the tail), on an otherwise idle machine.
+
+*RL decision charge.* RL is charged its essential per-decision cost in an optimised
+implementation, added to its engine search CPU time for the budget and time-to-best: native
+forward pass of its actual network (3.2–9.8 µs depending on input size and action head;
+`scripts/timing/mlp_decision_cost.rs`) + 2 µs state construction (0 for the no-state variant);
+random/fixed control policies are charged 0. This makes the budgets symmetric with the
+comparison methods, whose selection logic runs inside the engine. Recorded in every output:
+`decision_cost_us`, `decision_charge_seconds` and `engine_search_cpu_seconds` in results /
+restart CSVs (`search_cpu_seconds` = engine + charge), `rl_decision_charge` in the run manifest,
+the charge's share of search in `summary.json`, and `decision_charge_ns_per_iteration` on every
+operator-usage log row.
+
+Evaluation checkpoints after every instance (`partial_rows.jsonl`, `--resume`) and records
+per-restart action statistics (distinct actions, switches, action histogram); per-iteration
+operator-usage logs stay on.
+
+**Scripts**: `scripts/run_norm2026_ablation.py` (queue: 7 reference chunks, 38 trainings, 46
+evaluations; status in `NORM2026_STATUS.md`),
 `scripts/analyze_norm2026_ablation.py` (ratio-to-best tables, paired Wilcoxon + bootstrap CIs vs
 reference and Kisialiou, policy-behaviour tables). Outputs: `output/norm26__<axis>__<variant>__
 <size>__s<seed>/`, analysis in `output/norm26_analysis/`.
@@ -400,7 +533,8 @@ of every size (and large 08), plus 15 medium/large training sets, differ between
 all read the processed files), but any analysis reading instance properties from
 `data/generated` describes the wrong instances for those datasets — read `data/processed` instead.
 
-**Status**: running.
+**Status**: prepared, waiting for launch (machine must be idle). Exp 8 stays locked as it was;
+note its numbers come from the old wall-clock rule and are not directly comparable to Exp 9's.
 
 ---
 

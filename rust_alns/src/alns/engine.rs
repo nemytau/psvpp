@@ -85,6 +85,8 @@ pub struct ALNSMetrics {
     pub elapsed_ns: u128,
     pub destroy_elapsed_ns: u128,
     pub repair_elapsed_ns: u128,
+    /// CPU time of the iteration's search work (same span as `elapsed_ns`).
+    pub search_cpu_ns: u128,
 }
 
 #[derive(Clone)]
@@ -161,6 +163,40 @@ pub struct ALNSEngine {
     pub initial_temperature: f64,
     pub algorithm_mode: ALNSAlgorithmMode,
     pub kisialiou_improvement_sequence_override: Option<Vec<usize>>,
+    /// CPU time spent constructing the initial solution (part of each restart's search).
+    pub init_search_cpu_ns: u128,
+}
+
+/// Process CPU time in nanoseconds (CLOCK_PROCESS_CPUTIME_ID).
+///
+/// "Search time" is measured with this clock over exactly the spans the engine already
+/// times with `Instant` (one iteration: destroy, repair, improvement, acceptance and weight
+/// update; plus the constructive initial solution). It therefore excludes everything on the
+/// Python side -- policy inference, state encoding, logging, object creation, garbage
+/// collection -- and, unlike wall time, any time the process spends descheduled while other
+/// programs run. The engine is single-threaded and the calling Python thread is blocked for
+/// the duration of the call, so process CPU time over the span is the search thread's CPU
+/// time. (Not CLOCK_THREAD_CPUTIME_ID: under Rosetta 2 it returns 24 MHz Mach ticks instead
+/// of nanoseconds, ~41.7x too small.)
+pub fn process_cpu_time_ns() -> u128 {
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i64,
+    }
+    extern "C" {
+        fn clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
+    }
+    #[cfg(target_os = "macos")]
+    const CLOCK_PROCESS_CPUTIME_ID: i32 = 12;
+    #[cfg(not(target_os = "macos"))]
+    const CLOCK_PROCESS_CPUTIME_ID: i32 = 2;
+
+    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+    if unsafe { clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &mut ts) } != 0 {
+        return 0;
+    }
+    (ts.tv_sec as u128) * 1_000_000_000 + (ts.tv_nsec as u128)
 }
 
 impl ALNSEngine {
@@ -293,9 +329,11 @@ impl ALNSEngine {
         };
 
         let mut rng = StdRng::seed_from_u64(seed);
+        let init_cpu_start = process_cpu_time_ns();
         let mut initial_solution =
             crate::operators::initial_solution::construct_initial_solution(&context, &mut rng);
         initial_solution.update_total_cost(&context);
+        let init_search_cpu_ns = process_cpu_time_ns().saturating_sub(init_cpu_start);
 
         let mut operator_registry = OperatorRegistry::new();
         Self::setup_operators(&mut operator_registry);
@@ -347,6 +385,7 @@ impl ALNSEngine {
             initial_temperature: temperature,
             algorithm_mode,
             kisialiou_improvement_sequence_override: None,
+            init_search_cpu_ns,
         })
     }
 
@@ -502,6 +541,7 @@ impl ALNSEngine {
             elapsed_ns: 0,
             destroy_elapsed_ns: 0,
             repair_elapsed_ns: 0,
+            search_cpu_ns: 0,
         }
     }
 
@@ -812,6 +852,7 @@ impl ALNSEngine {
         iteration: usize,
     ) -> Result<ALNSMetrics, String> {
         let start_time = std::time::Instant::now();
+        let start_cpu_ns = process_cpu_time_ns();
 
         if destroy_operator_idx >= self.operator_registry.destroy_operators.len() {
             return Err(format!(
@@ -993,6 +1034,7 @@ impl ALNSEngine {
 
         // Calculate elapsed time
         let elapsed_ns = start_time.elapsed().as_nanos();
+        let search_cpu_ns = process_cpu_time_ns().saturating_sub(start_cpu_ns);
         let elapsed_ms = elapsed_ns / 1_000_000;
 
         // Log iteration progress
@@ -1121,6 +1163,7 @@ impl ALNSEngine {
             elapsed_ns,
             destroy_elapsed_ns,
             repair_elapsed_ns,
+            search_cpu_ns,
         })
     }
 
@@ -1195,6 +1238,7 @@ impl ALNSEngine {
         improvement_operator_idx: usize,
     ) -> Result<ALNSMetrics, String> {
         let start_time = std::time::Instant::now();
+        let start_cpu_ns = process_cpu_time_ns();
 
         if improvement_operator_idx >= self.operator_registry.improvement_operators.len() {
             return Err(format!(
@@ -1273,6 +1317,7 @@ impl ALNSEngine {
 
         let elapsed_ns = start_time.elapsed().as_nanos();
         let elapsed_ms = elapsed_ns / 1_000_000;
+        let search_cpu_ns = process_cpu_time_ns().saturating_sub(start_cpu_ns);
 
         log::info!(
             "Iter {:3} (improvement): cost={:.4}, best={:.4}, temp={:6.1}, improvement={}, accepted={}, elapsed={}ms",
@@ -1392,6 +1437,7 @@ impl ALNSEngine {
             elapsed_ns,
             destroy_elapsed_ns: 0,
             repair_elapsed_ns: 0,
+            search_cpu_ns,
         })
     }
 

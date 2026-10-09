@@ -29,7 +29,10 @@ from rl.episode_runner import (
     EpisodeSummary,
     _restart_seed,
     _time_to_best,
+    _time_to_best_search,
+    _budget_reached,
     _episode_time_to_best,
+    _episode_time_to_best_search,
     _episode_vessel_stats,
     _episode_structure_stats,
     _cache_key,
@@ -154,6 +157,12 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated dataset sizes to include for joint train/eval (overrides --size)",
     )
     parser.add_argument("--datasets-per-size", type=int, default=5)
+    parser.add_argument(
+        "--dataset-start",
+        type=int,
+        default=0,
+        help="Skip this many test datasets per size before taking --datasets-per-size (parallel chunks)",
+    )
     parser.add_argument("--train-timesteps", type=int, default=30000)
     parser.add_argument("--max-iterations", type=int, default=200)
     parser.add_argument(
@@ -414,12 +423,14 @@ def run_policy_episode(
     restart_limit: Optional[int] = None,
     progress_horizon: Optional[int] = None,
     collect_snapshots: bool = True,
+    decision_cost_seconds: float = 0.0,
 ) -> tuple[EpisodeSummary, List[object], List[Dict[str, object]]]:
     restart_cap = max(1, min(int(restart_max_iterations), int(max_iterations)))
     effective_restart_limit = max(1, int(restart_limit)) if restart_limit is not None else int(max_iterations)
     solver_elapsed_ms_total = 0.0
     total_solver_runtime_seconds = 0.0
     total_wall_runtime_seconds = 0.0
+    total_search_seconds = 0.0
     initial_cost: Optional[float] = None
     best_candidates: List[float] = []
     restart_snapshots: List[object] = []
@@ -427,7 +438,7 @@ def run_policy_episode(
     restart_idx = 0
 
     while restart_idx < effective_restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
+        if restart_idx > 0 and _budget_reached(total_search_seconds, target_runtime_seconds):
             break
 
         restart_seed = _restart_seed(seed, restart_idx)
@@ -458,6 +469,7 @@ def run_policy_episode(
         )
 
         obs, _ = env.reset(seed=restart_seed, options={"problem_path": dataset_path})
+        env.decision_charge_ns_per_iteration = int(round(decision_cost_seconds * 1e9))
         # Snapshotting clones the whole engine state per restart; skip it when the caller
         # (e.g. a cached-baseline dataset, or the stochastic-check sanity run) has no use
         # for matched-restart snapshots -- on large instances this is the main memory cost
@@ -489,8 +501,16 @@ def run_policy_episode(
             restart_elapsed_ms += step_ms
             solver_elapsed_ms_total += step_ms
             steps += 1
+            if _budget_reached(
+                total_search_seconds + env.search_cpu_seconds + steps * decision_cost_seconds,
+                target_runtime_seconds,
+            ):
+                break
 
         stats = env.get_episode_statistics()
+        engine_search_seconds = env.search_cpu_seconds
+        decision_charge_seconds = steps * decision_cost_seconds
+        restart_search_seconds = engine_search_seconds + decision_charge_seconds
         env.close()
 
         restart_initial = float(stats.get("initial_cost") or 0.0)
@@ -510,6 +530,7 @@ def run_policy_episode(
         restart_wall_runtime = time.perf_counter() - restart_wall_start
         total_solver_runtime_seconds += restart_solver_runtime
         total_wall_runtime_seconds += restart_wall_runtime
+        total_search_seconds += restart_search_seconds
         ttb_solver, ttb_iters = _time_to_best(stats)
         restart_records.append(
             {
@@ -518,6 +539,13 @@ def run_policy_episode(
                 "restart_seed": restart_seed,
                 "solver_runtime_seconds": restart_solver_runtime,
                 "wall_runtime_seconds": restart_wall_runtime,
+                "search_cpu_seconds": restart_search_seconds,
+                "engine_search_cpu_seconds": engine_search_seconds,
+                "decision_charge_seconds": decision_charge_seconds,
+                "time_to_best_search_seconds": (
+                    _time_to_best_search(stats) + (ttb_iters + 1) * decision_cost_seconds
+                    if stats.get("best_cost_history") else 0.0
+                ),
                 "time_to_best_solver_seconds": ttb_solver,
                 "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
@@ -554,10 +582,59 @@ def run_policy_episode(
             best_cost=float(global_best),
             solver_runtime_seconds=float(total_solver_runtime_seconds),
             wall_runtime_seconds=float(total_wall_runtime_seconds),
+            search_cpu_seconds=float(total_search_seconds),
         ),
         restart_snapshots,
         restart_records,
     )
+
+
+# RL's essential per-decision cost in an optimised (compiled) implementation, charged to RL's
+# search time so it is budgeted like the comparison methods' own selection logic (which runs
+# inside the engine and is already part of their search time). Forward pass of the PPO actor
+# measured natively (arm64, compiled Rust, 2026-10-09, scripts/timing/mlp_decision_cost.rs),
+# keyed by (observation dim, number of actions); state construction estimated at 2 us (0 for the
+# constant no-state encoder). See docs/EXPERIMENTS.md, "Timing protocol and RL decision overhead".
+NATIVE_FORWARD_US = {
+    (45, 48): 4.64,   # features_improvement_v3 + op_triple_v2
+    (45, 5): 3.59,    # improvement_chain_v2
+    (45, 288): 9.84,  # op_triple_many_v1
+    (1, 48): 3.15,    # features_null_v1
+    (11, 48): 3.58,   # features_instance_v1
+    (34, 48): 3.89,   # features_search_v1
+    (15, 48): 3.79,   # features_solution_v1
+    (60, 48): 5.03,   # features_all_v1
+}
+STATE_CONSTRUCTION_US = 2.0
+
+
+def _decision_cost_seconds(model: Any, policy_kind: str, state_module: str) -> float:
+    """Per-decision charge for a trained policy; 0 for the random / fixed control policies."""
+    if policy_kind != "ppo":
+        return 0.0
+    import torch
+
+    layers = [m for m in model.policy.mlp_extractor.policy_net if isinstance(m, torch.nn.Linear)]
+    layers.append(model.policy.action_net)
+    obs_dim, n_actions = layers[0].in_features, layers[-1].out_features
+    hidden = tuple(layer.out_features for layer in layers[:-1])
+    forward = NATIVE_FORWARD_US.get((obs_dim, n_actions)) if hidden == (64, 64) else None
+    if forward is None:
+        # Linear fit to the measurements above: ~1.07 us + 0.345 ns per multiply-add.
+        forward = 1.07 + 0.345e-3 * sum(layer.in_features * layer.out_features for layer in layers)
+    state = 0.0 if state_module == "features_null_v1" else STATE_CONSTRUCTION_US
+    return (forward + state) * 1e-6
+
+
+def _kisialiou_search_budget(kisialiou_stats: EpisodeSummary) -> float:
+    """Time budget for RL / baseline: the search CPU time Kisialiou needed on this dataset/seed."""
+    if kisialiou_stats.search_cpu_seconds <= 0.0:
+        raise RuntimeError(
+            "Cached Kisialiou result has no search_cpu_seconds -- it predates search-CPU-time "
+            "budgets (2026-10-09). Regenerate the baseline/Kisialiou cache with "
+            "--baseline-kisialiou-only before evaluating against it."
+        )
+    return float(kisialiou_stats.search_cpu_seconds)
 
 
 def _safe_git_output(repo: Path, args: List[str]) -> Optional[str]:
@@ -783,7 +860,7 @@ def _run_baseline_kisialiou_only(
 
             runtime_target_seconds: Optional[float] = None
             if args.eval_runtime_mode == "match_kisialiou" and args.eval_fixed_restarts is None:
-                runtime_target_seconds = max(float(kisialiou_stats.wall_runtime_seconds), 1e-6)
+                runtime_target_seconds = _kisialiou_search_budget(kisialiou_stats)
 
             baseline_stats, baseline_restart_rows = run_baseline_episode(
                 dataset_path=dataset_path,
@@ -856,7 +933,7 @@ def main() -> None:
     for size in sizes:
         splits = manager.prepare_size(size)
         train_paths.extend(splits.get("train", []))
-        test_paths.extend(splits.get("test", [])[: args.datasets_per_size])
+        test_paths.extend(splits.get("test", [])[args.dataset_start : args.dataset_start + args.datasets_per_size])
 
     if not train_paths or not test_paths:
         raise RuntimeError("Dataset manager returned empty train/test paths")
@@ -1017,6 +1094,26 @@ def main() -> None:
         bk_cache_in = {}
 
     bk_cache_out: Dict[str, Any] = dict(bk_cache_in) if bk_cache_in else {}
+    decision_cost_seconds = _decision_cost_seconds(model, args.policy, args.state_module)
+    print(f"RL decision charge: {decision_cost_seconds * 1e6:.2f} us per decision")
+    manifest["resolved"]["rl_decision_charge"] = {
+        "us_per_decision": decision_cost_seconds * 1e6,
+        "applied_to_search_budget": True,
+        "policy": args.policy,
+        "what": (
+            "Per-decision cost of an optimised (compiled) RL implementation -- native forward "
+            "pass of the PPO actor (NATIVE_FORWARD_US, measured with "
+            "scripts/timing/mlp_decision_cost.rs) + state construction (STATE_CONSTRUCTION_US, "
+            "estimate; 0 for features_null_v1); 0 for random/fixed control policies. Added to "
+            "RL's engine search CPU time for the budget check and time-to-best."
+        ),
+        "where_recorded": (
+            "results.csv: decision_cost_us, decision_charge_seconds, engine_search_cpu_seconds "
+            "(search_cpu_seconds = engine + charge); restart_results.csv: the same per restart; "
+            "operator-usage logs: decision_charge_ns_per_iteration"
+        ),
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     rows: List[Dict] = []
     # Restart-level rows are streamed to partial_restart_rows.jsonl after every dataset/seed
@@ -1102,7 +1199,7 @@ def main() -> None:
 
             runtime_target_seconds: Optional[float] = None
             if args.eval_runtime_mode == "match_kisialiou" and args.eval_fixed_restarts is None:
-                runtime_target_seconds = max(float(kisialiou_stats.wall_runtime_seconds), 1e-6)
+                runtime_target_seconds = _kisialiou_search_budget(kisialiou_stats)
 
             if cached_entry is not None:
                 # Baseline is already cached, so it will never consume RL's per-restart
@@ -1132,6 +1229,7 @@ def main() -> None:
                     restart_limit=args.eval_fixed_restarts,
                     progress_horizon=progress_horizon,
                     collect_snapshots=False,
+                    decision_cost_seconds=decision_cost_seconds,
                 )
                 baseline_stats, baseline_restart_rows = _episode_summary_from_cache(cached_entry["baseline"])
             else:
@@ -1161,6 +1259,7 @@ def main() -> None:
                     target_runtime_seconds=runtime_target_seconds,
                     restart_limit=args.eval_fixed_restarts,
                     progress_horizon=progress_horizon,
+                    decision_cost_seconds=decision_cost_seconds,
                 )
             restart_rows.extend(
                 {
@@ -1223,6 +1322,10 @@ def main() -> None:
                     "best_cost": rl_stats.best_cost,
                     "solver_runtime_seconds": rl_stats.solver_runtime_seconds,
                     "wall_runtime_seconds": rl_stats.wall_runtime_seconds,
+                    "search_cpu_seconds": rl_stats.search_cpu_seconds,
+                    "decision_cost_us": decision_cost_seconds * 1e6,
+                    "decision_charge_seconds": sum(float(r.get("decision_charge_seconds", 0.0)) for r in rl_restart_rows),
+                    "engine_search_cpu_seconds": sum(float(r.get("engine_search_cpu_seconds", 0.0)) for r in rl_restart_rows),
                     "runtime_seconds": rl_stats.runtime_seconds,
                     "improvement_pct": rl_stats.improvement_pct,
                     "improvement_pct_per_wall_second": rl_stats.improvement_pct / max(rl_stats.wall_runtime_seconds, 1e-12),
@@ -1231,6 +1334,7 @@ def main() -> None:
                     "kisialiou_gap_pct": kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "time_to_best_search_seconds": _episode_time_to_best_search(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                     **_episode_structure_stats(restart_records_for_row),
@@ -1257,6 +1361,7 @@ def main() -> None:
                     restart_limit=args.eval_fixed_restarts,
                     progress_horizon=progress_horizon,
                     collect_snapshots=False,
+                    decision_cost_seconds=decision_cost_seconds,
                 )
                 restart_rows.extend(
                     {
@@ -1291,6 +1396,7 @@ def main() -> None:
                         "best_cost": rl_stochastic_stats.best_cost,
                         "solver_runtime_seconds": rl_stochastic_stats.solver_runtime_seconds,
                         "wall_runtime_seconds": rl_stochastic_stats.wall_runtime_seconds,
+                    "search_cpu_seconds": rl_stochastic_stats.search_cpu_seconds,
                         "runtime_seconds": rl_stochastic_stats.runtime_seconds,
                         "improvement_pct": rl_stochastic_stats.improvement_pct,
                         "improvement_pct_per_wall_second": rl_stochastic_stats.improvement_pct / max(rl_stochastic_stats.wall_runtime_seconds, 1e-12),
@@ -1299,6 +1405,7 @@ def main() -> None:
                         "kisialiou_gap_pct": kisialiou_gap_stochastic,
                         "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "time_to_best_search_seconds": _episode_time_to_best_search(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                     **_episode_structure_stats(restart_records_for_row),
@@ -1316,6 +1423,7 @@ def main() -> None:
                     "best_cost": baseline_stats.best_cost,
                     "solver_runtime_seconds": baseline_stats.solver_runtime_seconds,
                     "wall_runtime_seconds": baseline_stats.wall_runtime_seconds,
+                    "search_cpu_seconds": baseline_stats.search_cpu_seconds,
                     "runtime_seconds": baseline_stats.runtime_seconds,
                     "improvement_pct": baseline_stats.improvement_pct,
                     "improvement_pct_per_wall_second": baseline_stats.improvement_pct / max(baseline_stats.wall_runtime_seconds, 1e-12),
@@ -1324,6 +1432,7 @@ def main() -> None:
                     "kisialiou_gap_pct": baseline_vs_kisialiou_gap,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "time_to_best_search_seconds": _episode_time_to_best_search(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                     **_episode_structure_stats(restart_records_for_row),
@@ -1341,6 +1450,7 @@ def main() -> None:
                     "best_cost": kisialiou_stats.best_cost,
                     "solver_runtime_seconds": kisialiou_stats.solver_runtime_seconds,
                     "wall_runtime_seconds": kisialiou_stats.wall_runtime_seconds,
+                    "search_cpu_seconds": kisialiou_stats.search_cpu_seconds,
                     "runtime_seconds": kisialiou_stats.runtime_seconds,
                     "improvement_pct": kisialiou_stats.improvement_pct,
                     "improvement_pct_per_wall_second": kisialiou_stats.improvement_pct / max(kisialiou_stats.wall_runtime_seconds, 1e-12),
@@ -1349,6 +1459,7 @@ def main() -> None:
                     "kisialiou_gap_pct": 0.0,
                     "runtime_target_seconds": runtime_target_seconds if runtime_target_seconds is not None else float(eval_iteration_cap),
                     "time_to_best_solver_seconds": _episode_time_to_best(restart_records_for_row),
+                    "time_to_best_search_seconds": _episode_time_to_best_search(restart_records_for_row),
                     "initial_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[0],
                     "best_num_vessels_used": _episode_vessel_stats(restart_records_for_row)[1],
                     **_episode_structure_stats(restart_records_for_row),
@@ -1426,11 +1537,17 @@ def main() -> None:
         total_solver_runtime = float(sum(float(r["solver_runtime_seconds"]) for r in mode_rows))
         improvement_per_wall_second = total_improvement_pct / max(total_wall_runtime, 1e-12)
         improvement_per_solver_second = total_improvement_pct / max(total_solver_runtime, 1e-12)
+        total_search_runtime = float(sum(float(r.get("search_cpu_seconds") or 0.0) for r in mode_rows))
+        improvement_per_search_second = total_improvement_pct / max(total_search_runtime, 1e-12)
         baseline_gap_values = [float(r["baseline_gap_pct"]) for r in mode_rows if mode != "baseline"]
         kisialiou_gap_values = [float(r["kisialiou_gap_pct"]) for r in mode_rows if mode != "kisialiou"]
+        charge = float(sum(float(r.get("decision_charge_seconds") or 0.0) for r in mode_rows))
         summary[mode] = {
+            "decision_cost_us": float(mode_rows[0].get("decision_cost_us") or 0.0),
+            "decision_charge_share_of_search": charge / max(total_search_runtime, 1e-12),
             "improvement_pct_per_wall_second": improvement_per_wall_second,
             "improvement_pct_per_solver_second": improvement_per_solver_second,
+            "improvement_pct_per_search_second": improvement_per_search_second,
             "mean_baseline_gap_pct": float(np.mean(baseline_gap_values)) if baseline_gap_values else 0.0,
             "mean_kisialiou_gap_pct": float(np.mean(kisialiou_gap_values)) if kisialiou_gap_values else 0.0,
             "num_samples": len(mode_rows),

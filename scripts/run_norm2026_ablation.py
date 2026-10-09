@@ -3,17 +3,31 @@
 One-factor-at-a-time around the Experiment 8 reference configuration -- op_triple_v2 /
 features_improvement_v3 / delta_cost_v9 / ent_coef 0.01 / ph300 / 200k PPO steps -- plus
 non-learned control policies. Each job trains a PPO model (train-only run) and then
-evaluates it (eval-only run) on the first 50 test instances of its size, eval seed 42,
-wall-time matched to the cached Kisialiou results (per-size cache slices).
+evaluates it (eval-only run) on the first test instances of its size (small 30, medium 20),
+eval seed 42. Training seeds: small 42/43 per variant, medium 42 (reference: medium
+42/43/44, small 42/43).
+
+Time budgets are search CPU time (engine CPU time actually spent searching, measured in ns
+inside the Rust engine; Python overhead excluded): RL and the adaptive baseline get exactly
+the search CPU time Kisialiou needs for its 5 reference restarts on each instance. The
+Kisialiou/baseline reference is therefore regenerated under this rule first, in parallel
+chunks (runs/baseline_kisialiou_cache/search_cpu_v1/), before any evaluation starts.
+
+On the M1 the CPU time a fixed amount of search costs depends on machine load (measured:
+2.37 s alone, ~3.1 s with 3 jobs, ~3.9 s with 4 jobs, for identical work), so every
+time-budgeted task must run under the same load: whenever a reference or evaluation task
+is running, filler processes keep exactly --workers CPU-bound processes busy (they exit by
+themselves if this runner dies). The machine should otherwise be idle.
 
 Layout per job tag "<axis>__<variant>__<size>__s<seed>":
     output/norm26__<tag>__train/model/ppo_rl_improvement_mvp.zip   (trained model)
     output/norm26__<tag>/{results.csv,summary.json,progress.json}   (evaluation)
     logs/norm2026_queue/<tag>__{train,eval}.log                      (stdout of each phase)
 
-Resumable at every level: a finished training is never redone, a finished evaluation is
-skipped, and an interrupted evaluation resumes after its last finished dataset (--resume).
-A failed phase is retried once. Progress is written every minute to NORM2026_STATUS.md.
+Resumable at every level: finished reference chunks, trainings and evaluations are never
+redone, an interrupted evaluation or reference chunk resumes after its last finished
+instance, and a training process that was paused (SIGSTOP) is resumed instead of restarted.
+A failed task is retried once. Progress is written every minute to NORM2026_STATUS.md.
 
     nohup caffeinate -is python scripts/run_norm2026_ablation.py --workers 4 > logs/norm2026_queue/queue.log 2>&1 &
     python scripts/run_norm2026_ablation.py --status
@@ -24,9 +38,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -34,7 +50,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
 PY = "/Users/timothy/opt/miniconda3/envs/py312/bin/python"
@@ -43,14 +59,17 @@ QUEUE_DIR = REPO / "logs" / "norm2026_queue"
 STATUS_PATH = REPO / "NORM2026_STATUS.md"
 EVENTS_PATH = QUEUE_DIR / "events.log"
 
-DATASETS = 50
+DATASETS_BY_SIZE = {"small": 30, "medium": 20}
+REFERENCE_PARTS = {"medium": 5, "small": 2}
 TIMESTEPS = 200_000
 
 
-def _configure(prefix: str, datasets: int, timesteps: int) -> None:
+def _configure(prefix: str, datasets: Optional[int], timesteps: int) -> None:
     """Override output prefix / dataset count / training steps (used for smoke tests)."""
-    global PREFIX, QUEUE_DIR, STATUS_PATH, EVENTS_PATH, DATASETS, TIMESTEPS
-    PREFIX, DATASETS, TIMESTEPS = prefix, datasets, timesteps
+    global PREFIX, QUEUE_DIR, STATUS_PATH, EVENTS_PATH, DATASETS_BY_SIZE, TIMESTEPS
+    PREFIX, TIMESTEPS = prefix, timesteps
+    if datasets is not None:
+        DATASETS_BY_SIZE = {size: datasets for size in DATASETS_BY_SIZE}
     if prefix != "norm26":
         QUEUE_DIR = REPO / "logs" / f"{prefix}_queue"
         STATUS_PATH = QUEUE_DIR / "STATUS.md"
@@ -68,11 +87,74 @@ EXP8_MODELS = {
 # first-fit), i (VNR, FCR, relocation, swap). These are the triples Exp 8's policies collapsed to.
 FIXED_TRIPLES = {"rnd_ff_fcr": 29, "rnd_ff_reloc": 30}
 
-# Rough per-phase durations (minutes) for ETA before a phase has reported progress:
-# training from past runs (46-110 min medium, 7-18 min small); evaluation = sum of cached
-# Kisialiou wall times over the 50 test instances (small 9 min, medium 106 min) + overhead.
-EST_TRAIN_MIN = {"small": 18.0, "medium": 80.0}
-EST_EVAL_MIN = {"small": 11.0, "medium": 112.0}
+# Rough per-task durations (minutes) for the ETA before a task reports progress, under the
+# 4-job load. Training: past runs (46-280 min medium, 7-18 min small) x load. Evaluation:
+# Kisialiou's search CPU under load (~15 s small / ~175 s medium per instance) x the RL
+# wall/search overhead with operator logging (measured 1.7x small, 4.5x medium).
+# Reference: Kisialiou (~1.25x its search time) + baseline (~2.6x the same budget).
+EST_TRAIN_MIN = {"small": 30.0, "medium": 150.0}
+EST_EVAL_MIN_PER_INSTANCE = {"small": 0.75, "medium": 10.0}
+EST_REFERENCE_MIN_PER_INSTANCE = {"small": 1.0, "medium": 11.0}
+
+
+def _cache_dir() -> Path:
+    suffix = "" if PREFIX == "norm26" else f"_{PREFIX}"
+    return REPO / "runs" / "baseline_kisialiou_cache" / f"search_cpu_v1{suffix}"
+
+
+def merged_cache(size: str) -> Path:
+    return _cache_dir() / f"cache_{size}_seed42.json"
+
+
+@dataclass
+class RefChunk:
+    """Kisialiou (5 reference restarts) + adaptive baseline for a slice of the test set."""
+
+    size: str
+    start: int
+    count: int
+
+    @property
+    def tag(self) -> str:
+        return f"reference__{self.size}__{self.start + 1:02d}-{self.start + self.count:02d}"
+
+    @property
+    def part_path(self) -> Path:
+        return _cache_dir() / f"{self.size}_part{self.start + 1:02d}.json"
+
+    def entries(self) -> int:
+        try:
+            return len(json.loads(self.part_path.read_text()))
+        except (OSError, ValueError):
+            return 0
+
+    def done(self) -> bool:
+        return self.entries() >= self.count
+
+    def command(self) -> List[str]:
+        return [
+            PY, "scripts/run_experiment_rl_improvement_mvp.py",
+            "--sizes", self.size,
+            "--dataset-start", str(self.start),
+            "--datasets-per-size", str(self.count),
+            "--eval-seeds", "42",
+            "--max-iterations", "300",
+            "--seed", "42",
+            "--baseline-kisialiou-only",
+            "--baseline-kisialiou-cache", str(self.part_path),
+            "--run-tag", self.tag,
+            "--force-overwrite",
+        ]
+
+
+def reference_chunks() -> List[RefChunk]:
+    chunks: List[RefChunk] = []
+    for size in ("medium", "small"):
+        total = DATASETS_BY_SIZE[size]
+        step = math.ceil(total / REFERENCE_PARTS[size])
+        for start in range(0, total, step):
+            chunks.append(RefChunk(size, start, min(step, total - start)))
+    return chunks
 
 
 @dataclass
@@ -112,7 +194,7 @@ class Job:
         return [
             PY, "scripts/run_experiment_rl_improvement_mvp.py",
             "--sizes", self.size,
-            "--datasets-per-size", str(DATASETS),
+            "--datasets-per-size", str(DATASETS_BY_SIZE[self.size]),
             "--eval-seeds", "42",
             "--max-iterations", "300",
             "--seed", str(self.seed),
@@ -132,7 +214,7 @@ class Job:
     def eval_command(self) -> List[str]:
         cmd = self._common() + [
             "--run-eval", "--resume", "--skip-cache-copy",
-            "--baseline-kisialiou-cache", f"runs/baseline_kisialiou_cache/cache_{self.size}_seed42.json",
+            "--baseline-kisialiou-cache", str(merged_cache(self.size)),
             "--run-tag", self.tag,
         ]
         if self.policy == "ppo":
@@ -147,7 +229,7 @@ class Job:
 def build_jobs() -> List[Job]:
     jobs: List[Job] = []
     for size in ("medium", "small"):
-        seeds = (42,) if size == "medium" else (42, 43, 44)
+        seeds = (42,) if size == "medium" else (42, 43)
         # Trained variants, longest-expected first within each size (non-time-aware
         # rewards and the 288-action space risk slow, expensive-operator policies).
         for seed in seeds:
@@ -164,8 +246,9 @@ def build_jobs() -> List[Job]:
                 Job("state", "solution", size, seed, state="features_solution_v1"),
                 Job("state", "all", size, seed, state="features_all_v1"),
             ]
-        jobs += [Job("ref", "op_triple_v2", size, seed) for seed in (43, 44)]
-        jobs.append(Job("ref", "op_triple_v2", size, 42, model_path=str(REPO / EXP8_MODELS[size])))
+        # Reference retrained under the search-CPU-time reward (Exp 8's models used wall time).
+        ref_seeds = (42, 43, 44) if size == "medium" else (42, 43)
+        jobs += [Job("ref", "op_triple_v2", size, seed) for seed in ref_seeds]
         jobs.append(Job("control", "random_triple", size, policy="random"))
         jobs.append(Job("control", "random_many", size, action="op_triple_many_v1", policy="random"))
         for name, idx in FIXED_TRIPLES.items():
@@ -195,38 +278,153 @@ def _eval_done(job: Job) -> bool:
     return (job.eval_dir / "summary.json").exists()
 
 
-def _run_phase(job: Job, phase: str, cmd: List[str], run_id: str) -> int:
+def _run_command(tag: str, phase: str, cmd: List[str], run_id: str, ok: Callable[[], bool]) -> bool:
+    """Run one task command (stdout to logs/.../<tag>__<phase>.log); retried once on failure."""
     env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", PYTHONPATH=str(REPO), RL_RUN_ID=run_id)
-    log_path = QUEUE_DIR / f"{job.tag}__{phase}.log"
-    rc = 1
+    log_path = QUEUE_DIR / f"{tag}__{phase}.log"
     for attempt in (1, 2):
-        _set(job.tag, phase=phase, phase_started=time.time(), attempt=attempt)
-        _event(f"START {phase:5s} {job.tag} attempt={attempt}")
+        _set(tag, phase=phase, phase_started=time.time(), attempt=attempt)
+        _event(f"START {phase:5s} {tag} attempt={attempt}")
         with log_path.open("a") as log:
             log.write(f"\n===== {datetime.now().isoformat(timespec='seconds')} attempt {attempt}: {' '.join(cmd)}\n")
             log.flush()
             rc = subprocess.call(cmd, cwd=REPO, env=env, stdout=log, stderr=subprocess.STDOUT)
-        ok = rc == 0 and (job.trained_model.exists() if phase == "train" else _eval_done(job))
-        _event(f"{'END  ' if ok else 'FAIL '} {phase:5s} {job.tag} rc={rc} "
-               f"{(time.time() - _state[job.tag]['phase_started']) / 60:.1f}min")
-        if ok:
-            return 0
-    return rc or 1
+        success = rc == 0 and ok()
+        _event(f"{'END  ' if success else 'FAIL '} {phase:5s} {tag} rc={rc} "
+               f"{(time.time() - _state[tag]['phase_started']) / 60:.1f}min")
+        if success:
+            return True
+    return False
 
 
-def run_job(job: Job) -> None:
+def _merge_reference(size: str) -> None:
+    chunks = [c for c in reference_chunks() if c.size == size]
+    target = merged_cache(size)
+    with _lock:
+        if target.exists() or not all(c.done() for c in chunks):
+            return
+        merged: Dict[str, object] = {}
+        for chunk in chunks:
+            merged.update(json.loads(chunk.part_path.read_text()))
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps(merged))
+        tmp.replace(target)
+    _event(f"REFERENCE {size} merged: {len(merged)} instances")
+
+
+def run_reference(chunk: RefChunk) -> None:
+    if not chunk.done():
+        chunk.part_path.parent.mkdir(parents=True, exist_ok=True)
+        if not _run_command(chunk.tag, "ref", chunk.command(), f"{PREFIX}__{chunk.tag}", chunk.done):
+            _set(chunk.tag, phase="failed (ref)", finished=time.time())
+            return
+    _set(chunk.tag, phase="done", finished=time.time())
+    _merge_reference(chunk.size)
+
+
+def _training_pids(job: Job) -> List[int]:
+    out = subprocess.run(["pgrep", "-f", "--", f"--run-tag {job.tag}__train"], capture_output=True, text=True).stdout
+    return [int(x) for x in out.split()]
+
+
+def run_training(job: Job) -> None:
+    if not job.needs_training or job.trained_model.exists():
+        return
+    pids = _training_pids(job)
+    if pids:
+        # A training started by an earlier queue and paused (SIGSTOP): resume it, don't restart.
+        _set(job.tag, phase="train", phase_started=time.time(), attempt=1, resumed=True)
+        _event(f"RESUME train {job.tag} pids={pids}")
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
+        while _training_pids(job):
+            time.sleep(20)
+        if job.trained_model.exists():
+            _event(f"END   train {job.tag} (resumed process) {(time.time() - _state[job.tag]['phase_started']) / 60:.1f}min")
+            _set(job.tag, phase="trained")
+            return
+        _event(f"FAIL  train {job.tag} (resumed process ended without a model); training afresh")
+    if not _run_command(job.tag, "train", job.train_command(), f"{PREFIX}__{job.tag}__train",
+                        job.trained_model.exists):
+        _set(job.tag, phase="failed (train)", finished=time.time())
+        return
+    _set(job.tag, phase="trained")
+
+
+def run_evaluation(job: Job) -> None:
     if _eval_done(job):
         _set(job.tag, phase="done", finished=time.time())
         return
-    _set(job.tag, started=time.time())
-    if job.needs_training and not job.trained_model.exists():
-        if _run_phase(job, "train", job.train_command(), f"{PREFIX}__{job.tag}__train") != 0:
-            _set(job.tag, phase="failed (train)", finished=time.time())
+    # Needs its size's search-CPU reference and (for trained variants) its model.
+    while True:
+        phase = str(_state.get(job.tag, {}).get("phase", ""))
+        if phase.startswith("failed"):
             return
-    if _run_phase(job, "eval", job.eval_command(), f"{PREFIX}__{job.tag}") != 0:
+        # The model file appears as soon as SB3 starts writing it, so also require that this
+        # queue's training task (if it ran one) has finished.
+        ready_model = not job.needs_training or (job.trained_model.exists() and phase != "train")
+        if merged_cache(job.size).exists() and ready_model:
+            break
+        _set(job.tag, eval_waiting=True)
+        time.sleep(30)
+    _set(job.tag, eval_waiting=False)
+    if not _run_command(job.tag, "eval", job.eval_command(), f"{PREFIX}__{job.tag}", lambda: _eval_done(job)):
         _set(job.tag, phase="failed (eval)", finished=time.time())
         return
     _set(job.tag, phase="done", finished=time.time())
+
+
+# A filler is a CPU-bound Python loop that exits as soon as its parent (this runner) is gone,
+# so it can never be left spinning after a crash or kill.
+FILLER_CODE = "import os\np = os.getppid()\nwhile os.getppid() == p:\n    sum(range(200000))"
+_fillers: List[subprocess.Popen] = []
+
+
+def _busy_job_processes() -> int:
+    """Running (not stopped) experiment processes, whoever started them."""
+    out = subprocess.run(["ps", "-Ao", "stat=,command="], capture_output=True, text=True).stdout
+    return sum(
+        1 for line in out.splitlines()
+        if "run_experiment_rl_improvement_mvp.py" in line and not line.lstrip().startswith("T")
+    )
+
+
+def _budgeted_task_running() -> bool:
+    with _lock:
+        return any(st.get("phase") in ("ref", "eval") for st in _state.values())
+
+
+def filler_loop(stop: threading.Event, workers: int) -> None:
+    """Keep exactly `workers` busy processes while any time-budgeted task runs."""
+    while not stop.is_set():
+        want = max(0, workers - _busy_job_processes()) if _budgeted_task_running() else 0
+        _fillers[:] = [f for f in _fillers if f.poll() is None]
+        while len(_fillers) < want:
+            _fillers.append(subprocess.Popen([PY, "-c", FILLER_CODE], stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL))
+        while len(_fillers) > want:
+            _fillers.pop().kill()
+        stop.wait(3)
+    for filler in _fillers:
+        filler.kill()
+
+
+def build_tasks(jobs: List[Job]) -> List[Tuple[str, object]]:
+    """Order: paused trainings (resume at once), reference chunks, remaining trainings, evaluations."""
+    paused = [j for j in jobs if j.needs_training and not j.trained_model.exists() and _training_pids(j)]
+    tasks: List[Tuple[str, object]] = [("train", j) for j in paused]
+    tasks += [("ref", c) for c in reference_chunks() if c.size in {j.size for j in jobs}]
+    tasks += [("train", j) for j in jobs if j.needs_training and j not in paused]
+    tasks += [("eval", j) for j in jobs]
+    return tasks
+
+
+def run_task(task: Tuple[str, object]) -> None:
+    kind, item = task
+    {"ref": run_reference, "train": run_training, "eval": run_evaluation}[kind](item)
 
 
 # ---------------------------------------------------------------------------- status
@@ -266,14 +464,14 @@ def _remaining_minutes(job: Job) -> float:
     if phase == "done" or (phase or "").startswith("failed") or _eval_done(job):
         return 0.0
     train_left = 0.0
-    if job.needs_training and not job.trained_model.exists():
+    if job.needs_training and not job.trained_model.exists() and phase != "trained":
         frac = _train_progress(job) if phase == "train" else None
         if frac and frac > 0.02:
             elapsed = (time.time() - st["phase_started"]) / 60
             train_left = elapsed * (1 - frac) / frac
         else:
             train_left = EST_TRAIN_MIN[job.size]
-    eval_left = EST_EVAL_MIN[job.size]
+    eval_left = EST_EVAL_MIN_PER_INSTANCE[job.size] * DATASETS_BY_SIZE[job.size]
     prog = _eval_progress(job) if phase == "eval" else None
     if prog and prog.get("done"):
         eval_left *= 1 - prog["done"] / max(prog["total"], 1)
@@ -294,6 +492,7 @@ def _system_lines() -> List[str]:
         lines.append(f"available RAM ~{sum(pages.values()) * page / 1e9:.1f} GB of 16 GB")
     except Exception:
         pass
+    lines.append(f"constant-load filler processes running: {sum(1 for f in _fillers if f.poll() is None)}")
     for label, path in (("external SSD (output/logs)", REPO / "output"), ("internal disk", Path("/"))):
         try:
             lines.append(f"{label}: {shutil.disk_usage(path).free / 1e9:.0f} GB free")
@@ -302,13 +501,36 @@ def _system_lines() -> List[str]:
     return lines
 
 
+def _reference_lines(chunks: List[RefChunk], states: Dict[str, Dict], now: float) -> Tuple[List[str], float]:
+    lines, remaining = [], 0.0
+    for chunk in chunks:
+        st = states.get(chunk.tag, {})
+        entries = chunk.entries()
+        if chunk.done():
+            state = "done"
+        elif str(st.get("phase", "")).startswith("failed"):
+            state = "**FAILED**"
+        elif st.get("phase") == "ref":
+            state = f"running {(now - st['phase_started']) / 60:.0f} min"
+        else:
+            state = "queued"
+        remaining += (chunk.count - min(entries, chunk.count)) * EST_REFERENCE_MIN_PER_INSTANCE[chunk.size]
+        lines.append(f"| {chunk.size} {chunk.start + 1}-{chunk.start + chunk.count} | {state} | {entries}/{chunk.count} |")
+    return lines, remaining
+
+
 def write_status(jobs: List[Job], workers: int) -> None:
     with _lock:
         states = {tag: dict(st) for tag, st in _state.items()}
     now = time.time()
     counts = {"done": 0, "running": 0, "queued": 0, "failed": 0}
     running_rows, failed_rows, result_rows = [], [], []
-    remaining = 0.0
+    chunks = [c for c in reference_chunks() if c.size in {j.size for j in jobs}]
+    reference_rows, remaining = _reference_lines(chunks, states, now)
+    for chunk in chunks:
+        if str(states.get(chunk.tag, {}).get("phase", "")).startswith("failed"):
+            tail = " / ".join(line.strip() for line in _tail(QUEUE_DIR / f"{chunk.tag}__ref.log", 3000).splitlines()[-3:])
+            failed_rows.append(f"- **{chunk.tag}** (reference): `{tail[-300:]}`")
     for job in jobs:
         st = states.get(job.tag, {})
         phase = st.get("phase")
@@ -342,9 +564,12 @@ def write_status(jobs: List[Job], workers: int) -> None:
                               if gap is not None else f"{prog['done']}/{prog['total']} instances")
                 else:
                     detail = "starting"
-            running_rows.append(f"| {job.tag} | {phase} (attempt {st.get('attempt', 1)}) | {elapsed:.0f} min | {detail} |")
+            resumed = " (resumed)" if phase == "train" and st.get("resumed") else ""
+            running_rows.append(f"| {job.tag} | {phase}{resumed} (attempt {st.get('attempt', 1)}) | {elapsed:.0f} min | {detail} |")
         else:
             counts["queued"] += 1
+            if st.get("eval_waiting"):
+                running_rows.append(f"| {job.tag} | waiting | | evaluation waits for the {job.size} reference |")
         remaining += _remaining_minutes(job)
 
     eta_min = remaining / max(workers, 1)
@@ -359,6 +584,12 @@ def write_status(jobs: List[Job], workers: int) -> None:
         f"(≈ {(datetime.now() + timedelta(minutes=eta_min)).strftime('%a %H:%M')}), "
         f"from typical phase durations; refines as jobs report progress.",
         "",
+        "## Kisialiou / baseline reference (defines every search-CPU budget)",
+        "",
+        "| instances | state | done |",
+        "|---|---|---|",
+        *reference_rows,
+        "",
         "## Running",
         "",
         "| job | phase | elapsed | progress |",
@@ -368,7 +599,8 @@ def write_status(jobs: List[Job], workers: int) -> None:
         "## Finished evaluations",
         "",
         "Gap = mean % by which RL's best cost beats the reference (positive = RL better). "
-        f"W/T/L = per-instance wins/ties/losses vs Kisialiou ({DATASETS} instances per job).",
+        f"W/T/L = per-instance wins/ties/losses vs Kisialiou (small {DATASETS_BY_SIZE['small']} / "
+        f"medium {DATASETS_BY_SIZE['medium']} instances per job).",
         "",
         "| size | axis | variant | seed | gap vs Kisialiou | W/T/L vs Kisialiou | gap vs baseline | wins vs baseline |",
         "|---|---|---|---|---|---|---|---|",
@@ -396,7 +628,7 @@ def main() -> None:
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--status", action="store_true", help="Print the latest status file")
     ap.add_argument("--prefix", default="norm26", help="Output prefix (non-default = smoke test)")
-    ap.add_argument("--datasets", type=int, default=50)
+    ap.add_argument("--datasets", type=int, default=None, help="Override instances per size (smoke tests)")
     ap.add_argument("--timesteps", type=int, default=200_000)
     args = ap.parse_args()
     _configure(args.prefix, args.datasets, args.timesteps)
@@ -408,14 +640,22 @@ def main() -> None:
     if args.only:
         patterns = [x for x in args.only.split(",") if x]
         jobs = [j for j in jobs if any(x in j.tag for x in patterns)]
+    tasks = build_tasks(jobs)
     if args.list:
-        for j in jobs:
-            print(f"{'done' if _eval_done(j) else 'todo'}  {'train+eval' if j.needs_training else 'eval only':10s}  {j.tag}")
-        print(f"{len(jobs)} jobs, {sum(j.needs_training for j in jobs)} trainings")
+        for kind, item in tasks:
+            if kind == "ref":
+                state = "done" if item.done() else f"todo ({item.entries()}/{item.count})"
+            elif kind == "train":
+                state = "done" if item.trained_model.exists() else ("PAUSED -> resume" if _training_pids(item) else "todo")
+            else:
+                state = "done" if _eval_done(item) else "todo"
+            print(f"{kind:5s}  {state:16s}  {item.tag}")
+        print(f"{len(tasks)} tasks: {sum(k == 'ref' for k, _ in tasks)} reference chunks, "
+              f"{sum(k == 'train' for k, _ in tasks)} trainings, {sum(k == 'eval' for k, _ in tasks)} evaluations")
         return
 
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
-    _event(f"QUEUE START workers={args.workers} jobs={len(jobs)}")
+    _event(f"QUEUE START workers={args.workers} jobs={len(jobs)} tasks={len(tasks)}")
     stop = threading.Event()
 
     def status_loop() -> None:
@@ -427,9 +667,21 @@ def main() -> None:
             stop.wait(60)
 
     threading.Thread(target=status_loop, daemon=True).start()
+    filler_thread = threading.Thread(target=filler_loop, args=(stop, args.workers), daemon=True)
+    filler_thread.start()
+
+    def _shutdown(signum, frame):  # stop fillers before exiting on SIGTERM / Ctrl-C
+        stop.set()
+        for filler in _fillers:
+            filler.kill()
+        raise SystemExit(1)
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        list(pool.map(run_job, jobs))
+        list(pool.map(run_task, tasks))
     stop.set()
+    filler_thread.join(timeout=10)
     write_status(jobs, args.workers)
     failed = [t for t, st in _state.items() if str(st.get("phase", "")).startswith("failed")]
     _event(f"QUEUE DONE failed={len(failed)}")

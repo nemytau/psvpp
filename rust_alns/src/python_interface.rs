@@ -175,6 +175,7 @@ fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject
     dict.set_item("elapsed_ns", metrics.elapsed_ns)?;
     dict.set_item("destroy_elapsed_ns", metrics.destroy_elapsed_ns)?;
     dict.set_item("repair_elapsed_ns", metrics.repair_elapsed_ns)?;
+    dict.set_item("search_cpu_ns", metrics.search_cpu_ns)?;
     Ok(dict.into())
 }
 
@@ -370,6 +371,15 @@ impl RustALNSInterface {
         }
 
         Ok(())
+    }
+
+    /// CPU time (ns) spent constructing the current restart's initial solution.
+    fn get_init_search_cpu_ns(&self) -> PyResult<u128> {
+        let engine = self
+            .engine
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("ALNS not initialized"))?;
+        Ok(engine.init_search_cpu_ns)
     }
 
     /// Restrict weighted operator selection to specific operators by name.

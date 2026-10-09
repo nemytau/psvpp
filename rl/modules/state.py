@@ -564,7 +564,7 @@ class SearchProcessStateEncoder(BaseStateEncoder):
                 if hit:
                     self._improvement_track[i] += self.TRACK_EMA * (improved - self._improvement_track[i])
 
-        elapsed_ms = float(result.get("elapsed_ns", 0.0) or 0.0) / 1e6 if is_step else 0.0
+        elapsed_ms = float(result.get("search_cpu_ns", result.get("elapsed_ns", 0.0)) or 0.0) / 1e6 if is_step else 0.0
         last_reward = float(getattr(env, "last_reward", 0.0)) if is_step else 0.0
 
         values = (

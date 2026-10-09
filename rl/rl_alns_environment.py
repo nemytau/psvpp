@@ -305,6 +305,14 @@ class ALNSEnvironment(gym.Env):
         self.last_current_cost: Optional[float] = None
         self.last_best_cost: Optional[float] = None
         self.last_reward: float = 0.0
+        # Search CPU time of the current restart (constructive initial solution + every
+        # engine step), measured inside the Rust engine with the process CPU clock -- the
+        # time actually spent searching, excluding all Python-side overhead.
+        self.search_cpu_ns: int = 0
+        self._init_search_cpu_ns: int = 0
+        # RL decision cost charged to the search budget per iteration (set by the evaluation
+        # loop for trained policies); written to every operator-usage log row.
+        self.decision_charge_ns_per_iteration: int = 0
         self.last_operator_id: float = -1.0
         self.last_operator_type_id: float = -1.0
         self.last_improvement_idx: float = -1.0
@@ -532,6 +540,8 @@ class ALNSEnvironment(gym.Env):
                 )
 
             self._initial_snapshot = self.alns.create_snapshot()
+            self._init_search_cpu_ns = int(self.alns.get_init_search_cpu_ns())
+            self.search_cpu_ns = self._init_search_cpu_ns
             
             # Store initial cost for reward computation
             self.initial_cost = init_result["total_cost"]
@@ -771,6 +781,7 @@ class ALNSEnvironment(gym.Env):
 
             self.last_action_type = action_type
             self._last_step_result = result
+            self.search_cpu_ns += int(result.get("search_cpu_ns", 0) or 0)
 
             # Capture previous cost references (before this iteration's updates)
             prev_current_cost = (
@@ -1051,6 +1062,7 @@ class ALNSEnvironment(gym.Env):
                 "temperature": result["temperature"],
                 "elapsed_ms": result.get("elapsed_ms", 0),
                 "elapsed_ns": result.get("elapsed_ns", 0),
+                "search_cpu_ns": result.get("search_cpu_ns", 0),
                 "operator_elapsed_ms": result.get("elapsed_ms", 0),
                 "num_vessels_used": (result.get("solution_metrics") or {}).get("num_vessels_used"),
                 "fixed_cost": (result.get("solution_metrics") or {}).get("fixed_cost"),
@@ -1272,6 +1284,14 @@ class ALNSEnvironment(gym.Env):
             cumulative_ns += ns_value
             elapsed_seconds.append(cumulative_ns / 1e9)
 
+        # Cumulative search CPU time after each step, starting from the constructive
+        # initial solution -- the clock used for budgets and time-to-best.
+        cumulative_search_ns = self._init_search_cpu_ns
+        search_cpu_seconds: List[float] = []
+        for step in self.episode_history:
+            cumulative_search_ns += int(step.get("search_cpu_ns", 0) or 0)
+            search_cpu_seconds.append(cumulative_search_ns / 1e9)
+
         # Fleet-size tracking: current_solution == best_solution exactly at the
         # iteration where a new best is accepted (see engine.rs's acceptance
         # branch), so the step's num_vessels_used at that same index is the
@@ -1318,7 +1338,14 @@ class ALNSEnvironment(gym.Env):
             "elapsed_ms_steps": elapsed_ms_steps,
             "elapsed_ms_cumulative": elapsed_ms_cumulative,
             "elapsed_seconds": elapsed_seconds,
+            "search_cpu_seconds": search_cpu_seconds,
+            "search_cpu_seconds_total": self.search_cpu_seconds,
         }
+
+    @property
+    def search_cpu_seconds(self) -> float:
+        """Search CPU time of the current restart so far (see `search_cpu_ns`)."""
+        return self.search_cpu_ns / 1e9
 
     def set_policy_statistics(self, *, entropy: Optional[float] = None) -> None:
         """Optionally record policy diagnostics for the next logged step."""
@@ -1396,6 +1423,7 @@ class ALNSEnvironment(gym.Env):
     def _queue_operator_log_record(self, record: Dict[str, Any], current_best_cost: float) -> None:
         if not self.operator_logging_enabled:
             return
+        record["decision_charge_ns_per_iteration"] = self.decision_charge_ns_per_iteration
         if self.operator_logging_future_window <= 0:
             record["best_cost_delta_future"] = 0.0
             self.operator_logger.append(record)

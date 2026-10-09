@@ -30,6 +30,9 @@ class EpisodeSummary:
     best_cost: float
     solver_runtime_seconds: float
     wall_runtime_seconds: float
+    # Engine CPU time actually spent searching (constructive solutions + every step). All time
+    # budgets use this clock since 2026-10-09; solver/wall times are kept for reference.
+    search_cpu_seconds: float = 0.0
 
     @property
     def improvement_pct(self) -> float:
@@ -62,6 +65,36 @@ def _time_to_best(stats: Dict) -> tuple:
             t = float(elapsed_seconds[i]) if i < len(elapsed_seconds) else 0.0
             return t, i
     return 0.0, 0
+
+
+def _time_to_best_search(stats: Dict) -> float:
+    """Search CPU seconds within a single restart until its best cost was first reached."""
+    best_cost_history = stats.get("best_cost_history") or []
+    search_seconds = stats.get("search_cpu_seconds") or []
+    if not best_cost_history or not search_seconds:
+        return 0.0
+    global_best = min(best_cost_history)
+    for i, cost in enumerate(best_cost_history):
+        if cost <= global_best + 1e-9:
+            return float(search_seconds[i]) if i < len(search_seconds) else 0.0
+    return 0.0
+
+
+def _episode_time_to_best_search(restart_records: list) -> float:
+    """Cumulative search CPU seconds until the episode's global best was first found."""
+    if not restart_records:
+        return 0.0
+    global_best = min(r["best_cost"] for r in restart_records)
+    cumulative = 0.0
+    for rec in restart_records:
+        if rec["best_cost"] <= global_best + 1e-9:
+            return cumulative + float(rec.get("time_to_best_search_seconds", 0.0))
+        cumulative += float(rec.get("search_cpu_seconds", 0.0))
+    return cumulative
+
+
+def _budget_reached(spent_seconds: float, target_seconds: Optional[float]) -> bool:
+    return target_seconds is not None and spent_seconds >= target_seconds
 
 
 def _episode_time_to_best(restart_records: list) -> float:
@@ -128,6 +161,7 @@ def _episode_summary_to_cache(stats: "EpisodeSummary", restart_rows: list) -> Di
         "best_cost": stats.best_cost,
         "solver_runtime_seconds": stats.solver_runtime_seconds,
         "wall_runtime_seconds": stats.wall_runtime_seconds,
+        "search_cpu_seconds": stats.search_cpu_seconds,
         "restart_rows": restart_rows,
     }
 
@@ -138,6 +172,7 @@ def _episode_summary_from_cache(entry: Dict[str, Any]) -> tuple:
         best_cost=entry["best_cost"],
         solver_runtime_seconds=entry["solver_runtime_seconds"],
         wall_runtime_seconds=entry["wall_runtime_seconds"],
+        search_cpu_seconds=float(entry.get("search_cpu_seconds") or 0.0),
     )
     return stats, entry["restart_rows"]
 
@@ -165,13 +200,14 @@ def run_baseline_episode(
     solver_elapsed_ms_total = 0.0
     total_solver_runtime_seconds = 0.0
     total_wall_runtime_seconds = 0.0
+    total_search_seconds = 0.0
     initial_cost: Optional[float] = None
     best_candidates: List[float] = []
     restart_idx = 0
     restart_records: List[Dict[str, object]] = []
 
     while restart_idx < effective_restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
+        if restart_idx > 0 and _budget_reached(total_search_seconds, target_runtime_seconds):
             break
 
         restart_seed = _restart_seed(seed, restart_idx)
@@ -238,8 +274,11 @@ def run_baseline_episode(
             restart_elapsed_ms += step_ms
             solver_elapsed_ms_total += step_ms
             steps += 1
+            if _budget_reached(total_search_seconds + env.search_cpu_seconds, target_runtime_seconds):
+                break
 
         stats = env.get_episode_statistics()
+        restart_search_seconds = env.search_cpu_seconds
         env.close()
 
         restart_initial = float(stats.get("initial_cost") or 0.0)
@@ -259,6 +298,7 @@ def run_baseline_episode(
         restart_wall_runtime = time.perf_counter() - restart_wall_start
         total_solver_runtime_seconds += restart_solver_runtime
         total_wall_runtime_seconds += restart_wall_runtime
+        total_search_seconds += restart_search_seconds
         ttb_solver, ttb_iters = _time_to_best(stats)
         restart_records.append(
             {
@@ -267,6 +307,8 @@ def run_baseline_episode(
                 "restart_seed": restart_seed,
                 "solver_runtime_seconds": restart_solver_runtime,
                 "wall_runtime_seconds": restart_wall_runtime,
+                "search_cpu_seconds": restart_search_seconds,
+                "time_to_best_search_seconds": _time_to_best_search(stats),
                 "time_to_best_solver_seconds": ttb_solver,
                 "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
@@ -298,6 +340,7 @@ def run_baseline_episode(
         best_cost=float(global_best),
         solver_runtime_seconds=float(total_solver_runtime_seconds),
         wall_runtime_seconds=float(total_wall_runtime_seconds),
+        search_cpu_seconds=float(total_search_seconds),
     ), restart_records
 
 
@@ -321,6 +364,7 @@ def run_policy_and_baseline_episodes(
     target_runtime_seconds: Optional[float] = None,
     restart_limit: Optional[int] = None,
     progress_horizon: Optional[int] = None,
+    decision_cost_seconds: float = 0.0,
 ) -> tuple[EpisodeSummary, List[Dict[str, object]], EpisodeSummary, List[Dict[str, object]]]:
     """Run RL-policy and baseline restarts interleaved, one restart index at a time.
 
@@ -342,6 +386,7 @@ def run_policy_and_baseline_episodes(
 
     rl_solver_total = 0.0
     rl_wall_total = 0.0
+    rl_search_total = 0.0
     rl_initial_cost: Optional[float] = None
     rl_best_candidates: List[float] = []
     rl_records: List[Dict[str, object]] = []
@@ -349,6 +394,7 @@ def run_policy_and_baseline_episodes(
 
     bl_solver_total = 0.0
     bl_wall_total = 0.0
+    bl_search_total = 0.0
     bl_initial_cost: Optional[float] = None
     bl_best_candidates: List[float] = []
     bl_records: List[Dict[str, object]] = []
@@ -360,7 +406,7 @@ def run_policy_and_baseline_episodes(
         snapshot: Optional[object] = None
 
         if not rl_done:
-            if target_runtime_seconds is not None and restart_idx > 0 and rl_wall_total >= target_runtime_seconds:
+            if restart_idx > 0 and _budget_reached(rl_search_total, target_runtime_seconds):
                 rl_done = True
             else:
                 restart_wall_start = time.perf_counter()
@@ -403,8 +449,14 @@ def run_policy_and_baseline_episodes(
                     step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
                     restart_elapsed_ms += step_ms
                     steps += 1
+                    if _budget_reached(
+                        rl_search_total + env.search_cpu_seconds + steps * decision_cost_seconds,
+                        target_runtime_seconds,
+                    ):
+                        break
 
                 stats = env.get_episode_statistics()
+                restart_search_seconds = env.search_cpu_seconds + steps * decision_cost_seconds
                 env.close()
 
                 restart_initial = float(stats.get("initial_cost") or 0.0)
@@ -418,6 +470,7 @@ def run_policy_and_baseline_episodes(
                 restart_wall_runtime = time.perf_counter() - restart_wall_start
                 rl_solver_total += restart_solver_runtime
                 rl_wall_total += restart_wall_runtime
+                rl_search_total += restart_search_seconds
                 ttb_solver, ttb_iters = _time_to_best(stats)
                 rl_records.append(
                     {
@@ -426,6 +479,8 @@ def run_policy_and_baseline_episodes(
                         "restart_seed": restart_seed,
                         "solver_runtime_seconds": restart_solver_runtime,
                         "wall_runtime_seconds": restart_wall_runtime,
+                        "search_cpu_seconds": restart_search_seconds,
+                        "time_to_best_search_seconds": _time_to_best_search(stats),
                         "time_to_best_solver_seconds": ttb_solver,
                         "iterations_to_best": ttb_iters,
                         "initial_cost": restart_initial,
@@ -448,7 +503,7 @@ def run_policy_and_baseline_episodes(
                     rl_done = True
 
         if not bl_done:
-            if target_runtime_seconds is not None and restart_idx > 0 and bl_wall_total >= target_runtime_seconds:
+            if restart_idx > 0 and _budget_reached(bl_search_total, target_runtime_seconds):
                 bl_done = True
             else:
                 restart_wall_start = time.perf_counter()
@@ -502,8 +557,11 @@ def run_policy_and_baseline_episodes(
                     step_ms = float(step_info.get("operator_elapsed_ms", step_info.get("elapsed_ms", 0.0)) or 0.0)
                     restart_elapsed_ms += step_ms
                     steps += 1
+                    if _budget_reached(bl_search_total + env.search_cpu_seconds, target_runtime_seconds):
+                        break
 
                 stats = env.get_episode_statistics()
+                restart_search_seconds = env.search_cpu_seconds
                 env.close()
 
                 restart_initial = float(stats.get("initial_cost") or 0.0)
@@ -517,6 +575,7 @@ def run_policy_and_baseline_episodes(
                 restart_wall_runtime = time.perf_counter() - restart_wall_start
                 bl_solver_total += restart_solver_runtime
                 bl_wall_total += restart_wall_runtime
+                bl_search_total += restart_search_seconds
                 ttb_solver, ttb_iters = _time_to_best(stats)
                 bl_records.append(
                     {
@@ -525,6 +584,8 @@ def run_policy_and_baseline_episodes(
                         "restart_seed": restart_seed,
                         "solver_runtime_seconds": restart_solver_runtime,
                         "wall_runtime_seconds": restart_wall_runtime,
+                        "search_cpu_seconds": restart_search_seconds,
+                        "time_to_best_search_seconds": _time_to_best_search(stats),
                         "time_to_best_solver_seconds": ttb_solver,
                         "iterations_to_best": ttb_iters,
                         "initial_cost": restart_initial,
@@ -558,12 +619,14 @@ def run_policy_and_baseline_episodes(
         best_cost=float(min(rl_best_candidates) if rl_best_candidates else 0.0),
         solver_runtime_seconds=float(rl_solver_total),
         wall_runtime_seconds=float(rl_wall_total),
+        search_cpu_seconds=float(rl_search_total),
     )
     bl_summary = EpisodeSummary(
         initial_cost=float(bl_initial_cost),
         best_cost=float(min(bl_best_candidates) if bl_best_candidates else 0.0),
         solver_runtime_seconds=float(bl_solver_total),
         wall_runtime_seconds=float(bl_wall_total),
+        search_cpu_seconds=float(bl_search_total),
     )
     return rl_summary, rl_records, bl_summary, bl_records
 
@@ -615,6 +678,7 @@ def run_kisialiou_episode(
     solver_elapsed_ms_total = 0.0
     total_solver_runtime_seconds = 0.0
     total_wall_runtime_seconds = 0.0
+    total_search_seconds = 0.0
     initial_cost: Optional[float] = None
     best_candidates: List[float] = []
     restart_idx = 0
@@ -622,7 +686,7 @@ def run_kisialiou_episode(
     restart_records: List[Dict[str, object]] = []
 
     while restart_idx < restart_limit:
-        if target_runtime_seconds is not None and restart_idx > 0 and total_wall_runtime_seconds >= target_runtime_seconds:
+        if restart_idx > 0 and _budget_reached(total_search_seconds, target_runtime_seconds):
             break
 
         restart_seed = _restart_seed(seed, restart_idx)
@@ -670,8 +734,11 @@ def run_kisialiou_episode(
             restart_elapsed_ms += step_ms
             solver_elapsed_ms_total += step_ms
             steps += 1
+            if _budget_reached(total_search_seconds + env.search_cpu_seconds, target_runtime_seconds):
+                break
 
         stats = env.get_episode_statistics()
+        restart_search_seconds = env.search_cpu_seconds
         env.close()
 
         restart_initial = float(stats.get("initial_cost") or 0.0)
@@ -691,6 +758,7 @@ def run_kisialiou_episode(
         restart_wall_runtime = time.perf_counter() - restart_wall_start
         total_solver_runtime_seconds += restart_solver_runtime
         total_wall_runtime_seconds += restart_wall_runtime
+        total_search_seconds += restart_search_seconds
         ttb_solver, ttb_iters = _time_to_best(stats)
         restart_records.append(
             {
@@ -699,6 +767,8 @@ def run_kisialiou_episode(
                 "restart_seed": restart_seed,
                 "solver_runtime_seconds": restart_solver_runtime,
                 "wall_runtime_seconds": restart_wall_runtime,
+                "search_cpu_seconds": restart_search_seconds,
+                "time_to_best_search_seconds": _time_to_best_search(stats),
                 "time_to_best_solver_seconds": ttb_solver,
                 "iterations_to_best": ttb_iters,
                 "initial_cost": restart_initial,
@@ -730,4 +800,5 @@ def run_kisialiou_episode(
         best_cost=float(global_best),
         solver_runtime_seconds=float(total_solver_runtime_seconds),
         wall_runtime_seconds=float(total_wall_runtime_seconds),
+        search_cpu_seconds=float(total_search_seconds),
     ), restart_records

@@ -38,7 +38,7 @@ import run_norm2026_ablation as queue  # noqa: E402
 AXIS_ORDER = ("action", "state", "reward", "control")
 REFERENCE = ("ref", "op_triple_v2")
 LABELS = {
-    ("ref", "op_triple_v2"): "Reference (Exp 8: triple / v3 state / v9 reward)",
+    ("ref", "op_triple_v2"): "Reference (Exp 8 config: triple / v3 state / v9 reward)",
     ("action", "improvement_chain_v2"): "Action: improvement chain",
     ("action", "op_triple_many_v1"): "Action: many (288 parameterised)",
     ("state", "null"): "State: none (constant)",
@@ -103,7 +103,7 @@ def holm(pvalues: List[float]) -> List[float]:
 
 def load_costs(prefix: str) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Dict], Dict[str, pd.DataFrame]]:
     """Per size: wide table of best cost (index = instance, columns = method / seed)."""
-    queue._configure(prefix, queue.DATASETS, queue.TIMESTEPS)
+    queue._configure(prefix, None, queue.TIMESTEPS)
     per_size: Dict[str, Dict[str, pd.Series]] = defaultdict(dict)
     meta: Dict[str, Dict] = {}
     restarts: Dict[str, pd.DataFrame] = {}

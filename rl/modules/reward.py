@@ -18,6 +18,14 @@ class BaseRewardFunction:
         raise NotImplementedError
 
 
+def _step_search_ns(result: Dict[str, Any]):
+    """Time cost of a step for time-aware rewards: the engine's search CPU time (process
+    CPU clock over the step's search work, so unaffected by other programs on the machine);
+    falls back to the engine's wall-clock timer for engines built before it existed."""
+    value = result.get("search_cpu_ns")
+    return value if value is not None else result.get("elapsed_ns")
+
+
 @register_reward("delta_cost_v3")
 class DeltaCostReward(BaseRewardFunction):
     """Reward shaped around relative cost improvements and acceptance."""
@@ -397,10 +405,12 @@ class DeltaCostTimePenaltyReward(DeltaCostAcceptedNoOpPenaltyReward):
     644ms outlier case now lands around 0.31 - 3.0 = -2.69 -- clearly bad, but
     distinguishable from a failed-and-slow case rather than identical to it.
 
-    Uses `result["elapsed_ns"]`, confirmed present at reward-compute time and
-    equal to the operator's own execution time for both backbone steps
-    (destroy+repair combined) and pure improvement-only steps, so no separate
-    handling is needed per action type.
+    Uses the step's search time, present at reward-compute time for both backbone
+    steps (destroy+repair+improvement) and pure improvement-only steps, so no
+    separate handling is needed per action type. Since 2026-10-09 that is
+    `result["search_cpu_ns"]` (engine CPU time, unaffected by other programs on the
+    machine); it was the engine's wall-clock `elapsed_ns` before, which is what the
+    calibration above and the Exp 8 models were trained with.
     """
 
     version = "9.0"
@@ -411,7 +421,7 @@ class DeltaCostTimePenaltyReward(DeltaCostAcceptedNoOpPenaltyReward):
     def compute(self, result: Dict[str, Any], env: Any) -> float:
         reward = super().compute(result, env)
 
-        elapsed_ns = result.get("elapsed_ns")
+        elapsed_ns = _step_search_ns(result)
         if elapsed_ns is not None and elapsed_ns > 0:
             elapsed_ms = float(elapsed_ns) / 1e6
             time_penalty = min(self.TIME_PENALTY_PER_MS * elapsed_ms, self.MAX_TIME_PENALTY)
@@ -482,7 +492,7 @@ class AlnsScoreTimeReward(AlnsScoreReward):
 
     def compute(self, result: Dict[str, Any], env: Any) -> float:
         reward = super().compute(result, env)
-        elapsed_ns = result.get("elapsed_ns")
+        elapsed_ns = _step_search_ns(result)
         if elapsed_ns is not None and elapsed_ns > 0:
             reward -= min(self.TIME_PENALTY_PER_MS * float(elapsed_ns) / 1e6, self.MAX_TIME_PENALTY)
         return float(reward)

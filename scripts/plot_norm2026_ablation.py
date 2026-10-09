@@ -121,7 +121,7 @@ def ratio_figure(size: str, costs: pd.DataFrame, raw: pd.DataFrame, out_dir: Pat
             ax.plot([c_lo, c_hi], [y, y], color=color, linewidth=2, solid_capstyle="round", zorder=2)
             ax.scatter([mean], [y], s=64, color=color, edgecolors=SURFACE, linewidths=2, zorder=3)
         ax.set_yticks(range(len(rows)))
-        ax.set_yticklabels([("Reference (Exp 8)" if m == ref else _short(m)) for m in rows])
+        ax.set_yticklabels([("Reference (Exp 8 config)" if m == ref else _short(m)) for m in rows])
         ax.set_title(title, loc="left")
         ax.set_xlim(lo - pad, hi + pad)
         ax.grid(axis="y", visible=False)
@@ -131,7 +131,7 @@ def ratio_figure(size: str, costs: pd.DataFrame, raw: pd.DataFrame, out_dir: Pat
     from matplotlib.lines import Line2D
     handles = [Line2D([], [], marker="o", linestyle="", markersize=8, color=c, markeredgecolor=SURFACE)
                for c in (ORANGE, BLUE, CONTEXT)]
-    legend_labels = ["Reference (Exp 8)", "Design variant / control", "Kisialiou ALNS, adaptive ALNS"]
+    legend_labels = ["Reference (Exp 8 config)", "Design variant / control", "Kisialiou ALNS, adaptive ALNS"]
     title = (f"{size.capitalize()} instances — mean cost ÷ best known, 95% CI, lower is better "
              f"({len(complete)} instances)")
 
@@ -221,7 +221,7 @@ def behaviour_figure(size: str, beh: pd.DataFrame, out_dir: Path) -> None:
         distinct=("mean_distinct_actions_per_restart", "mean"),
     ).reset_index()
     grouped["label"] = [
-        "Reference (Exp 8)" if (a, v) == analysis.REFERENCE else _short(analysis.LABELS.get((a, v), f"{a}: {v}"))
+        "Reference (Exp 8 config)" if (a, v) == analysis.REFERENCE else _short(analysis.LABELS.get((a, v), f"{a}: {v}"))
         for a, v in zip(grouped["axis"], grouped["variant"])
     ]
     grouped = grouped.sort_values("switch_rate")
@@ -230,7 +230,7 @@ def behaviour_figure(size: str, beh: pd.DataFrame, out_dir: Path) -> None:
         (axes[0], "switch_rate", "share of steps that switch to a different action"),
         (axes[1], "distinct", "distinct actions used per restart (mean)"),
     ):
-        colors = [ORANGE if lab == "Reference (Exp 8)" else BLUE for lab in grouped["label"]]
+        colors = [ORANGE if lab == "Reference (Exp 8 config)" else BLUE for lab in grouped["label"]]
         ax.barh(range(len(grouped)), grouped[column], height=0.55, color=colors)
         ax.set_yticks(range(len(grouped)))
         ax.set_yticklabels(grouped["label"])
