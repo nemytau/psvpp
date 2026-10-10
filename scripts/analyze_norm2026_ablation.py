@@ -113,7 +113,7 @@ def load_costs(prefix: str) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Dict], D
             continue
         df = pd.read_csv(results)
         rl = df[df["mode"] == "rl_improvement_mvp"].set_index("dataset")["best_cost"]
-        column = f"{job.axis}|{job.variant}|s{job.seed}"
+        column = f"{job.size}|{job.axis}|{job.variant}|s{job.seed}"  # size in the key: names repeat across sizes
         per_size[job.size][column] = rl
         meta[column] = {"axis": job.axis, "variant": job.variant, "seed": job.seed, "size": job.size,
                         "action": job.action}

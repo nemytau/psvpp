@@ -533,8 +533,86 @@ of every size (and large 08), plus 15 medium/large training sets, differ between
 all read the processed files), but any analysis reading instance properties from
 `data/generated` describes the wrong instances for those datasets — read `data/processed` instead.
 
-**Status**: prepared, waiting for launch (machine must be idle). Exp 8 stays locked as it was;
-note its numbers come from the old wall-clock rule and are not directly comparable to Exp 9's.
+**Run**: launched 2026-10-09 15:01, finished 2026-10-10 13:54 (22.9 h), 46/46 evaluations, 0
+failures. Outputs `output/norm26__*`, analysis `output/norm26_analysis/` (`summary.md`, tables,
+`figures/`). Exp 8 stays locked as it was; its numbers come from the old wall-clock rule and are
+not directly comparable to Exp 9's.
+
+**Results — ratio to best-known cost** (1.0000 = best of every method and seed on that instance;
+multi-seed variants scored on the per-instance mean cost over training seeds; W/L = per-instance
+wins / losses vs Kisialiou):
+
+*Medium (20 instances)*
+
+| method | mean | median | max | W/L vs Kisialiou |
+|---|---|---|---|---|
+| Reward: ALNS score + time | **1.0037** | 1.0040 | 1.0094 | 16/4 |
+| Reference (Exp 8 config), seeds 42/43/44 | 1.0355 | 1.0078 | 1.2915 | 13/7 |
+| State: none / instance / search / solution / all | 1.0354–1.0355 | 1.0078 | 1.2915 | 13/7 |
+| Control: fixed random + first-fit + FCR | 1.0355 | 1.0078 | 1.2915 | 13/7 |
+| Action: improvement chain | 1.0466 | 1.0077 | 1.2864 | 13/7 |
+| Control: uniform random (triple / many) | 1.0717 | 1.0010–1.0013 | 1.2934–1.2969 | 17/3 |
+| Action: many (288 parameterised) | 1.1248 | 1.0047 | 1.2988 | 11/9 |
+| Control: fixed random + first-fit + relocation | 1.1250 | 1.0048 | 1.2988 | 11/9 |
+| Adaptive ALNS (no improvement) | 1.1843 | 1.2664 | 1.3166 | 4/16 |
+| Reward: best-cost gain | 1.1851 | 1.2552 | 1.3046 | 12/8 |
+| Reward: ALNS score / new best (sparse) | 1.2079 | 1.2803 | 1.3034 | 14/6 |
+| Kisialiou ALNS | 1.2125 | 1.2834 | 1.5711 | — |
+
+*Small (30 instances; trained variants averaged over seeds 42/43, per-seed means in brackets)*
+
+| method | mean | median | max | W/L vs Kisialiou |
+|---|---|---|---|---|
+| Control: uniform random (many / triple) | **1.0289** | 1.0000 | 1.8616 | 22/3, 23/4 |
+| Reward: best-cost gain | 1.0448 (1.0304–1.0592) | 1.0011 | 1.8616 | 15/15 |
+| Action: improvement chain | 1.0457 (1.0316–1.0598) | 1.0018 | 1.8624 | 13/17 |
+| State: all three groups | 1.0583 (1.0582–1.0583) | 1.0003 | 1.8708 | 18/10 |
+| State: instance only | 1.0592 (1.0299–1.0884) | 1.0006 | 1.8705 | 21/8 |
+| State: search process only | 1.0733 (1.0582–1.0884) | 1.0003 | 1.8705 | 21/6 |
+| Reference (Exp 8 config) = control fixed random + first-fit + relocation | 1.0884 | 1.0003 | 1.9063 | 18/8 |
+| State: solution only / none | 1.1072 (1.0884–1.1261) | 1.0047 | 1.8749 | 6/24, 5/25 |
+| Reward: ALNS score | 1.1188 (1.0886–1.1490) | 1.0005 | 1.8989 | 18/9 |
+| Action: many (288 parameterised) | 1.1218 (1.0291–1.2145) | 1.0102 | 1.8761 | 5/25 |
+| Control: fixed random + first-fit + FCR | 1.1257 | 1.0084 | 1.9194 | 2/28 |
+| Adaptive ALNS (no improvement) | 1.1626 | 1.0158 | 1.9293 | 1/29 |
+| Kisialiou ALNS | 1.1635 | 1.0009 | 1.9063 | — |
+| Reward: ALNS score + time | 1.1749 (1.0889–1.2609) | 1.0125 | 1.9308 | 3/27 |
+| Reward: new best (sparse) | 1.2511 (1.1795–1.3228) | 1.1253 | 1.9384 | 1/29 |
+
+Paired Wilcoxon tests and bootstrap CIs: `output/norm26_analysis/tests_{small,medium}.csv`.
+
+**Findings.**
+1. *Policies collapse to one fixed configuration.* Almost every trained policy plays a single
+   action (switch rate ≈ 0); only the small search-state policy, seed 42, switched (20% of steps).
+   On medium the reference (all three seeds) and all five state variants learned *the same* action,
+   random removal + first-fit + FCR, and are numerically identical to the fixed-configuration
+   control (same seeded search; 19/20 instances identical best cost). RL here acts as automatic
+   *algorithm configuration*, not adaptive control.
+2. *State design does not matter on medium* (the policy ignores the state); on small it changes
+   which configuration is learned but with large seed-to-seed variation (e.g. instance-only
+   1.0299 vs 1.0884), so state effects on small are within seed noise.
+3. *Reward design matters most, through time-awareness.* Rewards without a time term (ALNS score,
+   new best) learn Shaw + first-fit + unlimited swap on medium: the swap improves almost every step
+   (high per-step reward) but costs so much that only ~6 steps per search-second fit — 1.2079,
+   worse than the adaptive baseline. Time-aware rewards learn cheap FCR / VNR policies with
+   thousands of steps per second. The best medium result is ALNS score + time (1.0037, 19/20
+   better than the reference, Holm p = 0.011; 16/4 vs Kisialiou): it mixes VNR (67%) and FCR and
+   finds the smallest fleet on all 20 instances. On small the same reward is unstable across seeds
+   (1.0889 vs 1.2609).
+4. *Medium results are decided by fleet size.* One vessel more costs ~22–30%. Kisialiou uses one
+   more vessel than the best RL policy on 13/20 instances (where its ratio is ~1.28) and wins only
+   where it finds the same fleet; the reference misses the minimum fleet by one vessel on 2
+   instances, ALNS score + time never.
+5. *Uniform random operator choice is a strong baseline.* On small it is the best method (1.0289);
+   on medium (1.0717) it beats Kisialiou on 17/20 instances but loses to the best fixed
+   configurations. A richer action space without better learning (many, 288 actions) helps neither.
+6. *The RL decision charge took 0–6.2% of RL's search budget* (`summary.json`,
+   `decision_charge_share_of_search`): highest for policies on the cheapest operators (FCR, VNR) —
+   6.2% small solution-only, 2.2–2.6% for the medium FCR policies — and at most 1.2% (mostly
+   0.1–0.5%) for policies on relocation or swap.
+
+**Caveats.** One training seed per medium variant (the reference's three seeds collapsed
+identically); small results vary strongly between seeds; one eval seed; 20 / 30 instances.
 
 ---
 
