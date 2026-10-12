@@ -106,7 +106,7 @@ impl Solution {
                         b_end,
                         HOURS_IN_PERIOD as f64,
                     ) {
-                        log::warn!(
+                        log::debug!(
                             "Infeasible: Vessel {} has overlapping voyages {} and {}",
                             vessel_id,
                             a.id,
@@ -125,7 +125,7 @@ impl Solution {
                     let v = v.borrow();
                     v.id == voyage_id && v.visit_ids.contains(&visit.id())
                 }) {
-                    log::warn!("Infeasible: Visit {} assigned to voyage {} but not found in voyage's visit_ids", visit.id(), voyage_id);
+                    log::debug!("Infeasible: Visit {} assigned to voyage {} but not found in voyage's visit_ids", visit.id(), voyage_id);
                     return false;
                 }
             }
@@ -135,14 +135,14 @@ impl Solution {
             let voyage = voyage_cell.borrow();
             let voyage_id = voyage.id;
             if !self.schedule.voyage_start_times.contains_key(&voyage_id) {
-                log::warn!(
+                log::debug!(
                     "Infeasible: Voyage {} missing from schedule.voyage_start_times",
                     voyage_id
                 );
                 return false;
             }
             if !self.schedule.voyage_end_times.contains_key(&voyage_id) {
-                log::warn!(
+                log::debug!(
                     "Infeasible: Voyage {} missing from schedule.voyage_end_times",
                     voyage_id
                 );
@@ -153,11 +153,11 @@ impl Solution {
                 self.schedule.vessel_day_voyages.get(&vessel_day_key)
             {
                 if scheduled_voyage_id != voyage_id {
-                    log::warn!("Infeasible: Schedule vessel_day_voyages for vessel {:?} day {:?} points to voyage {} but expected {}", voyage.vessel_id, voyage.departure_day, scheduled_voyage_id, voyage_id);
+                    log::debug!("Infeasible: Schedule vessel_day_voyages for vessel {:?} day {:?} points to voyage {} but expected {}", voyage.vessel_id, voyage.departure_day, scheduled_voyage_id, voyage_id);
                     return false;
                 }
             } else {
-                log::warn!(
+                log::debug!(
                     "Infeasible: No entry in schedule.vessel_day_voyages for vessel {:?} day {:?}",
                     voyage.vessel_id,
                     voyage.departure_day
@@ -168,11 +168,11 @@ impl Solution {
                 let inst_id = self._visits[*visit_id].installation_id();
                 if let Some(set) = self.schedule.departures_by_installation.get(&inst_id) {
                     if !set.contains(visit_id) {
-                        log::warn!("Infeasible: Visit {} (installation {}) not found in schedule.departures_by_installation", visit_id, inst_id);
+                        log::debug!("Infeasible: Visit {} (installation {}) not found in schedule.departures_by_installation", visit_id, inst_id);
                         return false;
                     }
                 } else {
-                    log::warn!("Infeasible: No entry in schedule.departures_by_installation for installation {}", inst_id);
+                    log::debug!("Infeasible: No entry in schedule.departures_by_installation for installation {}", inst_id);
                     return false;
                 }
             }
@@ -202,11 +202,11 @@ impl Solution {
                         .abs()
                         .min(period - (*day_a as i32 - *day_b as i32).abs());
                     if diff < spread {
-                        log::warn!("Infeasible: Visits {} and {} to installation {} violate spread constraint (days {} and {}, diff={}, required spread={})", 
+                        log::debug!("Infeasible: Visits {} and {} to installation {} violate spread constraint (days {} and {}, diff={}, required spread={})", 
                                 visit_a_id, visit_b_id, installation_id, day_a, day_b, diff, spread);
 
                         // Temporary debug output: show all voyages with starting days and route sequences
-                        log::warn!("=== DEBUG: All voyages in solution ===");
+                        log::debug!("=== DEBUG: All voyages in solution ===");
                         for voyage_cell in &self.voyages {
                             let voyage = voyage_cell.borrow();
                             if !voyage.visit_ids.is_empty() {
@@ -223,7 +223,7 @@ impl Solution {
                                         }
                                     })
                                     .collect();
-                                log::warn!(
+                                log::debug!(
                                     "Voyage {}: Vessel={}, Day={}, Route=[{}]",
                                     voyage.id,
                                     vessel_id,
@@ -232,7 +232,7 @@ impl Solution {
                                 );
                             }
                         }
-                        log::warn!("=== END DEBUG OUTPUT ===");
+                        log::debug!("=== END DEBUG OUTPUT ===");
 
                         return false;
                     }

@@ -630,3 +630,70 @@ before the current series:
   weighted engine selection)
 - Improvement operators missing from logs for D×R×I triple actions (fixed:
   `log_improvement` now true whenever `improvement_idx_result is not None`)
+
+---
+
+## Design notes (open questions, not bugs)
+
+### Repeat penalty keys on the improvement operator only (noted 2026-10-12)
+
+`delta_cost_v7`/`v8`/`v9` subtract `NO_OP_IMPROVEMENT_PENALTY = 1.0` when the selected
+improvement operator equals the previous iteration's (`improvement_operator_idx ==
+env.last_improvement_idx`) **and** the step was not accepted. The destroy and repair
+choices are not part of the condition, so the penalty fires even when the policy picked a
+different D/R pair and only reused the improvement operator — and it does not fire when
+the policy repeats the whole triple but switches improvement operator.
+
+This made sense where it originated (`improvement_chain_v2`, where consecutive
+improvement-only steps act on an unchanged schedule), but it is a weaker argument for
+`op_triple_v1/v2`, where every step also runs destroy+repair. Worth keeping in mind when
+reading operator-usage results.
+
+Related observation from the same check: all three destroy operators draw randomness
+(the removal count is always `xi_min + U(0,1)*(xi_max-xi_min)`; Shaw also picks its seed
+visit at random), while `deep_greedy_insertion` and `k_regret_insertion` use no RNG at all
+and `first_fit_insertion` shuffles voyages. So repeating a triple does not reproduce an
+identical candidate, only a similar one — unlike Kisialiou et al. (2018), where the
+destroy operators are deterministic given their input parameters.
+
+Status: logged only, no change made. Low priority for paper 1 results.
+
+### Feasibility guards added to the engine (2026-10-12)
+
+While documenting the solver for paper 1 it turned out that (a) `run_iteration` accepted
+candidates on cost alone, with no completeness/feasibility check, even though an
+incomplete schedule is *cheaper* (unassigned visits cost nothing), and (b) the Python env's
+infeasibility branch read `result["feasible"]`, a key the Rust side never sets (the real
+keys are `solution_metrics.is_complete` / `is_feasible`), so it was dead code.
+
+Fixed in `rust_alns/src/alns/engine.rs`: the improvement sequence is skipped when repair
+leaves visits unassigned, and a candidate is accepted only if it is complete and fully
+feasible. Also `python_interface.rs` now defaults the log filter to `warn` (env_logger's
+default is error-only, which hid every operator warning in Python-driven runs), and the
+12 `warn!` calls inside `Solution::is_fully_feasible` were downgraded to `debug!` because
+operators call that method to evaluate trial moves.
+
+Measured effect: zero discards over 1,200 iterations (small baseline; small/medium/large
+in RL mode, 300 iterations each), and every iteration was complete and feasible both
+before and after the change. The guards are a safety net; existing results stand.
+
+### Candidate action: early restart break (idea, 2026-10-12)
+
+Add an extra action to the action space that ends the current restart early, so the search
+continues from a freshly constructed initial solution instead of spending the remaining
+iterations on a schedule the policy judges to be stuck. Currently a restart always runs its
+full iteration budget (`max_iterations`, 300 in the ph300 runs), and restarts are triggered
+only by the eval loop, so the policy has no way to abandon an unpromising basin.
+
+Reward-hacking risk to design against: the reward pays for improvements relative to the
+*current* schedule (weight 10) as well as relative to the best known one (weight 30). A
+fresh initial solution is poor, so the early iterations after a break produce large
+improvements over the current schedule at no cost in quality. A policy could therefore
+learn to break often and farm those easy gains while rarely improving the best known
+schedule. Possible counters: pay only for improvements over the best known schedule after a
+break, charge an explicit cost for the break (it discards the iterations spent so far and
+pays for constructing a new initial solution), require a minimum number of iterations or a
+minimum stagnation count before a break is allowed, or evaluate breaks on the time-fair
+budget so their restart cost is visible in the metric the policy is scored on.
+
+Status: idea only, not implemented.

@@ -303,9 +303,15 @@ impl RustALNSInterface {
     ) -> PyResult<PyObject> {
         // Initialize logging for Python interface (only if not already initialized)
         if !PYTHON_LOGGING_INITIALIZED.load(Ordering::Relaxed) {
-            let _ = env_logger::Builder::from_default_env()
-                .target(env_logger::Target::Stdout)
-                .try_init();
+            // Default to warn level when RUST_LOG is unset: env_logger's own default
+            // is error-only, which silently hid operator warnings (e.g. a repair
+            // operator failing to reinsert every removed visit) in every run driven
+            // from Python. RUST_LOG still overrides this when set.
+            let _ = env_logger::Builder::from_env(
+                env_logger::Env::default().default_filter_or("warn"),
+            )
+            .target(env_logger::Target::Stdout)
+            .try_init();
             PYTHON_LOGGING_INITIALIZED.store(true, Ordering::Relaxed);
         }
 

@@ -926,12 +926,26 @@ impl ALNSEngine {
         let cost_after_repair = candidate_solution.total_cost;
         let repair_elapsed_ns = repair_start.elapsed().as_nanos();
 
+        // A repair operator may fail to reinsert every removed visit (it logs a
+        // warning and returns what it managed to insert). An incomplete schedule is
+        // cheaper than a complete one, because unserved visits cost nothing, so it
+        // must never reach the improvement phase or the acceptance test. Kisialiou
+        // et al. (2018) handle this the same way: "If an insertion fails, the
+        // algorithm proceeds to the next iteration."
+        let repair_complete = candidate_solution.is_complete_solution();
+        if !repair_complete {
+            log::warn!(
+                "Iteration {}: repair left visits unassigned; candidate discarded",
+                iteration + 1
+            );
+        }
+
         // Capture cost after destroy+repair and track each improvement operator separately
         let mut previous_improvement_cost = candidate_solution.total_cost;
 
         let mut improvement_costs = Vec::with_capacity(improvement_sequence.len());
         let mut improvement_step_metrics = Vec::with_capacity(improvement_sequence.len());
-        for &idx in improvement_sequence {
+        for &idx in improvement_sequence.iter().filter(|_| repair_complete) {
             let improvement_op = self.operator_registry.get_improvement_operator(idx);
             let cost_before = previous_improvement_cost;
             let improvement_start = std::time::Instant::now();
@@ -967,19 +981,33 @@ impl ALNSEngine {
         let current_cost = self.current_solution.total_cost;
         let best_cost = self.best_solution.total_cost;
 
+        // A candidate may only be accepted if it serves every visit and satisfies
+        // all constraints; otherwise the current solution is kept for the next
+        // iteration.
+        let candidate_valid = repair_complete && candidate_solution.is_fully_feasible(&self.context);
+        if repair_complete && !candidate_valid {
+            log::warn!(
+                "Iteration {}: candidate violates constraints; candidate discarded",
+                iteration + 1
+            );
+        }
+
         // Acceptance decision
-        let accept = acceptance::accept(
-            current_cost,
-            candidate_cost,
-            self.temperature,
-            &mut self.rng,
-        );
+        let accept = candidate_valid
+            && acceptance::accept(
+                current_cost,
+                candidate_cost,
+                self.temperature,
+                &mut self.rng,
+            );
         let in_aggressive_phase = self.is_in_aggressive_phase(iteration);
         let mut accepted = false;
         let mut is_new_best = false;
         let mut is_better_than_current = false;
 
-        if candidate_cost < best_cost {
+        if !candidate_valid {
+            self.stagnation_count += 1;
+        } else if candidate_cost < best_cost {
             self.best_solution = candidate_solution.clone();
             self.current_solution = candidate_solution;
             accepted = true;
