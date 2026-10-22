@@ -61,7 +61,7 @@ class ALNSEnvironment(gym.Env):
         seed: int = 42,
         max_iterations: int = 100,
         progress_horizon: Optional[int] = None,
-        temperature: float = 500.0,
+        temperature: Optional[float] = None,
         theta: float = 7.0,
         weight_update_interval: Optional[int] = None,
         aggressive_search_factor: float = 0.85,
@@ -102,7 +102,9 @@ class ALNSEnvironment(gym.Env):
                 max_iterations legitimately differs between them (e.g. training episodes vs.
                 match_kisialiou eval restarts), so the same raw iteration count means the same
                 thing to the policy in both contexts.
-            temperature: Initial simulated annealing temperature
+            temperature: Initial simulated annealing temperature in cost units. Defaults to the
+                engine's cost-model-consistent value (rust_alns_py.default_initial_temperature(),
+                500 at the original fuel price of 650/t, scaled with the fuel price).
             theta: Temperature cooling factor
             weight_update_interval: Iterations between operator weight updates
             num_episodes: Number of restarts (each with different seed for diverse initial solutions)
@@ -144,7 +146,9 @@ class ALNSEnvironment(gym.Env):
         # feature value in both contexts -- see docs/PAPER1_ACTION_SPACE_PLAN.md section 10.
         # Defaults to max_iterations for full backward compatibility when not set explicitly.
         self.progress_horizon = progress_horizon if progress_horizon is not None else max_iterations
-        self.temperature = temperature
+        self.temperature = (
+            float(temperature) if temperature is not None else float(rust_alns_py.default_initial_temperature())  # type: ignore
+        )
         self.theta = theta
         # delta (weight-update interval): 50 if rho<500, 100 if rho>=500,
         # per Kisialiou et al. (2018) Table 1, unless explicitly overridden.

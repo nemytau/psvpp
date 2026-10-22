@@ -9,9 +9,11 @@ against a random baseline using shared problem samples.
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import time
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -28,7 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 try:
     from stable_baselines3 import PPO
-    from stable_baselines3.common.callbacks import BaseCallback
+    from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
     from stable_baselines3.common.env_checker import check_env
     from stable_baselines3.common.evaluation import evaluate_policy
     from stable_baselines3.common.logger import configure
@@ -79,10 +81,14 @@ def _format_dataset_label(path: str) -> str:
 class ALNSTrainingCallback(BaseCallback):
     """Callback that captures cost convergence during PPO training."""
 
-    def __init__(self, log_dir: str, verbose: int = 1):
+    def __init__(self, log_dir: str, verbose: int = 1, export_every: int = 10_000):
         super().__init__(verbose)
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        # Summary, cost curve and progress file are refreshed every `export_every` timesteps, so a
+        # long training leaves usable intermediate results instead of everything at its very end.
+        self.export_every = int(export_every)
+        self._last_export = 0
 
         self.episode_rewards: List[float] = []
         self.episode_improvements: List[float] = []
@@ -189,12 +195,16 @@ class ALNSTrainingCallback(BaseCallback):
                 )
 
                 self.current_episode_reward = 0.0
+        if self.export_every > 0 and self.num_timesteps - self._last_export >= self.export_every:
+            self._last_export = self.num_timesteps
+            self._write_summary(partial=True)
+            self._write_costs_csv()
         return True
 
     def _on_rollout_end(self) -> None:
         pass
 
-    def _on_training_end(self) -> None:
+    def _write_summary(self, partial: bool = False) -> None:
         summary = {
             "total_episodes": len(self.episode_improvements),
             "avg_improvement": np.mean(self.episode_improvements) if self.episode_improvements else 0.0,
@@ -205,20 +215,32 @@ class ALNSTrainingCallback(BaseCallback):
 
         summary_file = self.log_dir / "training_summary.txt"
         with summary_file.open("w") as f:
-            f.write("ALNS RL Training Summary\n")
+            f.write("ALNS RL Training Summary" + (f" (partial, {self.num_timesteps} timesteps so far)" if partial else "") + "\n")
             f.write("=" * 30 + "\n")
             for key, value in summary.items():
                 f.write(f"{key}: {value}\n")
 
-        if self.verbose > 0:
+        progress = dict(
+            timesteps=int(self.num_timesteps),
+            episodes=len(self.episode_improvements),
+            recent_mean_reward=float(np.mean(self.episode_rewards[-50:])) if self.episode_rewards else None,
+            recent_mean_improvement=float(np.mean(self.episode_improvements[-50:])) if self.episode_improvements else None,
+            best_solution_cost=None if self.best_solution_cost == float("inf") else self.best_solution_cost,
+            updated_at=datetime.now().isoformat(timespec="seconds"),
+            final=not partial,
+        )
+        (self.log_dir / "training_progress.json").write_text(json.dumps(progress, indent=2))
+
+        if self.verbose > 0 and not partial:
             LOGGER.info("%s Training summary saved to: %s", LOG_PREFIX, summary_file)
 
+    def _on_training_end(self) -> None:
+        self._write_summary(partial=False)
         self._export_training_metrics()
 
-    def _export_training_metrics(self) -> None:
+    def _write_costs_csv(self) -> None:
         if not self.training_steps:
             return
-
         data_file = self.log_dir / "training_costs.csv"
         with data_file.open("w", newline="") as csv_file:
             writer = csv.writer(csv_file)
@@ -229,6 +251,12 @@ class ALNSTrainingCallback(BaseCallback):
                 self.training_best_costs,
             ):
                 writer.writerow([step, current_cost, best_cost])
+
+    def _export_training_metrics(self) -> None:
+        if not self.training_steps:
+            return
+
+        self._write_costs_csv()
 
         plot_path = self.log_dir / "training_convergence.png"
         plt.figure(figsize=(10, 6))
@@ -413,7 +441,14 @@ def train_ppo_agent(
     )
 
     callback = ALNSTrainingCallback(log_dir=str(log_dir_path))
-    model.learn(total_timesteps=total_timesteps, callback=callback)
+    # Model checkpoints every 10k timesteps (a few hundred KB each) next to the final model, so a
+    # training that dies late still leaves a usable policy and progress is visible on disk.
+    checkpoint = CheckpointCallback(
+        save_freq=10_000,
+        save_path=str(Path(model_save_path).parent / "checkpoints"),
+        name_prefix="ppo_checkpoint",
+    )
+    model.learn(total_timesteps=total_timesteps, callback=CallbackList([callback, checkpoint]))
 
     model.save(model_save_path)
     LOGGER.info("%s Model saved to: %s", LOG_PREFIX, model_save_path)

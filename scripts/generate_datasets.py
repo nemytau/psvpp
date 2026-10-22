@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Sequence
 
@@ -64,7 +65,7 @@ CONFIG_LOOKUP = {
 CONFIG_SEQUENCE = list(CONFIG_LOOKUP)
 
 DEFAULT_SAMPLES_PER_CONFIG = 5
-OUTPUT_ROOT = Path("data/generated")
+OUTPUT_ROOT = Path(os.environ.get("PSVPP_GENERATED_ROOT", "data/generated"))
 
 
 def ensure_dir(path: Path) -> None:
@@ -87,7 +88,9 @@ def generate_samples(
     samples_per_config: int,
     sizes: Optional[Sequence[str]] = None,
     only_split: Optional[str] = None,
+    output_root: Optional[Path] = None,
 ) -> None:
+    output_root = Path(output_root) if output_root is not None else OUTPUT_ROOT
     base_template = generate_base()
     longitude = float(getattr(base_template, "longitude", 0.0))
     latitude = float(getattr(base_template, "latitude", 0.0))
@@ -129,7 +132,7 @@ def generate_samples(
             inst_df = generate_installation_dataframe(config_name)
             vessel_df = generate_vessels_dataframe(config_name)
 
-            sample_dir = OUTPUT_ROOT / size_name / split_name / f"{config_name.lower()}_{sample_id:02d}"
+            sample_dir = output_root / size_name / split_name / f"{config_name.lower()}_{sample_id:02d}"
             ensure_dir(sample_dir)
 
             inst_df.to_csv(sample_dir / "installations.csv", index=False)
@@ -153,7 +156,7 @@ def generate_samples(
                 f"(seed={seed}, installs={len(inst_df)}, vessels={len(vessel_df)})"
             )
 
-    summary_path = OUTPUT_ROOT / "SUMMARY.yaml"
+    summary_path = output_root / "SUMMARY.yaml"
     ensure_dir(summary_path.parent)
     with summary_path.open("w", encoding="utf-8") as summary_file:
         yaml.safe_dump(summary, summary_file, sort_keys=False)
@@ -179,6 +182,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Restrict generation to only the train or only the test split",
     )
+    parser.add_argument(
+        "--output-root",
+        default=None,
+        help="Root folder for the generated datasets (default: $PSVPP_GENERATED_ROOT or data/generated)",
+    )
     return parser.parse_args()
 
 
@@ -188,6 +196,7 @@ def main() -> None:
         samples_per_config=max(1, args.samples),
         sizes=args.sizes,
         only_split=args.only_split,
+        output_root=Path(args.output_root) if args.output_root else None,
     )
 
 

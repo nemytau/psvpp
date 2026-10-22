@@ -745,7 +745,7 @@ impl Solution {
         let mut vessels_used = HashSet::new();
         let mut fixed_cost = 0.0;
         let mut variable_cost = 0.0;
-        let fuel_cost = context.problem.lng_cost();
+        let fuel_cost = context.problem.fuel_price();
         for voyage_cell in &self.voyages {
             let voyage = voyage_cell.borrow();
             // Only count non-empty voyages
@@ -810,7 +810,7 @@ impl Solution {
         use std::collections::HashMap;
         let mut fixed_cost = 0.0;
         let mut variable_cost = 0.0;
-        let fuel_cost = context.problem.lng_cost();
+        let fuel_cost = context.problem.fuel_price();
         let mut vessel_usage: HashMap<usize, usize> = HashMap::new();
         for voyage_cell in &self.voyages {
             let voyage = voyage_cell.borrow();

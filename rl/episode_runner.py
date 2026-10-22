@@ -24,6 +24,20 @@ import numpy as np
 from rl.rl_alns_environment import ALNSEnvironment
 
 
+# Per-iteration operator-usage logging of evaluation episodes can be capped to the first N
+# restarts of every episode (None = log every restart, the default). Under the search-CPU-time
+# protocol a large-instance evaluation produces ~10^9 log rows (~250 GB), so the large runs log
+# a sample; every restart still gets its summary row (restart_results.csv), including the action
+# histogram and switch statistics. Set by scripts/run_experiment_rl_improvement_mvp.py
+# (--operator-log-restarts).
+OPERATOR_LOG_RESTARTS: Optional[int] = None
+
+
+def log_restart(restart_idx: int) -> bool:
+    """Whether per-iteration operator-usage rows are written for this restart."""
+    return OPERATOR_LOG_RESTARTS is None or restart_idx < OPERATOR_LOG_RESTARTS
+
+
 @dataclass
 class EpisodeSummary:
     initial_cost: float
@@ -220,7 +234,7 @@ def run_baseline_episode(
             seed=restart_seed,
             problem_instance_paths=[dataset_path],
             problem_sampling_strategy="round_robin",
-            enable_operator_logging=True,
+            enable_operator_logging=log_restart(restart_idx),
             operator_logging_mode="baseline",
             operator_logging_mode_label=mode_label,
             operator_logging_size=size_label,
@@ -417,7 +431,7 @@ def run_policy_and_baseline_episodes(
                     seed=restart_seed,
                     problem_instance_paths=[dataset_path],
                     problem_sampling_strategy="round_robin",
-                    enable_operator_logging=True,
+                    enable_operator_logging=log_restart(restart_idx),
                     operator_logging_mode="reinforcement_learning",
                     operator_logging_mode_label="rl_improvement_mvp",
                     operator_logging_size=size_label,
@@ -514,7 +528,7 @@ def run_policy_and_baseline_episodes(
                     seed=restart_seed,
                     problem_instance_paths=[dataset_path],
                     problem_sampling_strategy="round_robin",
-                    enable_operator_logging=True,
+                    enable_operator_logging=log_restart(restart_idx),
                     operator_logging_mode="baseline",
                     operator_logging_mode_label="baseline",
                     operator_logging_size=size_label,
@@ -699,7 +713,7 @@ def run_kisialiou_episode(
             seed=restart_seed,
             problem_instance_paths=[dataset_path],
             problem_sampling_strategy="round_robin",
-            enable_operator_logging=True,
+            enable_operator_logging=log_restart(restart_idx),
             operator_logging_mode="kisialiou",
             operator_logging_mode_label=mode_label,
             operator_logging_size=size_label,

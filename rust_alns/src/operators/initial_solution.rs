@@ -9,7 +9,12 @@ use rand::Rng;
 use std::collections::HashMap;
 
 const MAX_VISITS_PER_VOYAGE: usize = 5;
-const MAX_ATTEMPTS: usize = 10;
+// Each attempt draws fresh random departure days and a new visit order. Instances with many
+// frequent visits and all-tight time windows fail up to ~60% of the attempts (measured on the
+// 2026-10 test sets), so 10 attempts panicked on ~1% of restarts there; 500 attempts make a
+// panic impossible in practice while restarts that used to succeed within 10 attempts are
+// bit-for-bit unchanged (same random stream).
+const MAX_ATTEMPTS: usize = 500;
 const MAX_VESSEL_CAPACITY: f64 = 100.0; // Define appropriate capacity value
 
 pub fn construct_initial_solution(context: &Context, rng: &mut impl Rng) -> Solution {

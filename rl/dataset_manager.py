@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -15,9 +16,17 @@ class GeneratedDatasetManager:
 
     def __init__(
         self,
-        generated_root: Path | str = Path("data/generated"),
-        processed_root: Path | str = Path("data/processed/alns"),
+        generated_root: Path | str | None = None,
+        processed_root: Path | str | None = None,
     ) -> None:
+        # The roots default to data/generated and data/processed/alns, overridable through the
+        # PSVPP_GENERATED_ROOT / PSVPP_PROCESSED_ROOT environment variables so that a whole
+        # experiment (training, evaluation, caches) can run on a separate dataset tree without
+        # touching the one earlier experiments read.
+        if generated_root is None:
+            generated_root = os.environ.get("PSVPP_GENERATED_ROOT", "data/generated")
+        if processed_root is None:
+            processed_root = os.environ.get("PSVPP_PROCESSED_ROOT", "data/processed/alns")
         self.generated_root = Path(generated_root)
         self.processed_root = Path(processed_root)
 

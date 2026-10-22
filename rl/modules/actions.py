@@ -182,6 +182,33 @@ class AdaptiveWeightedActionSpace(BaseActionSpace):
         return 0
 
 
+@register_action("adaptive_weighted_v2")
+class AdaptiveWeightedV2ActionSpace(AdaptiveWeightedActionSpace):
+    """adaptive_weighted_v1 plus `first_fit_insertion_v1` as a 4th repair operator.
+
+    Baseline/Kisialiou operator pool of the 2026-10 rerun of Experiment 8: the RL action
+    spaces `op_pair_v2` / `op_triple_v2` / `improvement_chain_v2` offer first-fit insertion,
+    so the non-learned methods get it too (pool = 3 Kisialiou-calibrated destroy operators x
+    4 repair operators). Pass this as --baseline-action-module: the same pool restricts the
+    adaptive baseline and Kisialiou's ALNS (run_kisialiou_episode takes the baseline module).
+    adaptive_weighted_v1 stays unchanged so earlier caches remain reproducible.
+    """
+
+    version = "2.1"
+
+    def __init__(
+        self,
+        destroy_operators: Sequence[str],
+        repair_operators: Sequence[str],
+        improvement_operators: Optional[Sequence[str]] = None,
+        size_bucket: str = "large",
+    ) -> None:
+        super().__init__(destroy_operators, repair_operators, improvement_operators, size_bucket=size_bucket)
+        first_fit = _first(list(repair_operators), "first_fit_insertion_v1")
+        if first_fit is not None and first_fit not in self.repair_operators:
+            self.repair_operators = [*self.repair_operators, first_fit]
+
+
 @register_action("adaptive_weighted_full_v1")
 class AdaptiveWeightedFullActionSpace(BaseActionSpace):
     """Single-action space that triggers the adaptive weighted engine over

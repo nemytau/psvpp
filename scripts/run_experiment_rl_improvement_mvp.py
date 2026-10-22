@@ -25,8 +25,10 @@ if str(REPO_ROOT) not in sys.path:
 from rl.dataset_manager import GeneratedDatasetManager
 from rl.rl_alns_environment import ALNSEnvironment
 from rl.train_alns_rl import train_ppo_agent
+from rl import episode_runner as _episode_runner
 from rl.episode_runner import (
     EpisodeSummary,
+    log_restart,
     _restart_seed,
     _time_to_best,
     _time_to_best_search,
@@ -162,6 +164,26 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Skip this many test datasets per size before taking --datasets-per-size (parallel chunks)",
+    )
+    parser.add_argument(
+        "--dataset-indices",
+        default=None,
+        help=(
+            "Comma-separated indices into the (name-sorted) test datasets of the run's size; "
+            "overrides --dataset-start/--datasets-per-size. Used to split a test set into "
+            "cost-balanced parallel shards."
+        ),
+    )
+    parser.add_argument(
+        "--operator-log-restarts",
+        type=int,
+        default=None,
+        help=(
+            "Write per-iteration operator-usage logs only for the first N restarts of every "
+            "evaluation episode (default: all). Every restart still gets its summary row in "
+            "restart_results.csv. A full large-instance evaluation under the search-CPU-time "
+            "protocol would produce ~250 GB of per-iteration rows."
+        ),
     )
     parser.add_argument("--train-timesteps", type=int, default=30000)
     parser.add_argument("--max-iterations", type=int, default=200)
@@ -451,7 +473,7 @@ def run_policy_episode(
             seed=restart_seed,
             problem_instance_paths=[dataset_path],
             problem_sampling_strategy="round_robin",
-            enable_operator_logging=True,
+            enable_operator_logging=log_restart(restart_idx),
             operator_logging_mode="reinforcement_learning",
             operator_logging_mode_label=mode_label,
             operator_logging_size=size_label,
@@ -790,6 +812,103 @@ def _build_run_manifest(
     }
 
 
+def _write_partial_outputs(out_dir: Path, rows: List[Dict]) -> None:
+    """Refresh results_partial.csv / summary_partial.json after every finished instance, so a long
+    evaluation shows its results as it goes instead of only at the end (the final files are
+    written once all instances are done; summary.json stays the completion marker)."""
+    if not rows:
+        return
+    fields: List[str] = []
+    for row in rows:
+        for key in row:
+            if key not in fields:
+                fields.append(key)
+    tmp = out_dir / "results_partial.csv.tmp"
+    with tmp.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp.replace(out_dir / "results_partial.csv")
+    tmp_summary = out_dir / "summary_partial.json.tmp"
+    tmp_summary.write_text(json.dumps(compute_summary(rows), indent=2), encoding="utf-8")
+    tmp_summary.replace(out_dir / "summary_partial.json")
+
+
+def _provenance_sections(
+    *, args: argparse.Namespace, train_paths: List[str], test_paths: List[str], size_bucket: str
+) -> Dict[str, Any]:
+    """Run-manifest sections that pin down what the numbers mean: cost model, data roots, pools."""
+    import hashlib
+    import os
+
+    import rust_alns_py
+
+    charter, consumption = set(), set()
+    for path in list(train_paths) + list(test_paths):
+        with open(Path(path) / "vessels.csv", newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                charter.add(float(row["cost"]))
+                consumption.add((float(row["fcs"]), float(row["fcw"])))
+
+    generated_root = Path(os.environ.get("PSVPP_GENERATED_ROOT", "data/generated"))
+    design = generated_root / "test_set_v2_design.csv"
+    design_info = None
+    if design.exists():
+        design_info = {"path": str(design.resolve()), "sha256": hashlib.sha256(design.read_bytes()).hexdigest()}
+
+    pool_env = ALNSEnvironment(
+        problem_instance=train_paths[0],
+        max_iterations=1,
+        seed=0,
+        problem_instance_paths=[train_paths[0]],
+        enable_operator_logging=False,
+        action_module=args.baseline_action_module,
+        state_module=args.baseline_state_module,
+        reward_module=args.reward_module,
+        algorithm_mode="baseline",
+        size_bucket=size_bucket,
+    )
+    baseline_pool = {
+        "module": args.baseline_action_module,
+        "destroy_operators": list(getattr(pool_env.action_impl, "destroy_operators", [])),
+        "repair_operators": list(getattr(pool_env.action_impl, "repair_operators", [])),
+        "used_by": "adaptive baseline and Kisialiou ALNS (same pool)",
+    }
+    pool_env.close()
+
+    return {
+        "cost_model": {
+            "currency": "NOK",
+            "charter_cost_per_vessel_week_in_datasets": sorted(charter),
+            "fuel_consumption_t_per_h_sailing_waiting_in_datasets": sorted(consumption),
+            "fuel_price_nok_per_tonne": rust_alns_py.fuel_price_nok_per_tonne(),
+            "sa_initial_temperature": rust_alns_py.default_initial_temperature(),
+            "note": (
+                "sa_initial_temperature = 500 * fuel_price / 650: the original cost model (fuel 650/t, "
+                "charter 150,000/week) was calibrated with 500; temperature is in cost units."
+            ),
+        },
+        "data_roots": {
+            "PSVPP_GENERATED_ROOT": os.environ.get("PSVPP_GENERATED_ROOT"),
+            "PSVPP_PROCESSED_ROOT": os.environ.get("PSVPP_PROCESSED_ROOT"),
+            "generated_root": str(generated_root.resolve()),
+            "test_set_design": design_info,
+        },
+        "baseline_action_space": baseline_pool,
+        "operator_logging": {
+            "operator_log_restarts": args.operator_log_restarts,
+            "note": "None = per-iteration operator-usage rows for every restart; N = first N restarts per episode only",
+        },
+        "dataset_selection": {
+            "dataset_indices": args.dataset_indices,
+            "dataset_start": args.dataset_start,
+            "datasets_per_size": args.datasets_per_size,
+            "num_test_datasets": len(test_paths),
+            "num_train_datasets": len(train_paths),
+        },
+    }
+
+
 def _run_baseline_kisialiou_only(
     *,
     args: argparse.Namespace,
@@ -891,8 +1010,100 @@ def _run_baseline_kisialiou_only(
     print(f"Wrote baseline/Kisialiou cache to {cache_path} ({len(bk_cache_out)} dataset/seed entries).")
 
 
+def compute_summary(rows: List[Dict]) -> Dict[str, Dict]:
+    """Per-mode summary statistics and RL-vs-reference paired records of an evaluation's dataset rows.
+
+    Shared by the end of an evaluation run and by the shard merge of the Experiment 8 rerun queue.
+    """
+    by_mode: Dict[str, List[Dict]] = {}
+    for row in rows:
+        by_mode.setdefault(str(row["mode"]), []).append(row)
+
+    summary: Dict[str, Dict] = {}
+    for mode, mode_rows in by_mode.items():
+        total_improvement_pct = float(sum(float(r["improvement_pct"]) for r in mode_rows))
+        total_wall_runtime = float(sum(float(r["wall_runtime_seconds"]) for r in mode_rows))
+        total_solver_runtime = float(sum(float(r["solver_runtime_seconds"]) for r in mode_rows))
+        improvement_per_wall_second = total_improvement_pct / max(total_wall_runtime, 1e-12)
+        improvement_per_solver_second = total_improvement_pct / max(total_solver_runtime, 1e-12)
+        total_search_runtime = float(sum(float(r.get("search_cpu_seconds") or 0.0) for r in mode_rows))
+        improvement_per_search_second = total_improvement_pct / max(total_search_runtime, 1e-12)
+        baseline_gap_values = [float(r["baseline_gap_pct"]) for r in mode_rows if mode != "baseline"]
+        kisialiou_gap_values = [float(r["kisialiou_gap_pct"]) for r in mode_rows if mode != "kisialiou"]
+        charge = float(sum(float(r.get("decision_charge_seconds") or 0.0) for r in mode_rows))
+        summary[mode] = {
+            "decision_cost_us": float(mode_rows[0].get("decision_cost_us") or 0.0),
+            "decision_charge_share_of_search": charge / max(total_search_runtime, 1e-12),
+            "improvement_pct_per_wall_second": improvement_per_wall_second,
+            "improvement_pct_per_solver_second": improvement_per_solver_second,
+            "improvement_pct_per_search_second": improvement_per_search_second,
+            "mean_baseline_gap_pct": float(np.mean(baseline_gap_values)) if baseline_gap_values else 0.0,
+            "mean_kisialiou_gap_pct": float(np.mean(kisialiou_gap_values)) if kisialiou_gap_values else 0.0,
+            "num_samples": len(mode_rows),
+        }
+
+    def _row_key(row: Dict[str, Any]) -> Optional[tuple[str, int]]:
+        dataset_val = row.get("dataset")
+        seed_val = row.get("seed")
+        if dataset_val is None or seed_val is None:
+            return None
+        try:
+            return str(dataset_val), int(seed_val)
+        except (TypeError, ValueError):
+            return None
+
+    rl_rows = [row for row in rows if str(row.get("mode")) == "rl_improvement_mvp"]
+    baseline_lookup: Dict[tuple[str, int], Dict] = {}
+    kisialiou_lookup: Dict[tuple[str, int], Dict] = {}
+    for row in rows:
+        key = _row_key(row)
+        if key is None:
+            continue
+        mode = str(row.get("mode"))
+        if mode == "baseline":
+            baseline_lookup[key] = row
+        elif mode == "kisialiou":
+            kisialiou_lookup[key] = row
+
+    def _paired_record(comparator_lookup: Dict[tuple[str, int], Dict], key_name: str) -> Dict[str, float]:
+        wins = losses = ties = 0
+        gaps: List[float] = []
+        for row in rl_rows:
+            key = _row_key(row)
+            if key is None:
+                continue
+            other = comparator_lookup.get(key)
+            if other is None:
+                continue
+            rl_best = float(row.get("best_cost", 0.0))
+            other_best = float(other.get("best_cost", 0.0))
+            diff = rl_best - other_best
+            if abs(diff) <= 1e-9:
+                ties += 1
+            elif diff < 0.0:
+                wins += 1
+            else:
+                losses += 1
+            if other_best > 1e-12:
+                gaps.append(((other_best - rl_best) / other_best) * 100.0)
+        total = wins + losses + ties
+        return {
+            f"wins_vs_{key_name}": wins,
+            f"losses_vs_{key_name}": losses,
+            f"ties_vs_{key_name}": ties,
+            f"win_rate_vs_{key_name}": (wins / total) if total > 0 else 0.0,
+            f"median_gap_vs_{key_name}_pct": statistics.median(gaps) if gaps else 0.0,
+        }
+
+    if "rl_improvement_mvp" in summary:
+        summary["rl_improvement_mvp"].update(_paired_record(baseline_lookup, "baseline"))
+        summary["rl_improvement_mvp"].update(_paired_record(kisialiou_lookup, "kisialiou"))
+    return summary
+
+
 def main() -> None:
     args = parse_args()
+    _episode_runner.OPERATOR_LOG_RESTARTS = args.operator_log_restarts
     repo = Path(__file__).resolve().parents[1]
     sizes = parse_size_list(args.sizes if args.sizes else args.size)
     if not sizes:
@@ -933,7 +1144,11 @@ def main() -> None:
     for size in sizes:
         splits = manager.prepare_size(size)
         train_paths.extend(splits.get("train", []))
-        test_paths.extend(splits.get("test", [])[args.dataset_start : args.dataset_start + args.datasets_per_size])
+        all_test = splits.get("test", [])
+        if args.dataset_indices:
+            test_paths.extend(all_test[int(i)] for i in str(args.dataset_indices).split(",") if i.strip())
+        else:
+            test_paths.extend(all_test[args.dataset_start : args.dataset_start + args.datasets_per_size])
 
     if not train_paths or not test_paths:
         raise RuntimeError("Dataset manager returned empty train/test paths")
@@ -958,6 +1173,38 @@ def main() -> None:
     )
 
     if args.baseline_kisialiou_only:
+        ref_command = _build_exact_command()
+        ref_manifest_path = out_dir / "run_manifest.json"
+        ref_manifest: Dict[str, Any] = {
+            "run_id": run_id,
+            "kind": "baseline_kisialiou_reference",
+            "created_at": datetime.now().isoformat(),
+            "command": ref_command,
+            "repo_root": str(repo),
+            "output_dir": str(out_dir),
+            "log_dir": str(log_dir),
+            "cli_args": vars(args),
+            "resolved": {
+                "eval_seeds": eval_seeds,
+                "eval_iteration_cap": eval_iteration_cap,
+                "eval_restart_max_iterations": args.eval_restart_max_iterations,
+                "progress_horizon": progress_horizon,
+                "test_paths": list(test_paths),
+                "runtime_matching": {
+                    "mode": args.eval_runtime_mode,
+                    "reference_restarts": args.eval_runtime_reference_restarts,
+                    "budget": "search CPU time of Kisialiou's reference restarts; baseline (and later RL) get the same",
+                },
+            },
+            "git": _collect_git_metadata(repo),
+            "runtime": _collect_runtime_metadata(),
+        }
+        ref_manifest["resolved"].update(
+            _provenance_sections(args=args, train_paths=list(train_paths), test_paths=list(test_paths), size_bucket=size_bucket)
+        )
+        ref_manifest_path.write_text(json.dumps(ref_manifest, indent=2), encoding="utf-8")
+        _write_command_file(out_dir, ref_command)
+        _write_command_file(log_dir, ref_command)
         _run_baseline_kisialiou_only(
             args=args,
             repo=repo,
@@ -967,6 +1214,8 @@ def main() -> None:
             log_dir=log_dir,
             progress_horizon=progress_horizon,
         )
+        ref_manifest["finished_at"] = datetime.now().isoformat()
+        ref_manifest_path.write_text(json.dumps(ref_manifest, indent=2), encoding="utf-8")
         return
 
     if args.run_eval and not args.recompute_baseline_kisialiou:
@@ -1020,6 +1269,9 @@ def main() -> None:
         training_operator_usage={},
         progress_horizon=progress_horizon,
     )
+    manifest["resolved"].update(
+        _provenance_sections(args=args, train_paths=train_paths, test_paths=test_paths, size_bucket=size_bucket)
+    )
     manifest_path = out_dir / "run_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _write_command_file(out_dir, exact_command)
@@ -1068,6 +1320,8 @@ def main() -> None:
         vec_env.close()
 
     manifest["resolved"]["training_operator_usage"] = _collect_training_operator_usage(log_dir)
+    if not args.run_eval:
+        manifest["finished_at"] = datetime.now().isoformat()
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     if not args.run_eval:
@@ -1490,6 +1744,7 @@ def main() -> None:
             tmp_progress = progress_path.with_suffix(".json.tmp")
             tmp_progress.write_text(json.dumps(progress, indent=2), encoding="utf-8")
             tmp_progress.replace(progress_path)
+            _write_partial_outputs(out_dir, rows)
 
     if not args.skip_cache_copy:
         bk_cache_path = out_dir / "baseline_kisialiou_cache.json"
@@ -1526,89 +1781,7 @@ def main() -> None:
             for line in handle:
                 writer.writerow(json.loads(line))
 
-    by_mode: Dict[str, List[Dict]] = {}
-    for row in rows:
-        by_mode.setdefault(str(row["mode"]), []).append(row)
-
-    summary: Dict[str, Dict] = {}
-    for mode, mode_rows in by_mode.items():
-        total_improvement_pct = float(sum(float(r["improvement_pct"]) for r in mode_rows))
-        total_wall_runtime = float(sum(float(r["wall_runtime_seconds"]) for r in mode_rows))
-        total_solver_runtime = float(sum(float(r["solver_runtime_seconds"]) for r in mode_rows))
-        improvement_per_wall_second = total_improvement_pct / max(total_wall_runtime, 1e-12)
-        improvement_per_solver_second = total_improvement_pct / max(total_solver_runtime, 1e-12)
-        total_search_runtime = float(sum(float(r.get("search_cpu_seconds") or 0.0) for r in mode_rows))
-        improvement_per_search_second = total_improvement_pct / max(total_search_runtime, 1e-12)
-        baseline_gap_values = [float(r["baseline_gap_pct"]) for r in mode_rows if mode != "baseline"]
-        kisialiou_gap_values = [float(r["kisialiou_gap_pct"]) for r in mode_rows if mode != "kisialiou"]
-        charge = float(sum(float(r.get("decision_charge_seconds") or 0.0) for r in mode_rows))
-        summary[mode] = {
-            "decision_cost_us": float(mode_rows[0].get("decision_cost_us") or 0.0),
-            "decision_charge_share_of_search": charge / max(total_search_runtime, 1e-12),
-            "improvement_pct_per_wall_second": improvement_per_wall_second,
-            "improvement_pct_per_solver_second": improvement_per_solver_second,
-            "improvement_pct_per_search_second": improvement_per_search_second,
-            "mean_baseline_gap_pct": float(np.mean(baseline_gap_values)) if baseline_gap_values else 0.0,
-            "mean_kisialiou_gap_pct": float(np.mean(kisialiou_gap_values)) if kisialiou_gap_values else 0.0,
-            "num_samples": len(mode_rows),
-        }
-
-    def _row_key(row: Dict[str, Any]) -> Optional[tuple[str, int]]:
-        dataset_val = row.get("dataset")
-        seed_val = row.get("seed")
-        if dataset_val is None or seed_val is None:
-            return None
-        try:
-            return str(dataset_val), int(seed_val)
-        except (TypeError, ValueError):
-            return None
-
-    rl_rows = [row for row in rows if str(row.get("mode")) == "rl_improvement_mvp"]
-    baseline_lookup: Dict[tuple[str, int], Dict] = {}
-    kisialiou_lookup: Dict[tuple[str, int], Dict] = {}
-    for row in rows:
-        key = _row_key(row)
-        if key is None:
-            continue
-        mode = str(row.get("mode"))
-        if mode == "baseline":
-            baseline_lookup[key] = row
-        elif mode == "kisialiou":
-            kisialiou_lookup[key] = row
-
-    def _paired_record(comparator_lookup: Dict[tuple[str, int], Dict], key_name: str) -> Dict[str, float]:
-        wins = losses = ties = 0
-        gaps: List[float] = []
-        for row in rl_rows:
-            key = _row_key(row)
-            if key is None:
-                continue
-            other = comparator_lookup.get(key)
-            if other is None:
-                continue
-            rl_best = float(row.get("best_cost", 0.0))
-            other_best = float(other.get("best_cost", 0.0))
-            diff = rl_best - other_best
-            if abs(diff) <= 1e-9:
-                ties += 1
-            elif diff < 0.0:
-                wins += 1
-            else:
-                losses += 1
-            if other_best > 1e-12:
-                gaps.append(((other_best - rl_best) / other_best) * 100.0)
-        total = wins + losses + ties
-        return {
-            f"wins_vs_{key_name}": wins,
-            f"losses_vs_{key_name}": losses,
-            f"ties_vs_{key_name}": ties,
-            f"win_rate_vs_{key_name}": (wins / total) if total > 0 else 0.0,
-            f"median_gap_vs_{key_name}_pct": statistics.median(gaps) if gaps else 0.0,
-        }
-
-    if "rl_improvement_mvp" in summary:
-        summary["rl_improvement_mvp"].update(_paired_record(baseline_lookup, "baseline"))
-        summary["rl_improvement_mvp"].update(_paired_record(kisialiou_lookup, "kisialiou"))
+    summary = compute_summary(rows)
 
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -1665,6 +1838,8 @@ def main() -> None:
 
     report_path = out_dir / "report.txt"
     report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+    manifest["finished_at"] = datetime.now().isoformat()
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(f"Run complete: {run_id}")
     print(f"Results: {results_json}")

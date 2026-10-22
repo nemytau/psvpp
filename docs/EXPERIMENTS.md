@@ -582,12 +582,33 @@ wins / losses vs Kisialiou):
 Paired Wilcoxon tests and bootstrap CIs: `output/norm26_analysis/tests_{small,medium}.csv`.
 
 **Findings.**
-1. *Policies collapse to one fixed configuration.* Almost every trained policy plays a single
-   action (switch rate ≈ 0); only the small search-state policy, seed 42, switched (20% of steps).
-   On medium the reference (all three seeds) and all five state variants learned *the same* action,
-   random removal + first-fit + FCR, and are numerically identical to the fixed-configuration
-   control (same seeded search; 19/20 instances identical best cost). RL here acts as automatic
-   *algorithm configuration*, not adaptive control.
+1. *Policies mostly collapse to one fixed configuration; some switch once per restart.* On medium
+   the reference (all three seeds) and all five state variants learned *the same* action, random
+   removal + first-fit + FCR, every step, and are numerically identical to the fixed-configuration
+   control (same seeded search; 19/20 instances identical best cost) — automatic *algorithm
+   configuration* rather than adaptive control. But several policies switch exactly once within a
+   restart, always from a fleet/voyage-reduction phase to another operator
+   (`scripts/analyze_norm2026_switching.py`, output `output/norm26_analysis/switching.txt`; the
+   per-step switch rates of ~0.003 hid this — one switch per 300-step restart):
+   - ALNS score + time, medium (the best medium method): 74% of restarts run Shaw + first-fit +
+     FCR for the first ~11 iterations (median), then random + first-fit + VNR to the end; switching
+     restarts improve 20.5% (median) vs 2.2% for restarts that never switch — 19.2% before the
+     switch, 1.0% after it (medians over switch-once restarts).
+   - All-three-groups state, small, seed 43: 99.9% of restarts run random + first-fit + VNR for
+     ~42 iterations, then random + first-fit + relocation. Only 1 of 1,522 restarts stayed, so
+     there is no "stayed" group; median restart gain 32.4%, of which 26.0% comes in the VNR phase
+     and 0.4% after the switch (94% of restarts gain something after it). For comparison, the
+     small reference policy (relocation throughout, never switches; seeds 42 and 43) gains a median
+     3.6% per restart (analysed 2026-10-15).
+   - Many operators, small, seed 43: 66% run random + greedy + VNR (k=3) on iteration 1, then
+     random + first-fit + relocation (33.3% vs 2.9% improvement; 32.7% before the switch, i.e. in
+     the first iteration, 0.7% after); similar one-switch patterns for
+     best-cost gain, ALNS score and new best on small.
+   Reduce first, then local search — Kisialiou's hand-designed chain order. Association, not
+   causation: a deterministic policy switches when early progress changes its state (for the
+   ALNS score + time policy the trigger is the removal of a vessel — see finding 7). The same
+   pattern appeared in the Experiment 1 follow-up (every small restart started with FCR; restarts
+   that moved on to relocation never stalled).
 2. *State design does not matter on medium* (the policy ignores the state); on small it changes
    which configuration is learned but with large seed-to-seed variation (e.g. instance-only
    1.0299 vs 1.0884), so state effects on small are within seed noise.
@@ -610,9 +631,225 @@ Paired Wilcoxon tests and bootstrap CIs: `output/norm26_analysis/tests_{small,me
    `decision_charge_share_of_search`): highest for policies on the cheapest operators (FCR, VNR) —
    6.2% small solution-only, 2.2–2.6% for the medium FCR policies — and at most 1.2% (mostly
    0.1–0.5%) for policies on relocation or swap.
+7. *The best medium policy learned a state-dependent phase rule: cut cost with FCR until it is
+   ≈18.5% below the restart's start — usually one vessel — then switch to VNR* (analysed
+   2026-10-15). This is the one clear case of adaptive control in Experiment 9 — the switch is
+   triggered by an event in the search, not by the iteration count or the instance size.
+   - **Evidence** (`ALNS score + time`, medium, seed 42; 20,985 restarts on 20 test instances; from
+     the per-iteration operator logs `logs/norm26__reward__alns_score_time_v1__medium__s42/` and the
+     per-restart fleet sizes in `output/norm26__reward__alns_score_time_v1__medium__s42/restart_results.csv`;
+     scripts `output/presentations/NORM2026_HiMolde_files/build/{switch_trigger,fleet_switch}_analysis.py`):
+     - Every restart starts with Shaw + first-fit + FCR. 74% switch once to random + first-fit +
+       VNR and keep it to the end of the restart; 25% never switch; ~1% switch more than once.
+     - **The trigger is a cost ratio, not the fleet.** The rule "switch once the cost is ≥ 18.5%
+       below the restart's starting cost" classifies **100%** of restarts correctly (switched vs
+       stayed); "switch after a vessel is cut" only 88%. The step that crosses 18.5% saves a median
+       **151k** (IQR 149–153k) — one 150k charter — so on most instances the threshold means
+       "a vessel is gone".
+     - Where one vessel is only ~15% of the starting cost (6 of 20 instances: test 01, 09, 12, 16,
+       18, 19), one vessel does not reach the threshold: 46% of the restarts that never switched
+       *did* cut a vessel (their drop stalls at 15.8–17.2%), and the restarts that switched there
+       had cut two. Those instances have the lowest switch shares (0.31–0.84). 37% of all switching
+       restarts switched only after cutting 2+ vessels. Plausibly the policy learned "a vessel ≈
+       18–19% of cost" from the training instances and uses the cost ratio as its proxy.
+     - The reaction is immediate: **67%** switch on the very next step after crossing, 75% within
+       4 steps (95th percentile 28).
+     - Not "switch because no further vessel can be cut": 58% of switching restarts end one vessel
+       above the best-known fleet (minimum over every medium Exp 9 run and method), 41% at it. The
+       non-switching restarts keep running FCR for the whole restart (54% never cut a vessel; 87%
+       end one vessel above the best-known fleet).
+     - Fleet results per restart vs. other methods (same instances): cut ≥ 1 vessel — ALNS score +
+       time 86%, reference RL (always FCR) 67%, Kisialiou 46% (100 long restarts), classical ALNS 6%;
+       reached the best-known fleet — 31%, 11%, 9%, 0.3%.
+     - Consequence for interpretation: the 20.5% vs 2.2% restart-gain gap in finding 1 is mostly the
+       reduction itself — the gain comes before the switch (19.2% before, 1.0% after; medians over
+       switch-once restarts); the switch is a learned reaction, not the cause of the gain.
+   - **How it was achieved** — no hand-coded rule; it emerged from the following setup (only the
+     reward differs from the Exp 8 reference configuration):
+     - *Reward* `alns_score_time_v1`: the classic ALNS score rescaled to new best = 1, better than
+       current = 9/33, accepted worse = 3/33, rejected = 0, minus a search-CPU-time tax of 0.002 per
+       ms (capped at 0.5). The score makes finding a new best (such as a removed vessel) by far the
+       most valuable outcome; the time tax makes cheap operators (FCR ~0.3 ms, VNR, Shaw/random
+       removal, first-fit) preferable to expensive ones (unlimited swap ~160 ms), so the policy
+       can afford thousands of steps and many restarts per search-second.
+     - *State* `features_improvement_v3` (45 features): includes `num_vessels_used`, number of
+       voyages / empty voyages, current and best cost relative to the restart's initial cost,
+       progress, stagnation, SA acceptance signals and the last improvement operator — so a removed
+       vessel is directly visible to the policy (vessel count drops, cost ratio falls by ~19%).
+     - *Action* `op_triple_v2` (48 destroy × repair × improvement triples), *training* PPO
+       (Stable-Baselines3), 200k timesteps, entropy coefficient 0.01, 300-iteration restarts,
+       medium training instances, seed 42; evaluated greedily (deterministic policy) on the 20
+       medium test instances under the equal search-CPU-time budget with the RL decision charge.
+       Commands: `output/norm26__reward__alns_score_time_v1__medium__s42{__train,}/run_command.txt`.
+     - The same state and action with the reference reward (`delta_cost_v9`) collapsed to a single
+       triple (random + first-fit + FCR) for the whole restart, so the reward is what produced the
+       phase behaviour.
+   - **Not yet known:** which state feature(s) the policy actually keys on. The 100% vs 88% fit
+     points to the cost ratio ((initial − best) / initial or best / initial, both in the state)
+     rather than `num_vessels_used`, but the operator logs do not record the observation vector. A
+     replay of the saved model recording the 45-dim state per step plus a small decision tree
+     predicting FCR vs VNR would pin it down. Only one training seed exists for this variant, and
+     the small-instance switches (VNR → relocation) have not been analysed this way.
+   - **Why this does not contradict finding 2** (state does not matter on medium): the state
+     variants were all trained with the reference reward, under which the policy collapses to one
+     triple and ignores its input. Under ALNS score + time the policy *does* use the state — a
+     deterministic policy can only change its action within a restart if its observation changes —
+     so the reward decides whether the state is used at all. State × reward interactions were not
+     tested (one-factor-at-a-time design); state variants under `alns_score_time_v1` are the
+     obvious follow-up.
+8. *The improvement-chain policies rebuilt the reference configuration with idle repeats*
+   (analysed 2026-10-15, `improvement_chain_v2`; RL picks backbone vs. one of 4 improvement
+   operators, the engine's adaptive roulette picks destroy/repair, at most 3 consecutive
+   improvement steps — `--chain-max-consecutive-improvements` default 3).
+   - Medium (seed 42, 12,758 restarts): backbone steps are exactly 25.0% of steps — the policy
+     never chooses the backbone voluntarily, every chain runs to the cap: backbone → X → X → X.
+     Chains repeat one operator: FCR×3 70%, VNR×3 30% (VNR chains 23% of chains in the first half
+     of a restart, 37% in the second). The engine's roulette mostly picks first-fit repair
+     (random + first-fit 26%, worst + first-fit 20%, Shaw + first-fit 9%).
+   - Almost all improvement steps are idle: the solution changes on 1.3% of chain position 1,
+     0.1% of position 2 and 0% of position 3 (FCR/VNR converge in one call). Effective algorithm:
+     adaptive destroy + mostly first-fit, then FCR or VNR once, plus two wasted calls — essentially
+     the reference triple random + first-fit + FCR, hence the close cost (1.0466 vs 1.0355). The
+     repeats are cheap (FCR ~0.3 ms), so they cost throughput, not quality.
+   - Small: seed 42 chains FCR (39.5% of steps) and unlimited swap (32.8%, expensive yet still
+     repeated); seed 43 chains relocation (44.3%) and FCR (30.7%). Best action variant on small
+     (1.0457 vs reference 1.0884).
+   - The reference reward's −1 repeat penalty (`delta_cost_v9`, inherited from v7/v8) *does* fire
+     — but a backbone step is punished harder. Logged rewards (medium, one test instance, ~63k
+     chains): chain position 1 mean +0.006 (median −0.05, the improvement-step tax), positions 2
+     and 3 ≈ −1.05 (repeat penalty), backbone (destroy + repair) steps mean **−1.38** (median
+     −0.12, heavy negative tail: a destroyed-and-repaired candidate is usually worse than the
+     current solution and `delta_cost_v9` charges 30% of that loss, ×10 vs current and ×30 vs
+     best, up to ×2 late in the restart). An idle repeat (−1.05) beats a perturbation (−1.38) on
+     average, so the policy idles until the cap forces the backbone. The time term plays no role
+     here (FCR ≈ 0.3 ms → −0.0015). This is the per-step-reward problem in its clearest form: the
+     perturbation ALNS needs is penalised for its immediate cost, with no credit for the
+     improvement it enables later.
 
 **Caveats.** One training seed per medium variant (the reference's three seeds collapsed
 identically); small results vary strongly between seeds; one eval seed; 20 / 30 instances.
+
+---
+
+## Experiment 8 rerun — setup and launch (2026-10-22)
+
+**Why.** Experiment 8's numbers (locked 2026-09-08) were produced with (1) wall-clock time
+budgets that counted the Python prototype's overhead against RL, (2) baselines whose repair pool
+lacked the first-fit insertion operator RL's action space has, (3) a cost model with a 150,000 NOK
+weekly charter and an unrealistically cheap fuel price, (4) test sets that were 50 draws from one
+configuration per size. The rerun fixes all four and uses one seed (training and evaluation 42).
+Everything is retrained and the baseline/Kisialiou reference regenerated; nothing from Exp 8/9 is
+reused (Exp 8 stays locked as it was).
+
+**What changed (and where).**
+1. *Search-CPU-time budgets, RL charged a native decision cost* — the Exp 9 protocol (section
+   "Timing protocol and RL decision overhead"): every method gets the search CPU time Kisialiou's 5
+   reference restarts needed on that instance; RL is charged 4.64 µs (native forward pass of its
+   45→64→64→48 network, measured) + 2.0 µs (state construction, an estimate; conservative bound 17–38 µs)
+   = 6.64 µs per decision, instead of its measured Python overhead.
+2. *First-fit in both baselines* — new action module `adaptive_weighted_v2` (rl/modules/actions.py):
+   3 Kisialiou-calibrated destroy × 4 repair (deep greedy rank 1, k-regret 2, k-regret 3,
+   `first_fit_insertion_v1`). Passed as `--baseline-action-module`, it restricts the adaptive
+   baseline and Kisialiou's ALNS alike. `adaptive_weighted_v1` is untouched.
+3. *Cost model in NOK* — charter 7 × 250,000 = **1,750,000 per vessel and week**
+   (py_alns/resource/generation_config.yaml, all fleet entries; only vessels used are paid);
+   fuel price **13,500 NOK per tonne** (rust_alns/src/structs/constants.rs; MGO 1,425 USD/t, Ship & Bunker
+   Rotterdam 21 Oct 2026, 2-week range 1,333–1,437, at ≈ 9.5 NOK/USD) instead of 650; consumption
+   unchanged (0.43 / 0.26 t/h). Because the simulated-annealing start temperature is in cost units, it
+   is scaled with the fuel price: 500 × 13,500 / 650 = **10,384.6** (`default_initial_temperature()`,
+   read from the engine by the Python env). Rewards, states and operators use relative quantities
+   (checked), so nothing else depends on the cost scale. Recorded in every run manifest
+   (`resolved.cost_model`).
+4. *Diversified test sets* — scripts/generate_test_set_v2.py: per size a full factorial of
+   **time-window density {0, 25, 50, 75, 100} % × demand/frequency level DF1–DF5 × 2 replicates =
+   50 instances**, each its own configuration (DF1–5 = the parameter points of the train DF
+   configs: small demand + frequent visits → large demand + infrequent; weekly demand per
+   installation ≈ constant). Installation counts spread over the tier's range (small 6–12,
+   medium 12–20, large 20–40) by a Latin-square rank assignment, balanced over both factors (mean
+   count by TW level 28.8–30.8 and by DF level 28.8–30.8 for large); tight window 7–19 throughout. Design
+   table with realised properties: `data/rerun26/generated/test_set_v2_design.csv` (tracked copy: `py_alns/resource/test_set_v2_design.csv`). Train sets are
+   the unchanged 13 configs × 5 per size, regenerated (`generate_datasets.py`). All data lives in a
+   separate tree (`data/rerun26/{generated,processed/alns}`, selected through the
+   `PSVPP_GENERATED_ROOT` / `PSVPP_PROCESSED_ROOT` environment variables) so earlier experiments'
+   data and caches are untouched; `DATA_MANIFEST.json` stores counts and checksums.
+5. *Robustness fixes found while preparing* — (a) the all-tight-window cells with frequent visits are
+   hard for the constructive heuristic on large instances (up to 63% of attempts failed with 14
+   vessels; ~1% of restarts panicked with the 10-attempt limit). **Large fleet raised 14 → 18 vessels
+   for train and test** (zero failed attempts afterwards; on instances where 14 sufficed the search
+   is bit-identical and costs the same CPU time, since unused vessels cost nothing), and the attempt
+   limit raised 10 → 500 as a safety net (the 585 sampled initial solutions are bit-identical to the
+   old build). Medium/small keep 9 vessels. (b) Per-iteration operator logs would be ~130 GB per
+   large RL evaluation under CPU-time budgets; decision 2026-10-22: log **every restart of every
+   size** (expected ≈ 300 GB in total, ≈ 200 GB of it large; range 220–400 GB; SSD has ~700 GB free).
+   Only the fixed-configuration controls on medium/large log their first 20 restarts per instance
+   (a fixed triple carries no information in the per-iteration rows; their restart summaries are
+   complete). `--operator-log-restarts N` is the switch. The queue starts no new task while the SSD has
+   less than 120 GB free (running tasks continue, the queue resumes by itself when space is freed).
+
+**Jobs** (`scripts/run_exp8_rerun.py`; one process each; seed 42; PPO 200k steps, ent_coef 0.01,
+ph300, `op_triple_v2` / `features_improvement_v3`):
+reference chunks (Kisialiou + adaptive baseline, cost-balanced slices of the 50 test instances) →
+trainings (`main` = `delta_cost_v9`, the Exp 8 reward; `alt` = `alns_score_time_v1`, Exp 9's best
+medium reward) → evaluations of every model on all 50 instances (cost-balanced shards, merged) →
+fixed-configuration controls (random removal + first-fit + FCR on every size, + relocation on
+small; RL's collapsed triples without RL). The queue keeps exactly 4 CPU-bound processes busy
+whenever a reference/evaluation task runs (CPU time of fixed work depends on load: 2.37 s alone vs
+~3.9 s with 4 jobs), and logs the CPU time of a fixed probe workload every 30 min
+(`logs/rerun26_queue/speed_probe.csv`) to document machine-speed drift.
+
+**Outputs and manifests.** Every task writes the usual `run_manifest.json` (git state incl.
+untracked files, CLI args, resolved paths, cost model, data roots, baseline operator pool, logging
+policy, timestamps), `run_command.txt`, results/summary/report and its operator-usage and training
+logs (`output/rerun26__<tag>[__train|__shNN]/`, `logs/rerun26__<tag>.../`); merged evaluations get
+`merge manifest` + combined results; the queue writes `output/rerun26__QUEUE_MANIFEST.json` (full
+plan, commands, predictions, outcomes), `RERUN26_STATUS.md`, `logs/rerun26_queue/events.log`.
+
+**Progress is written steadily, not at the end.** Reference chunks append every finished instance to
+their cache part. Evaluation shards write, after **every finished instance**, `partial_rows.jsonl`,
+`partial_restart_rows.jsonl`, `progress.json`, `results_partial.csv` and `summary_partial.json`
+(`summary.json` appears only when the shard is complete); operator-usage logs stream per restart.
+Trainings write SB3's `progress.csv` / TensorBoard events continuously, a model checkpoint every 10k
+steps (`output/.../model/checkpoints/`) and refresh `training_summary.txt`, `training_costs.csv` and
+`training_progress.json` every 10k steps. The queue rewrites `RERUN26_STATUS.md` every minute: running
+tasks with progress, SSD free space, and a **results-so-far table per evaluation job** (mean
+ratio-to-best of policy / baseline / Kisialiou over the instances finished so far, W/T/L).
+
+**Cost-model consistency check** (1 Kisialiou restart on 14 of the new instances, all three sizes,
+after the cost change): charter is 81–87% of total cost both in the initial and the best solutions
+(fuel 13–19%; before the change ≈ 89%). By construction fuel can never rival the charter per vessel:
+a vessel sailing non-stop for a week burns 0.43 t/h × 168 h × 13,500 = 0.98 M NOK, 56% of the
+1.75 M charter, and real solutions use a vessel only part of the week. One vessel more or less
+(1.75 M) is still worth ≈ 300 h of sailing fuel, so fleet size dominates the objective as before.
+
+**Predicted runtime** (`python scripts/run_exp8_rerun.py --list`; model calibrated on Exp 8 caches,
+Exp 9's queue timings and Kisialiou runs on 10 of the new instances under the 4-process load; the
+measured/predicted ratio was 0.7–1.6 per instance, mean ≈ 1.3 for medium/large, which is included):
+
+| process-hours, 4-process load | references | train main | eval main | controls | train ALNS-score+time | eval ALNS-score+time | total |
+|---|---|---|---|---|---|---|---|
+| small | 2 | 0.3 | 1 | 5 | 0.6 | 1 | 10 |
+| medium | 11 | 1 | 20 | 13 | 1 | 12 | 58 |
+| large | 64 | 8 | 87 | 61 | 10 | 56 | 286 |
+| all | 77 | 9 | 109 | 79 | 11 | 69 | 354 |
+
+Wall-clock on 4 workers (list scheduler, required work first, optional work last; range =
+predictions ×0.8 / ×1.4): required part (references, main models, controls) **≈ 2.9 days**
+(2.3–4.0); with the ALNS-score+time model on small and medium ≈ 3.0 days; with it on all three
+sizes **≈ 4.0 days** (3.2–5.6), the large ALNS-score+time evaluation being the last, cuttable tail.
+The large test instances dominate (DF1/DF2 cells with 80–100 visits ≈ 70% of the large time); the
+installation count of large DF1/DF2 was capped at 28 for this reason (uncapped: visits up to 140,
+≈ 2× the large time).
+
+**Launch command** (as run on 2026-10-22, with the ALNS-score+time model on all sizes):
+
+```bash
+nohup caffeinate -is bash -c 'for i in 1 2 3 4 5; do python scripts/run_exp8_rerun.py --workers 4 \
+    --alt-sizes small,medium,large && break; sleep 120; done' > logs/rerun26_queue/queue.log 2>&1 &
+python scripts/run_exp8_rerun.py --status      # or read RERUN26_STATUS.md
+```
+(the runner is resumable and adopts tasks that are still running, so the retry loop and a manual
+re-launch are safe; to stop everything: `pkill -f run_exp8_rerun.py; pkill -f run_experiment_rl_improvement_mvp.py`).
+
 
 ---
 

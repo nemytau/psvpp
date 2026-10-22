@@ -36,8 +36,9 @@ impl ProblemData {
     pub fn fcw(&self) -> f64 {
         0.26
     }
-    pub fn lng_cost(&self) -> f64 {
-        650.0
+    /// Fuel price in NOK per tonne (see `constants::FUEL_PRICE_NOK_PER_TONNE`).
+    pub fn fuel_price(&self) -> f64 {
+        crate::structs::constants::FUEL_PRICE_NOK_PER_TONNE
     }
     pub fn generate_visits(&self) -> Vec<Visit> {
         let mut visits = Vec::new();
