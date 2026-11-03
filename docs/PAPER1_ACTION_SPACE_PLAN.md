@@ -815,6 +815,11 @@ retraining — this only needs new datasets + eval runs, not new PPO training.
 
 ## 17. TODO — old-pool reference ablation on Experiment 10's instances (prepared 2026-11-03, NOT RUN: waiting for a free PC)
 
+> **This is the frozen branch `exp10-legacy-horizon`** (code of Experiment 10, engine horizon 1000 for 300-iteration restarts). The ablation
+> below is meant to be run from here, from the separate checkout `../psvpp-exp10-legacy` (a git worktree of this repository whose `data`, `logs`,
+> `output` and `runs` are the same SSD folders). The main line `feature/rl-alns-improvements` has the horizon fixed (commit `ede94ee`) and is for
+> future runs; results from the two lines are not comparable.
+
 **Why**: in Experiment 10 (the Experiment 8 rerun; `docs/EXPERIMENTS.md`, "Experiment 10") RL stopped beating the references.
 Per dataset (ratio-to-best; denominator = best of adaptive / Kisialiou / RL main on the dataset, 50 datasets per size,
 each experiment on its own instances):
