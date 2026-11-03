@@ -37,7 +37,43 @@ pub fn cool_down(temperature: f64, theta: f64, max_iterations: usize) -> f64 {
     if max_iterations == 0 {
         temperature
     } else {
-        let mu = 1.0 - theta / (max_iterations as f64);
+        // A horizon shorter than theta (diagnostic runs of a few iterations) would give a negative rate.
+        let mu = (1.0 - theta / (max_iterations as f64)).max(0.0);
         temperature * mu
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_full_horizon_cools_to_about_exp_minus_theta() {
+        // Kisialiou et al. (2018), section 3.8: mu = 1 - theta / rho per iteration, so after rho iterations
+        // T = T0 * (1 - theta / rho)^rho ~ T0 * exp(-theta). The engine must be given the real restart length rho.
+        let (theta, rho) = (7.0_f64, 300_usize);
+        let mut t = 1000.0;
+        for _ in 0..rho {
+            t = cool_down(t, theta, rho);
+        }
+        let expected = 1000.0 * (1.0 - theta / rho as f64).powi(rho as i32);
+        assert!((t - expected).abs() < 1e-9 * expected);
+        assert!(t / 1000.0 > 0.0008 && t / 1000.0 < 0.0011, "got {}", t / 1000.0);
+    }
+
+    #[test]
+    fn a_300_iteration_restart_against_a_1000_horizon_ends_hot() {
+        // The pre-2026-11-03 behaviour (Experiments 8-10): horizon 1000 for 300-iteration restarts.
+        let mut t = 1000.0;
+        for _ in 0..300 {
+            t = cool_down(t, 7.0, 1000);
+        }
+        assert!(t / 1000.0 > 0.12 && t / 1000.0 < 0.13, "got {}", t / 1000.0);
+    }
+
+    #[test]
+    fn cooling_rate_never_goes_negative_for_a_very_short_horizon() {
+        assert_eq!(cool_down(100.0, 7.0, 2), 0.0);
+        assert!(cool_down(100.0, 7.0, 7) >= 0.0);
     }
 }

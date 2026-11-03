@@ -36,6 +36,10 @@ Resumable at every level: finished reference chunks, trainings, evaluation shard
 never redone; an interrupted evaluation shard / reference chunk resumes after its last finished
 instance. A failed task is retried once.
 
+Engine horizon: Experiment 10 ran 300-iteration restarts against an engine horizon of 1000 (cooling schedule and aggressive phase).
+Since 2026-11-03 the horizon is the restart length by default, so a new run of this queue is NOT comparable with Experiment 10;
+the old-pool ablation sets PSVPP_ENGINE_HORIZON=1000 to stay comparable.
+
 Old-pool ablation (--oldpool-ablation, 2026-11-03): only the reference chunks, with the baselines'
 ORIGINAL repair pool (--baseline-action-module adaptive_weighted_v1, no first-fit), on Experiment 10's own
 150 test instances, engine, cost model, budget definition and 4-process load. It isolates what
@@ -106,6 +110,9 @@ SMOKE = False
 REFS_ONLY = False  # old-pool ablation: reference chunks only (no training / evaluation / controls)
 RERUN_EVENTS = REPO / "logs" / "rerun26_queue" / "events.log"  # observed chunk durations of Experiment 10 (ETA)
 SIZE_RANK = {"small": 0, "medium": 1, "large": 2}  # reference-only queue: cheap sizes (and their results) first
+# Engine iteration horizon of Experiment 10 (see rl/rl_alns_environment.py, ENGINE_HORIZON_ENV): it ran 300-iteration restarts
+# against a hard-coded 1000. The old-pool ablation must reproduce that engine to stay comparable with it.
+LEGACY_ENGINE_HORIZON = "1000"
 RERUN_CACHE_DIR = REPO / "runs" / "baseline_kisialiou_cache" / "rerun26_v1"  # Experiment 10's (first-fit) references
 DATA_CHECK: Dict = {}   # result of verify_data_manifest() (ablation)
 ENGINE_INFO: Dict = {}  # fingerprint of the installed Rust extension (ablation)
@@ -164,6 +171,7 @@ def task_env(run_id: str) -> Dict[str, str]:
         RL_RUN_ID=run_id,
         PSVPP_GENERATED_ROOT=str(GENERATED),
         PSVPP_PROCESSED_ROOT=str(PROCESSED),
+        **({"PSVPP_ENGINE_HORIZON": LEGACY_ENGINE_HORIZON} if REFS_ONLY else {}),
     )
 
 
@@ -971,6 +979,8 @@ def write_queue_manifest(tasks: List[Task], args: argparse.Namespace, data: Dict
                            "CPU time is the budget of the plain adaptive ALNS baseline (no improvement operators) on that instance. "
                            "No reference to the RL runs: the old pool defines its own (shorter or longer) budget",
             "constant_load": f"{args.workers} busy processes whenever a reference chunk runs",
+            "engine_horizon": f"PSVPP_ENGINE_HORIZON={LEGACY_ENGINE_HORIZON}: the horizon Experiment 10 ran with (300-iteration restarts "
+                              "against 1000); the engine takes the restart length by default since 2026-11-03",
             "seed": SEED, "n_test_per_size": N_TEST, "operator_log_restarts": OPERATOR_LOG_RESTARTS,
             "compare_with": {"first_fit_references": str(RERUN_CACHE_DIR), "rl_models": "output/rerun26__main__delta_cost_v9__<size>__s42",
                              "analysis": "python scripts/analyze_oldpool_ablation.py"},

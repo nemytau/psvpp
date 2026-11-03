@@ -4,7 +4,7 @@ The PyO3 interface now supports configurable parameters for fine-tuning the ALNS
 
 ## Updated Interface
 
-### `initialize_alns(problem_instance, seed, temperature=None, theta=None, weight_update_interval=None, aggressive_search_factor=None)`
+### `initialize_alns(problem_instance, seed, temperature=None, theta=None, weight_update_interval=None, aggressive_search_factor=None, algorithm_mode=None, kisialiou_improvement_sequence=None, max_iterations=None)`
 
 **Parameters:**
 - `problem_instance` (str): Problem instance name (e.g., "SMALL_1")
@@ -13,6 +13,7 @@ The PyO3 interface now supports configurable parameters for fine-tuning the ALNS
 - `theta` (float, optional): Cooling factor for temperature decay (default: 0.9) 
 - `weight_update_interval` (int, optional): Iterations between operator weight updates (default: 10)
 - `aggressive_search_factor` (float, optional): Fraction of iterations after which strict acceptance starts (default: 0.85)
+- `max_iterations` (int, optional): Iteration horizon of the engine = the length of one restart (default: 1000, the historical value). It sets the cooling rate (`mu = 1 - theta / max_iterations` per iteration, so a full restart ends at `T0 * exp(-theta)`) and the start of the aggressive phase (`aggressive_search_factor * max_iterations`). Step-driven callers must pass their real restart length; `rl/rl_alns_environment.py` does (`PSVPP_ENGINE_HORIZON` overrides it). Experiments 8-10 ran 300-iteration restarts against the default 1000.
 
 **Backward Compatibility:**
 The old interface `initialize_alns(problem_instance, seed)` still works with default values.
@@ -27,7 +28,7 @@ The old interface `initialize_alns(problem_instance, seed)` still works with def
 ### Theta (Cooling Factor)
 - **Higher values** (e.g., 0.99): Slower cooling, maintains exploration longer
 - **Lower values** (e.g., 0.8): Faster cooling, transitions to exploitation sooner
-- **Formula**: new_temperature = old_temperature * theta^iteration
+- **Formula** (as implemented in `alns/acceptance.rs`, Kisialiou et al. 2018, section 3.8): every iteration `temperature *= 1 - theta / max_iterations`
 
 ### Weight Update Interval
 - **Lower values** (e.g., 3): Frequent weight updates, operators adapt quickly

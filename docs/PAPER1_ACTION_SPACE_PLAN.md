@@ -843,7 +843,7 @@ infeasible candidates) and RL's own generalisation. The ablation holds all of th
 | methods | Kisialiou ALNS (5 restarts x 300 iterations) and the plain adaptive ALNS (no improvement operators) for Kisialiou's search CPU time — the original reference protocol, no reference to the RL runs |
 | pool | `--baseline-action-module adaptive_weighted_v1`: 3 destroy x 3 repair (greedy rank 1, k-regret-2, k-regret-3), **no first-fit** (Experiment 10 used `adaptive_weighted_v2`) |
 | instances | Experiment 10's 150 test instances (`data/rerun26`, small/medium/large x 50), seed 42; data hashes verified against `data/rerun26/DATA_MANIFEST.json` before the run |
-| engine / cost model | the installed `rust_alns_py` build of 2026-10-22 20:11 (sha256 recorded in the manifest, the launcher refuses a different build), charter 1.75M NOK/week, fuel 13,500 NOK/t, SA T0 10,384.6 |
+| engine / cost model | the engine of Experiment 10 including its horizon: the runs set `PSVPP_ENGINE_HORIZON=1000` (300-iteration restarts against a horizon of 1000; since the fix of 2026-11-03 the default is the restart length). Needs the rebuilt extension (`cd rust_alns && maturin develop --release`); the smoke test checks that two Kisialiou results of the pre-fix build are reproduced exactly. Charter 1.75M NOK/week, fuel 13,500 NOK/t, SA T0 10,384.6 |
 | load | exactly 4 busy processes (4 workers + fillers) as in Experiment 10, `caffeinate -is`; the PC must otherwise be idle for the whole run |
 | chunks | Experiment 10's 19 reference chunks (small 2, medium 5, large 12), run small -> medium -> large so the first results arrive after ~40 min |
 | logs | full per-iteration operator logs for every restart (Experiment 10's references needed ~5 GB in total) |
@@ -882,6 +882,11 @@ per dataset with a named denominator, plus the same comparisons at equal compute
 **Early signal (2 small instances from the first smoke run, 2026-11-03; anecdotal)**: old-pool Kisialiou ended at the same cost as
 first-fit Kisialiou (ratios 1.0004 and 1.0012) while using 19-35% less CPU; old-pool adaptive ALNS ended 1.2-2.7% above the first-fit
 one while also getting less CPU. Two TW0/DF1 instances only.
+
+**After the engine-horizon fix (2026-11-03)**: the ablation above stays valid because it runs with the old horizon. The fix itself raises a new
+open question that needs its own experiment: how much the corrected schedule (a 300-iteration restart now cools to 0.1% of T0 and spends its last 15%
+in the aggressive phase) changes the numbers of Experiment 10 — references and RL alike. That would be a new experiment (references regenerated, models
+retrained on the corrected dynamics); not planned in detail yet.
 
 **Status**: prepared, not run. `scripts/run_exp8_rerun.py --oldpool-ablation` (queue mode; reuses Experiment 10's cost-balanced chunks,
 filler load, manifests and status), `scripts/analyze_oldpool_ablation.py`, `scripts/run_oldpool_ablation.sh` are written and

@@ -5,7 +5,10 @@
 # What it runs: Kisialiou ALNS (5 restarts x 300 iterations) and the plain adaptive ALNS (same CPU time, no improvement
 # operators) with the ORIGINAL repair pool (adaptive_weighted_v1: greedy rank 1, k-regret-2, k-regret-3; no first-fit
 # insertion) on the 150 test instances of the Experiment 10 (data/rerun26: small, medium, large x 50), seed 42, with
-# the same engine build, cost model and 4-process load as Experiment 10's references. Nothing else: no training, no RL runs.
+# the same engine, cost model and 4-process load as Experiment 10's references (the engine runs with horizon 1000 via
+# PSVPP_ENGINE_HORIZON, as Experiment 10 did; the default since 2026-11-03 is the restart length). Nothing else: no training, no RL runs.
+# The Rust extension must be built from the horizon fix (`cd rust_alns && maturin develop --release`); the smoke test checks that
+# it reproduces two Kisialiou results of the pre-fix build exactly.
 #
 # The run measures CPU time, so the PC must be otherwise IDLE and awake (on AC power) for the whole run: about 12 hours
 # (range 9-14 h) with 4 busy processes. Close browsers, IDEs and other experiments first. Start it from a normal Terminal;
@@ -30,8 +33,6 @@ RUNNER=scripts/run_exp8_rerun.py
 QUEUE_DIR=logs/rerun26oldpool_queue
 STATUS=RERUN26OLDPOOL_STATUS.md
 WORKERS=4
-# rust_alns_py build Experiment 10 used (built 2026-10-22 20:11, before Experiment 10 started); a different build makes the comparison invalid
-ENGINE_SHA=7ae63d345331b9013721406eb3b629ce490f4a0d71354837bb667953cd15d2df
 MIN_FREE_GB=120
 MIN_IDLE_PCT=90
 
@@ -83,20 +84,23 @@ check_machine() {
     top -l 2 -s 1 -n 6 -o cpu -stats pid,command,cpu | awk '/^PID/ { blk = "" } { blk = blk $0 "\n" } END { printf "%s", blk }'
     soft "the machine is only ${idle}% idle (need >= ${MIN_IDLE_PCT}%): CPU-time budgets are only comparable on an idle machine"
   fi
+}
 
-  local sha
-  sha=$("$PY" -c 'import glob,hashlib,os,rust_alns_py as r; f=sorted(glob.glob(os.path.join(os.path.dirname(r.__file__),"*.so")))[0]; print(hashlib.sha256(open(f,"rb").read()).hexdigest())' 2>/dev/null || true)
-  if [ "$sha" = "$ENGINE_SHA" ]; then
-    say "engine: Experiment 10's build (${sha:0:12})"
-  else
-    soft "the installed rust_alns_py (${sha:0:12}) is not Experiment 10's build (${ENGINE_SHA:0:12}); the comparison with Experiment 10 would be invalid"
-  fi
+check_engine() {
+  # initialize_alns must take the restart length (horizon fix of 2026-11-03); the runs then use PSVPP_ENGINE_HORIZON=1000
+  # like Experiment 10. The smoke test verifies that this reproduces the pre-fix build exactly.
+  local d
+  d=$(ls -d data/rerun26/processed/alns/small/test/*/ | head -1)
+  "$PY" -c 'import sys, rust_alns_py as r; r.RustALNSInterface().initialize_alns(sys.argv[1], 42, max_iterations=300)' "${d%/}" > /dev/null 2>&1 \
+    || fail "rust_alns_py is older than the engine-horizon fix (initialize_alns takes no max_iterations); rebuild it: cd rust_alns && maturin develop --release"
+  say "engine: takes the restart length as horizon; this run sets PSVPP_ENGINE_HORIZON=1000 like Experiment 10"
 }
 
 check() {
   say "== preflight $(date '+%F %T')"
   check_storage
   check_machine
+  check_engine
   check_data
   say "git: $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD); uncommitted in scripts/rl/rust_alns/py_alns: $(git status --porcelain scripts rl rust_alns py_alns | awk '{print $2}' | tr '\n' ' ')"
   say "== preflight ok"
@@ -122,6 +126,17 @@ smoke() {
   [ -s output/rerun26oldpoolsmoke__QUEUE_MANIFEST.json ] || fail "smoke: the queue manifest is missing"
   grep -q "adaptive_weighted_v1" "${out}__c01/run_command.txt" || fail "smoke: the chunk command does not use adaptive_weighted_v1"
   grep -q "adaptive_weighted_v1" "$out/results.csv" || fail "smoke: results.csv does not record the old pool"
+  # Kisialiou's search is deterministic given the seed: these two results come from the first smoke run of 2026-11-03 on the pre-fix
+  # build (horizon 1000). A different value means the engine horizon or the engine itself differs from Experiment 10's.
+  "$PY" - "$out/results.csv" <<'PYEOF' || fail "smoke: Kisialiou does not reproduce the pre-fix build's results (engine horizon or engine changed)"
+import csv, sys
+EXPECT = {"small_test_tw000_df1_01": 4022340.6655561617, "small_test_tw000_df1_02": 4125536.54962781}
+got = {r["dataset"]: float(r["best_cost"]) for r in csv.DictReader(open(sys.argv[1])) if r["mode"] == "kisialiou"}
+bad = {d: (got.get(d), v) for d, v in EXPECT.items() if got.get(d) is None or abs(got[d] - v) > 1e-6 * v}
+if bad:
+    print("got / expected:", bad)
+    sys.exit(1)
+PYEOF
   say "smoke: ok -- dataset, mode, initial cost, best cost, search CPU s, restarts, vessels:"
   cut -d, -f1,4,6,7,9,13,15 "$out/results.csv"
 }

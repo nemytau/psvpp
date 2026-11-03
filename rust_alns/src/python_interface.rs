@@ -12,6 +12,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // Global flag to track if logging has been initialized for Python interface
 static PYTHON_LOGGING_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+/// Iteration horizon of the engine when the Python caller does not give one (`initialize_alns(max_iterations=...)`).
+/// Historical default: Experiments 8-10 ran 300-iteration restarts against it. New callers pass their restart length.
+const DEFAULT_ENGINE_HORIZON: usize = 1000;
+
 fn metrics_to_pydict(py: Python<'_>, metrics: &ALNSMetrics) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     let solution_dict = PyDict::new(py);
@@ -287,7 +291,8 @@ impl RustALNSInterface {
         weight_update_interval=None,
         aggressive_search_factor=None,
         algorithm_mode=None,
-        kisialiou_improvement_sequence=None
+        kisialiou_improvement_sequence=None,
+        max_iterations=None
     ))]
     fn initialize_alns(
         &mut self,
@@ -300,6 +305,7 @@ impl RustALNSInterface {
         aggressive_search_factor: Option<f64>,
         algorithm_mode: Option<&str>,
         kisialiou_improvement_sequence: Option<Vec<String>>,
+        max_iterations: Option<usize>,
     ) -> PyResult<PyObject> {
         // Initialize logging for Python interface (only if not already initialized)
         if !PYTHON_LOGGING_INITIALIZED.load(Ordering::Relaxed) {
@@ -320,7 +326,15 @@ impl RustALNSInterface {
         let theta = theta.unwrap_or(0.9);
         let weight_update_interval = weight_update_interval.unwrap_or(10);
         let aggressive_search_factor = aggressive_search_factor.unwrap_or(0.85);
-        let max_iterations = 1000; // Default max iterations
+        // The iteration horizon (rho) is the length of one restart: it sets the cooling rate
+        // mu = 1 - theta / rho and the start of the aggressive phase (aggressive_search_factor * rho).
+        // Step-driven callers must pass their real restart length; it used to be fixed at 1000, which
+        // left 300-iteration restarts with a schedule that only cooled to 12% of T0 and an aggressive
+        // phase that was never reached (Experiments 8-10).
+        let max_iterations = max_iterations.unwrap_or(DEFAULT_ENGINE_HORIZON);
+        if max_iterations == 0 {
+            return Err(PyValueError::new_err("max_iterations must be at least 1"));
+        }
 
         let algorithm_mode = algorithm_mode
             .map(|mode| mode.to_ascii_lowercase())

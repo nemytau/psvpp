@@ -895,6 +895,21 @@ def _provenance_sections(
             "test_set_design": design_info,
         },
         "baseline_action_space": baseline_pool,
+        "engine_horizon": {
+            "PSVPP_ENGINE_HORIZON": os.environ.get("PSVPP_ENGINE_HORIZON"),
+            "effective_iterations": (
+                int(os.environ["PSVPP_ENGINE_HORIZON"])
+                if os.environ.get("PSVPP_ENGINE_HORIZON")
+                else "the restart length: --max-iterations in training, --eval-restart-max-iterations in evaluation"
+            ),
+            "restart_length_training": args.max_iterations,
+            "restart_length_evaluation": args.eval_restart_max_iterations,
+            "note": (
+                "iterations the engine's cooling schedule (mu = 1 - theta / horizon) and aggressive phase "
+                "(from 0.85 x horizon) are defined for. Experiments 8-10 ran 300-iteration restarts against a hard-coded "
+                "horizon of 1000 (PSVPP_ENGINE_HORIZON=1000 reproduces them); since 2026-11-03 the default is the restart length."
+            ),
+        },
         "operator_logging": {
             "operator_log_restarts": args.operator_log_restarts,
             "note": "None = per-iteration operator-usage rows for every restart; N = first N restarts per episode only",

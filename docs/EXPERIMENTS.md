@@ -739,7 +739,9 @@ reading Exp 10 against Exp 8 and Exp 9: **first-fit insertion (`first_fit_insert
 baselines**, the adaptive ALNS and Kisialiou's ALNS (action module `adaptive_weighted_v2` instead of `adaptive_weighted_v1`), so the
 baselines now have the operator that RL's action space already had. The other changes are search-CPU-time budgets with a fixed RL
 decision charge, a NOK cost model (charter 1.75M per vessel and week, fuel 13,500 NOK/t), and 50 diversified test instances per
-size. Exp 10 numbers are therefore not comparable with Exp 8/9 without these differences in mind. Whether first-fit explains the
+size. Exp 10 numbers are therefore not comparable with Exp 8/9 without these differences in mind. Like Exp 8 and 9,
+it ran 300-iteration restarts against the engine's hard-coded horizon of 1000 (fixed on 2026-11-03, see the design note
+"Restarts are independent …"); runs after the fix are not comparable with it unless `PSVPP_ENGINE_HORIZON=1000` is set. Whether first-fit explains the
 drop in RL's lead is the open question tested by the old-pool ablation (TODO, `docs/PAPER1_ACTION_SPACE_PLAN.md` section 17).
 
 **Naming.** Earlier called "the Experiment 8 rerun". On disk it keeps its original identifiers so that manifests, caches and
@@ -948,7 +950,7 @@ budget so their restart cost is visible in the metric the policy is scored on.
 
 Status: idea only, not implemented.
 
-### Restarts are independent; cooling and aggressive phase are set for 1000 iterations, restarts run 300 (audited 2026-11-03)
+### Restarts are independent (audited 2026-11-03); the engine horizon was 1000 for 300-iteration restarts (fixed 2026-11-03)
 
 **Restart independence (checked, no problem).** Every restart gets a completely fresh engine: the
 Python environment's `reset()` calls `initialize_alns`, which builds a new `ALNSEngine`
@@ -964,15 +966,31 @@ restart does not jump to an earlier restart's best (e.g. a restart starting at 5
 later Kisialiou restarts re-find an earlier restart's best cost, at iterations 1–295 (median 117),
 as re-discovery by search, not as an immediate jump.
 
-**Open question: horizon of the cooling schedule and of the aggressive phase.** The Python-facing
-`initialize_alns` hard-codes the engine's `max_iterations` to 1000 (`python_interface.rs`) and the
-environment never changes it, while all evaluations (and the ph300 training) run restarts of 300
-iterations. Consequences, identical for every method and every experiment: (a) with theta = 7
-the cooling rate is 1 − 7/1000 per iteration, so a 300-iteration restart ends at 12% of T0
-(logged: 10,385 → 1,262) instead of the ≈ 0.1% a full 1000-iteration schedule reaches;
-(b) the aggressive phase (from 0.85 × 1000 = iteration 850: non-improving iterations reset the
-current solution to the restart's best) is never reached, which the logs confirm (share of
-iterations with current = best: 0.47–0.59 in iterations 1–254, 0.53 in 255–300). Both
-apply to every method alike (they may still favour some more than others), and "Kisialiou" here is the
-first 30% of its schedule, without its final intensification phase. Not decided whether this is intended; changing it would
-change every number, so it needs its own experiment (e.g. engine horizon = restart length).
+**Engine horizon of the cooling schedule and of the aggressive phase — fixed 2026-11-03.** The
+Python-facing `initialize_alns` hard-coded the engine's `max_iterations` (its horizon rho) to 1000 and
+the environment never changed it, while all evaluations (and the ph300 training) run restarts of 300
+iterations. Consequences for Experiments 8, 9 and 10, identical for every method: (a) with theta = 7
+the cooling rate is 1 − 7/1000 per iteration, so a 300-iteration restart ended at 12% of T0 (logged:
+10,385 → 1,262) instead of the ≈ 0.1% of a full schedule; (b) the aggressive phase (from
+0.85 × 1000 = iteration 850: non-improving iterations reset the current solution to the restart's
+best) was never reached, which the logs confirm (share of iterations with current = best: 0.47–0.59
+in iterations 1–254, 0.53 in 255–300). Both applied to every method alike (they may still favour some
+more than others), and "Kisialiou" in those experiments is the first 30% of its schedule, without its
+final intensification phase.
+
+The fix: `initialize_alns(..., max_iterations=...)` takes the horizon (default stays 1000 for other
+callers), and `ALNSEnvironment` passes its restart length (`max_iterations`: `--max-iterations` in
+training, `--eval-restart-max-iterations` in evaluation). From now on a 300-iteration restart cools to
+T0·e^−7 (≈ 0.1%) and spends its last 15% (iterations 255–300) in the aggressive phase. Consequences:
+**results from before the fix are not comparable with results after it** (Experiments 8–10 stay as
+recorded; a run after the fix needs its own references); policies trained before the fix were
+trained on the old dynamics. `PSVPP_ENGINE_HORIZON=1000` restores the old behaviour
+(the old-pool ablation uses it to stay comparable with Experiment 10); every run manifest records the
+horizon (`resolved.engine_horizon`). The extension must be rebuilt (`cd rust_alns && maturin develop
+--release`); an older build makes the environment stop with an error that says so. Regression test:
+`tests/test_engine_horizon.py` (5 tests, a few seconds; Rust unit tests for the cooling rate are in `alns/acceptance.rs`).
+Checked on `small_test_tw000_df1_02`, Kisialiou, restart 0: with `PSVPP_ENGINE_HORIZON=1000` the new build reproduces
+Experiment 10 bit for bit (temperature 10,311.9 → 1,262.3, best 4,127,926.05); with the restart length as horizon the temperature
+runs 10,142.3 → 8.7 and the current solution equals the best one in all 46 iterations 255–300 (old horizon: 0 of 46). Not yet measured: how much the corrected schedule changes the
+numbers (cooler restarts accept fewer worsening moves, so the search is greedier, and the last 15% of
+every restart continues from the restart's best).

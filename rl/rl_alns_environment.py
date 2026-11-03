@@ -7,6 +7,7 @@ library, allowing RL agents to learn optimal operator selection strategies.
 
 import inspect
 import logging
+import os
 from collections import deque
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
@@ -32,6 +33,11 @@ from rl.operator_usage_logger import OperatorUsageLogger
 
 LOGGER = logging.getLogger("psvpp.alns")
 LOG_PREFIX = "[ALNS]"
+
+# Overrides the iteration horizon handed to the Rust engine (see ALNSEnvironment._engine_horizon). Unset = the
+# restart length. Experiments 8-10 ran 300-iteration restarts against a hard-coded horizon of 1000; set
+# PSVPP_ENGINE_HORIZON=1000 to reproduce them.
+ENGINE_HORIZON_ENV = "PSVPP_ENGINE_HORIZON"
 
 
 class ALNSEnvironment(gym.Env):
@@ -386,6 +392,44 @@ class ALNSEnvironment(gym.Env):
 
         return dict(self._instance_stats_cache.get(cache_key, {}))
 
+    def _engine_horizon(self) -> int:
+        """Iteration horizon (rho) of the Rust engine: the number of iterations of one restart.
+
+        The engine derives its cooling rate (mu = 1 - theta / rho) and the start of its aggressive phase
+        (aggressive_search_factor * rho, where non-improving iterations return to the restart's best) from it,
+        so it has to be the real restart length, i.e. this environment's ``max_iterations``. Before 2026-11-03
+        the engine used a fixed 1000 whatever the restart length: 300-iteration restarts ended at 12% of the
+        start temperature and never reached the aggressive phase. ``PSVPP_ENGINE_HORIZON`` overrides the value
+        (1000 reproduces Experiments 8-10).
+        """
+        override = os.environ.get(ENGINE_HORIZON_ENV)
+        horizon = int(override) if override else int(self.max_iterations)
+        if horizon < 1:
+            raise ValueError(f"engine horizon must be at least 1 (got {horizon})")
+        return horizon
+
+    def _initialize_engine(self, problem_instance: str, seed: int) -> Dict[str, Any]:
+        """Build a fresh Rust engine (current = best = a new initial solution) for one restart."""
+        try:
+            return self.alns.initialize_alns(
+                problem_instance=problem_instance,
+                seed=seed,
+                temperature=self.temperature,
+                theta=self.theta,
+                weight_update_interval=self.weight_update_interval,
+                aggressive_search_factor=self.aggressive_search_factor,
+                algorithm_mode=self.algorithm_mode,
+                kisialiou_improvement_sequence=self.kisialiou_improvement_sequence,
+                max_iterations=self._engine_horizon(),
+            )
+        except TypeError as exc:
+            if "max_iterations" in str(exc):
+                raise RuntimeError(
+                    "rust_alns_py was built before the engine-horizon fix and cannot take the restart length; "
+                    "rebuild it: cd rust_alns && maturin develop --release"
+                ) from exc
+            raise
+
     def _choose_problem_instance(
         self,
         episode_seed: Optional[int],
@@ -517,16 +561,7 @@ class ALNSEnvironment(gym.Env):
         
         # Initialize ALNS with Rust engine
         try:
-            init_result = self.alns.initialize_alns(
-                problem_instance=self.current_problem_instance,
-                seed=episode_seed,
-                temperature=self.temperature,
-                theta=self.theta,
-                weight_update_interval=self.weight_update_interval,
-                aggressive_search_factor=self.aggressive_search_factor,
-                algorithm_mode=self.algorithm_mode,
-                kisialiou_improvement_sequence=self.kisialiou_improvement_sequence,
-            )
+            init_result = self._initialize_engine(self.current_problem_instance, episode_seed)
 
             if snapshot_override is not None:
                 init_result = self.alns.apply_snapshot(snapshot_override)
@@ -637,16 +672,7 @@ class ALNSEnvironment(gym.Env):
         selected_problem = problem_instance or self.current_problem_instance or self.problem_instance
         run_seed = int(seed) if seed is not None else int(self.seed)
 
-        self.alns.initialize_alns(
-            problem_instance=selected_problem,
-            seed=run_seed,
-            temperature=self.temperature,
-            theta=self.theta,
-            weight_update_interval=self.weight_update_interval,
-            aggressive_search_factor=self.aggressive_search_factor,
-            algorithm_mode=self.algorithm_mode,
-            kisialiou_improvement_sequence=self.kisialiou_improvement_sequence,
-        )
+        self._initialize_engine(selected_problem, run_seed)
 
         return self.alns.run_with_restarts(restarts=restart_count)
 
