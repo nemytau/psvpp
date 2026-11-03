@@ -811,3 +811,79 @@ TW tightness moves from 0% to 100%, holding demand/frequency distribution fixed.
 retraining — this only needs new datasets + eval runs, not new PPO training.
 
 **Status**: planned only, not implemented. Target: next week.
+
+
+## 17. TODO — old-pool reference ablation on Experiment 10's instances (prepared 2026-11-03, NOT RUN: waiting for a free PC)
+
+**Why**: in Experiment 10 (the Experiment 8 rerun; `docs/EXPERIMENTS.md`, "Experiment 10") RL stopped beating the references.
+Per dataset (ratio-to-best; denominator = best of adaptive / Kisialiou / RL main on the dataset, 50 datasets per size,
+each experiment on its own instances):
+
+| size | Exp 8: adaptive / Kisialiou / RL | Exp 10: adaptive / Kisialiou / RL |
+|---|---|---|
+| small | 1.0513 / 1.0364 / 1.0003 | 1.0100 / 1.0052 / 1.0468 |
+| medium | 1.1019 / 1.1025 / 1.0040 | 1.0269 / 1.0176 / 1.0223 |
+| large | 1.0961 / 1.0799 / 1.0029 | 1.0630 / 1.0035 / 1.0476 |
+
+RL's own result per dataset moved by at most 3 points either way (final cost / the dataset's own initial cost, small / medium /
+large: Exp 8 0.748 / 0.735 / 0.763, Exp 10 0.728 / 0.738 / 0.790) while Kisialiou gained 6-7 points on every size
+(0.770 / 0.802 / 0.822 -> 0.704 / 0.735 / 0.759) and the adaptive ALNS 3-8 points (0.780 / 0.801 / 0.834 -> 0.706 / 0.741 / 0.801).
+The instance sets differ between the two experiments, so this anchor is indicative only. Leading
+hypothesis: first-fit insertion, which Experiment 10 added to both references' repair pool (change 2) — in Experiment 10's reference
+logs first-fit is 32% of Kisialiou's repair calls but 63% of its new-best steps (adaptive ALNS: 51-56% of calls, 85-86% of
+new bests), and the *non-learned* control "random removal + first-fit + FCR" went from beating Kisialiou per dataset
+(Exp 9: cost ratio 0.973 small / 0.858 medium) to tying or losing (Exp 10 1.020 / 0.999 / 1.037). Not separated by that evidence:
+the new, diversified (partly out-of-distribution) test instances, the engine guard (b0ebecf: never accept incomplete or
+infeasible candidates) and RL's own generalisation. The ablation holds all of them fixed and changes only the pool.
+
+**What runs** (reference chunks only — no training, no RL evaluation):
+
+| item | value |
+|---|---|
+| methods | Kisialiou ALNS (5 restarts x 300 iterations) and the plain adaptive ALNS (no improvement operators) for Kisialiou's search CPU time — the original reference protocol, no reference to the RL runs |
+| pool | `--baseline-action-module adaptive_weighted_v1`: 3 destroy x 3 repair (greedy rank 1, k-regret-2, k-regret-3), **no first-fit** (Experiment 10 used `adaptive_weighted_v2`) |
+| instances | Experiment 10's 150 test instances (`data/rerun26`, small/medium/large x 50), seed 42; data hashes verified against `data/rerun26/DATA_MANIFEST.json` before the run |
+| engine / cost model | the installed `rust_alns_py` build of 2026-10-22 20:11 (sha256 recorded in the manifest, the launcher refuses a different build), charter 1.75M NOK/week, fuel 13,500 NOK/t, SA T0 10,384.6 |
+| load | exactly 4 busy processes (4 workers + fillers) as in Experiment 10, `caffeinate -is`; the PC must otherwise be idle for the whole run |
+| chunks | Experiment 10's 19 reference chunks (small 2, medium 5, large 12), run small -> medium -> large so the first results arrive after ~40 min |
+| logs | full per-iteration operator logs for every restart (Experiment 10's references needed ~5 GB in total) |
+
+**Estimated duration**: ~11-12 h wall clock (range 9-14 h). Basis: Experiment 10's 19 reference chunks took 46.4 task-hours
+(4 workers -> 11.6 h; list-scheduling simulation 11.9 h); on the two instances of the first smoke run the old pool needed
+0.85-0.92x the wall time of the first-fit run.
+
+**How to run** (when the PC is free; nothing else heavy during the ~12 h):
+
+```bash
+scripts/run_oldpool_ablation.sh start      # preflight + 2-instance smoke test + detached full run
+scripts/run_oldpool_ablation.sh status     # status file + last events (also: RERUN26OLDPOOL_STATUS.md, refreshed every minute)
+scripts/run_oldpool_ablation.sh analyze    # per-dataset comparison with Experiment 10 and the RL models (also runs by itself at the end)
+scripts/run_oldpool_ablation.sh stop       # stops this run only; `start` again resumes (finished instances/chunks are kept)
+```
+
+**Where results are dumped** (steadily, not at the end): `runs/baseline_kisialiou_cache/rerun26_oldpool_v1/<size>_partNN.json`
+(per instance, written after every finished instance, with all restart rows), `output/rerun26oldpool__reference__<size>__cNN/`
+(`run_command.txt`, `run_manifest.json` incl. git state and `finished_at`), `RERUN26OLDPOOL_STATUS.md` (every minute: running chunks,
+ETA, and a results-so-far table: old vs first-fit references and RL, finished instances only), `logs/rerun26oldpool_queue/`
+(`events.log`, per-task logs, `speed_probe.csv` machine-speed record), `logs/rerun26oldpool__reference__*` (operator logs),
+`output/rerun26oldpool__QUEUE_MANIFEST.json` (plan, commands, data and engine fingerprints, outcome). Per size once its chunks are
+done: `output/rerun26oldpool__reference__<size>/{results.csv,restart_results.csv,results.json,summary.json,run_manifest.json}`.
+At the end: `output/rerun26oldpool__ANALYSIS.md` and `.per_dataset.csv` (`scripts/analyze_oldpool_ablation.py`; every table
+per dataset with a named denominator, plus the same comparisons at equal compute because the old pool defines its own budget).
+
+**How to read the outcome**:
+- old-pool references ~ first-fit references per dataset (old/ff ratio about 1.00) -> first-fit is not what made the references
+  stronger; look at the instance set (RL on base-like instances), the engine guard and RL's generalisation next.
+- old-pool references clearly worse (old/ff well above 1.00) *and* RL beats them again at equal compute (RL/Kisialiou below 1.00)
+  -> RL's Exp 8 edge was the missing first-fit operator in the baselines; the paper has to be framed against the strong references.
+- old-pool references clearly worse but RL still does not beat them -> RL's generalisation to the diversified instances is the
+  open problem (train covers one axis at a time, test is the TW x DF factorial).
+
+**Early signal (2 small instances from the first smoke run, 2026-11-03; anecdotal)**: old-pool Kisialiou ended at the same cost as
+first-fit Kisialiou (ratios 1.0004 and 1.0012) while using 19-35% less CPU; old-pool adaptive ALNS ended 1.2-2.7% above the first-fit
+one while also getting less CPU. Two TW0/DF1 instances only.
+
+**Status**: prepared, not run. `scripts/run_exp8_rerun.py --oldpool-ablation` (queue mode; reuses Experiment 10's cost-balanced chunks,
+filler load, manifests and status), `scripts/analyze_oldpool_ablation.py`, `scripts/run_oldpool_ablation.sh` are written and
+uncommitted. A 2-instance smoke run of the pipeline passed on 2026-11-03; the scripts were edited afterwards, so `start` repeats the
+smoke test before the long run.

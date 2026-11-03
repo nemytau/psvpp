@@ -731,13 +731,26 @@ identically); small results vary strongly between seeds; one eval seed; 20 / 30 
 
 ---
 
-## Experiment 8 rerun — setup and launch (2026-10-22)
+## Experiment 10 — first-fit added to the baselines, CPU-time budgets, NOK cost model, diversified test sets (the Experiment 8 rerun; setup and launch 2026-10-22, finished 2026-10-24)
+
+**What Experiment 10 is.** The Experiment 8 setup (RL `op_triple_v2` / `features_improvement_v3` / `delta_cost_v9`, ph300, against
+the adaptive baseline and Kisialiou's ALNS, small / medium / large) repeated with four changes. The one that matters most when
+reading Exp 10 against Exp 8 and Exp 9: **first-fit insertion (`first_fit_insertion_v1`) was added to the repair pool of both
+baselines**, the adaptive ALNS and Kisialiou's ALNS (action module `adaptive_weighted_v2` instead of `adaptive_weighted_v1`), so the
+baselines now have the operator that RL's action space already had. The other changes are search-CPU-time budgets with a fixed RL
+decision charge, a NOK cost model (charter 1.75M per vessel and week, fuel 13,500 NOK/t), and 50 diversified test instances per
+size. Exp 10 numbers are therefore not comparable with Exp 8/9 without these differences in mind. Whether first-fit explains the
+drop in RL's lead is the open question tested by the old-pool ablation (TODO, `docs/PAPER1_ACTION_SPACE_PLAN.md` section 17).
+
+**Naming.** Earlier called "the Experiment 8 rerun". On disk it keeps its original identifiers so that manifests, caches and
+commands stay valid: file prefixes `rerun26` (`output/rerun26__*`, `data/rerun26`, `runs/baseline_kisialiou_cache/rerun26_v1`),
+`scripts/run_exp8_rerun.py`, `RERUN26_STATUS.md`.
 
 **Why.** Experiment 8's numbers (locked 2026-09-08) were produced with (1) wall-clock time
 budgets that counted the Python prototype's overhead against RL, (2) baselines whose repair pool
 lacked the first-fit insertion operator RL's action space has, (3) a cost model with a 150,000 NOK
 weekly charter and an unrealistically cheap fuel price, (4) test sets that were 50 draws from one
-configuration per size. The rerun fixes all four and uses one seed (training and evaluation 42).
+configuration per size. Experiment 10 fixes all four and uses one seed (training and evaluation 42).
 Everything is retrained and the baseline/Kisialiou reference regenerated; nothing from Exp 8/9 is
 reused (Exp 8 stays locked as it was).
 
@@ -934,3 +947,32 @@ minimum stagnation count before a break is allowed, or evaluate breaks on the ti
 budget so their restart cost is visible in the metric the policy is scored on.
 
 Status: idea only, not implemented.
+
+### Restarts are independent; cooling and aggressive phase are set for 1000 iterations, restarts run 300 (audited 2026-11-03)
+
+**Restart independence (checked, no problem).** Every restart gets a completely fresh engine: the
+Python environment's `reset()` calls `initialize_alns`, which builds a new `ALNSEngine`
+(`new_from_instance`: current = best = a new randomised constructive solution, new RNG from the
+restart seed, operator weights 1.0, temperature T0, stagnation 0). The Rust `run_with_restarts`
+(not used by our runs) does the same in `reset_for_restart` and keeps the global best in its own
+variable, so a later restart can neither overwrite it nor start from it. The reported best of a
+search is the minimum over the restarts' bests (`min(best_candidates)` in `rl/episode_runner.py`).
+The only place where the current solution is set to the best one is the "aggressive phase" of the
+step function, and there it is the restart's own best. In the Exp 10 per-iteration logs a new
+restart does not jump to an earlier restart's best (e.g. a restart starting at 5.97M stays at
+0.965 of its start for 8 iterations while an earlier restart ended at 0.672 of it); 40 of 100
+later Kisialiou restarts re-find an earlier restart's best cost, at iterations 1–295 (median 117),
+as re-discovery by search, not as an immediate jump.
+
+**Open question: horizon of the cooling schedule and of the aggressive phase.** The Python-facing
+`initialize_alns` hard-codes the engine's `max_iterations` to 1000 (`python_interface.rs`) and the
+environment never changes it, while all evaluations (and the ph300 training) run restarts of 300
+iterations. Consequences, identical for every method and every experiment: (a) with theta = 7
+the cooling rate is 1 − 7/1000 per iteration, so a 300-iteration restart ends at 12% of T0
+(logged: 10,385 → 1,262) instead of the ≈ 0.1% a full 1000-iteration schedule reaches;
+(b) the aggressive phase (from 0.85 × 1000 = iteration 850: non-improving iterations reset the
+current solution to the restart's best) is never reached, which the logs confirm (share of
+iterations with current = best: 0.47–0.59 in iterations 1–254, 0.53 in 255–300). Both
+apply to every method alike (they may still favour some more than others), and "Kisialiou" here is the
+first 30% of its schedule, without its final intensification phase. Not decided whether this is intended; changing it would
+change every number, so it needs its own experiment (e.g. engine horizon = restart length).

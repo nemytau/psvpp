@@ -1,6 +1,6 @@
-"""Experiment 8 rerun (2026-10): RL vs. adaptive baseline vs. Kisialiou, small / medium / large.
+"""Experiment 10 (2026-10; the Experiment 10): RL vs. adaptive baseline vs. Kisialiou, small / medium / large.
 
-What changed relative to Experiment 8 (docs/EXPERIMENTS.md, "Experiment 8 rerun"):
+What changed relative to Experiment 8 (docs/EXPERIMENTS.md, "Experiment 10"):
   1. time budgets are search CPU time (Python overhead excluded) and RL is charged its native
      per-decision cost (rl/episode_runner.py, scripts/run_experiment_rl_improvement_mvp.py);
   2. the adaptive baseline and Kisialiou's ALNS get first-fit insertion in their repair pool
@@ -35,6 +35,12 @@ Layout (everything under the repo's output/ and logs/, which live on the externa
 Resumable at every level: finished reference chunks, trainings, evaluation shards and merges are
 never redone; an interrupted evaluation shard / reference chunk resumes after its last finished
 instance. A failed task is retried once.
+
+Old-pool ablation (--oldpool-ablation, 2026-11-03): only the reference chunks, with the baselines'
+ORIGINAL repair pool (--baseline-action-module adaptive_weighted_v1, no first-fit), on Experiment 10's own
+150 test instances, engine, cost model, budget definition and 4-process load. It isolates what
+first-fit insertion did to the references. Own prefix (rerun26oldpool), own cache folder and status
+file; scripts/analyze_oldpool_ablation.py compares the result with Experiment 10 and with the RL models.
 
     nohup caffeinate -is python scripts/run_exp8_rerun.py --workers 4 --alt-sizes small,medium,large \\
         > logs/rerun26_queue/queue.log 2>&1 &
@@ -97,6 +103,36 @@ EVENTS_PATH = QUEUE_DIR / "events.log"
 CACHE_DIR = REPO / "runs" / "baseline_kisialiou_cache" / "rerun26_v1"
 QUEUE_MANIFEST = REPO / "output" / "rerun26__QUEUE_MANIFEST.json"
 SMOKE = False
+REFS_ONLY = False  # old-pool ablation: reference chunks only (no training / evaluation / controls)
+RERUN_EVENTS = REPO / "logs" / "rerun26_queue" / "events.log"  # observed chunk durations of Experiment 10 (ETA)
+SIZE_RANK = {"small": 0, "medium": 1, "large": 2}  # reference-only queue: cheap sizes (and their results) first
+RERUN_CACHE_DIR = REPO / "runs" / "baseline_kisialiou_cache" / "rerun26_v1"  # Experiment 10's (first-fit) references
+DATA_CHECK: Dict = {}   # result of verify_data_manifest() (ablation)
+ENGINE_INFO: Dict = {}  # fingerprint of the installed Rust extension (ablation)
+
+
+def _configure_oldpool(smoke: bool = False) -> None:
+    """Old-pool ablation: Kisialiou + adaptive baseline WITHOUT first-fit on Experiment 10's test instances.
+
+    Everything but the baselines' repair pool is Experiment 10's reference run: same data root, engine,
+    cost model, chunking, budget (search CPU of Kisialiou's 5 reference restarts) and 4-process load."""
+    global PREFIX, QUEUE_DIR, STATUS_PATH, EVENTS_PATH, CACHE_DIR, QUEUE_MANIFEST, BASELINE_MODULE
+    global REFS_ONLY, SIZES, REFERENCE_CHUNKS, N_TEST, SMOKE
+    REFS_ONLY = True
+    BASELINE_MODULE = "adaptive_weighted_v1"
+    PREFIX = "rerun26oldpool" + ("smoke" if smoke else "")
+    QUEUE_DIR = REPO / "logs" / f"{PREFIX}_queue"
+    STATUS_PATH = REPO / f"{PREFIX.upper()}_STATUS.md"
+    EVENTS_PATH = QUEUE_DIR / "events.log"
+    CACHE_DIR = REPO / "runs" / "baseline_kisialiou_cache" / ("rerun26_oldpool_smoke" if smoke else "rerun26_oldpool_v1")
+    QUEUE_MANIFEST = REPO / "output" / f"{PREFIX}__QUEUE_MANIFEST.json"
+    if smoke:
+        SMOKE = True
+        SIZES = ("small",)
+        REFERENCE_CHUNKS = {"small": 2}
+        N_TEST = 2
+    else:
+        SIZES = ("small", "medium", "large")
 
 
 def _configure_smoke() -> None:
@@ -212,26 +248,61 @@ def ensure_data() -> Dict[str, SizeData]:
     return data
 
 
-def write_data_manifest(data: Dict[str, SizeData]) -> None:
-    def digest(paths: List[Path]) -> str:
-        h = hashlib.sha256()
-        for p in paths:
-            h.update(p.name.encode())
-            h.update(p.read_bytes())
-        return h.hexdigest()
+def _split_entry(size: str, split: str) -> Dict:
+    """Instance count and one SHA-256 over the names and bytes of every csv of a size/split."""
+    dirs = sorted(d for d in (PROCESSED / size / split).iterdir() if d.is_dir())
+    h = hashlib.sha256()
+    for f in (f for d in dirs for f in sorted(d.glob("*.csv"))):
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
+    return {"instances": len(dirs), "sha256_of_all_csv": h.hexdigest()}
 
+
+def write_data_manifest(data: Dict[str, SizeData]) -> None:
     info = {"created_at": datetime.now().isoformat(), "generated_root": str(GENERATED),
             "processed_root": str(PROCESSED), "git": _git(), "sizes": {}}
     for size in ("small", "medium", "large"):
-        entry = {}
-        for split in ("train", "test"):
-            dirs = sorted(d for d in (PROCESSED / size / split).iterdir() if d.is_dir())
-            files = [f for d in dirs for f in sorted(d.glob("*.csv"))]
-            entry[split] = {"instances": len(dirs), "sha256_of_all_csv": digest(files)}
-        info["sizes"][size] = entry
+        info["sizes"][size] = {split: _split_entry(size, split) for split in ("train", "test")}
     design = GENERATED / "test_set_v2_design.csv"
     info["test_set_design_csv"] = {"path": str(design), "sha256": hashlib.sha256(design.read_bytes()).hexdigest()}
     (DATA_ROOT / "DATA_MANIFEST.json").write_text(json.dumps(info, indent=2))
+
+
+def engine_fingerprint() -> Dict:
+    """Which compiled Rust engine runs the ablation (Experiment 10's engine must be the same build)."""
+    code = ("import rust_alns_py, os, glob, hashlib, json, time\n"
+            "d = os.path.dirname(rust_alns_py.__file__)\n"
+            "libs = sorted(glob.glob(os.path.join(d, '*.so')) + glob.glob(os.path.join(d, '*.dylib')))\n"
+            "print(json.dumps([{'path': f, 'sha256': hashlib.sha256(open(f, 'rb').read()).hexdigest(), "
+            "'modified': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(os.path.getmtime(f)))} for f in libs]))\n")
+    out = subprocess.run([PY, "-c", code], cwd=REPO, env=task_env("fingerprint"), capture_output=True, text=True)
+    try:
+        libs = json.loads(out.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        libs = [{"error": out.stderr.strip()[-300:]}]
+    return {"rust_alns_py_libraries": libs, "fuel_price_nok_per_tonne_and_sa_t0": _cost_model_constants()}
+
+
+def _cost_model_constants() -> Dict:
+    out = subprocess.run([PY, "-c", "import rust_alns_py as r; print(r.fuel_price_nok_per_tonne(), r.default_initial_temperature())"],
+                         cwd=REPO, env=task_env("fingerprint"), capture_output=True, text=True).stdout.split()
+    return {"fuel_price_nok_per_tonne": float(out[0]), "sa_initial_temperature": float(out[1])} if len(out) == 2 else {}
+
+
+def verify_data_manifest() -> Dict:
+    """The ablation must run on exactly Experiment 10's instances: compare every size/split with the manifest the
+    Exp 10 wrote when it launched (data/rerun26/DATA_MANIFEST.json). Raises when anything differs."""
+    recorded = json.loads((DATA_ROOT / "DATA_MANIFEST.json").read_text())
+    checked: Dict[str, Dict] = {}
+    for size in ("small", "medium", "large"):
+        for split in ("train", "test"):
+            now = _split_entry(size, split)
+            was = recorded["sizes"][size][split]
+            if now != was:
+                raise RuntimeError(f"data changed since Experiment 10: {size}/{split} {now} != {was}")
+            checked[f"{size}/{split}"] = {"instances": now["instances"], "sha256_prefix": now["sha256_of_all_csv"][:16]}
+    return {"manifest": str(DATA_ROOT / "DATA_MANIFEST.json"), "written_by_commit": recorded["git"]["commit"],
+            "all_splits_identical": True, "splits": checked}
 
 
 def balanced_groups(costs: List[float], n: int) -> List[List[int]]:
@@ -291,8 +362,20 @@ def _common(size: str, indices: Optional[List[int]] = None) -> List[str]:
     return cmd
 
 
+def _observed_ref_minutes() -> Dict[str, float]:
+    """Durations of Experiment 10's reference chunks (same chunking, same 4-process load): a far better ETA for the
+    ablation than the cost model, which overestimated the large chunks by ~1.6x."""
+    try:
+        text = RERUN_EVENTS.read_text()
+    except OSError:
+        return {}
+    return {m.group(1): float(m.group(2))
+            for m in re.finditer(r"END\s+ref\s+(reference__\S+)\s+rc=0\s+([\d.]+)min", text)}
+
+
 def build_tasks(data: Dict[str, SizeData], alt_sizes: List[str], controls: bool) -> List[Task]:
     tasks: List[Task] = []
+    observed = _observed_ref_minutes() if REFS_ONLY and not SMOKE else {}
     for size in SIZES:
         sd = data[size]
         k = sd.predicted_k()
@@ -307,10 +390,13 @@ def build_tasks(data: Dict[str, SizeData], alt_sizes: List[str], controls: bool)
             part = CACHE_DIR / f"{size}_part{ci + 1:02d}.json"
             cmd = _common(size, group) + ["--baseline-kisialiou-only", "--baseline-kisialiou-cache", str(part),
                                           "--run-tag", tag] + cap_args
-            tasks.append(Task("ref", tag, size, sum(k[i] * REF_RATIO[size] for i in group) / 60, [], False, cmd,
+            minutes = observed.get(tag, sum(k[i] * REF_RATIO[size] for i in group) / 60)
+            tasks.append(Task("ref", tag, size, minutes, [], False, cmd,
                               f"{PREFIX}__{tag}", REPO / "output" / f"{PREFIX}__{tag}", part,
                               {"instances": [sd.names[i] for i in group], "part": str(part), "merged_cache": str(merged_cache)}))
             ref_tags.append(f"ref:{tag}")
+        if REFS_ONLY:
+            continue
 
         # trained models: main (Exp 8 reward) and alt (Exp 9 best reward)
         variants = [("main", "delta_cost_v9", False)]
@@ -443,19 +529,93 @@ def _task_complete(task: Task) -> bool:
     return task.done()
 
 
+_export_lock = threading.Lock()
+
+
 def merge_reference(size: str, tasks: List[Task]) -> None:
     chunks = [t for t in tasks if t.kind == "ref" and t.size == size]
     target = Path(chunks[0].meta["merged_cache"])
-    with _lock:
-        if target.exists() or not all(_task_complete(c) for c in chunks):
+    merged_instances = None
+    with _lock:  # _event() takes this lock too: no events inside the block
+        if not all(_task_complete(c) for c in chunks):
             return
-        merged: Dict[str, object] = {}
-        for c in chunks:
-            merged.update(json.loads(c.done_file.read_text()))
-        tmp = target.with_suffix(".tmp")
-        tmp.write_text(json.dumps(merged))
-        tmp.replace(target)
-    _event(f"REFERENCE {size} merged: {len(merged)} instances -> {target}")
+        if not target.exists():
+            merged: Dict[str, object] = {}
+            for c in chunks:
+                merged.update(json.loads(c.done_file.read_text()))
+            tmp = target.with_suffix(".tmp")
+            tmp.write_text(json.dumps(merged))
+            tmp.replace(target)
+            merged_instances = len(merged)
+    if merged_instances is not None:
+        _event(f"REFERENCE {size} merged: {merged_instances} instances -> {target}")
+    if REFS_ONLY:
+        with _export_lock:
+            if not (REPO / "output" / f"{PREFIX}__reference__{size}" / "summary.json").exists():
+                try:
+                    export_reference_results(size, json.loads(target.read_text()), chunks)
+                except Exception as exc:  # noqa: BLE001 -- the merged cache is the source of truth; never fail the task over the export
+                    _event(f"FAIL  export of {size} reference results: {exc!r}")
+
+
+def export_reference_results(size: str, merged: Dict[str, object], chunks: List[Task]) -> None:
+    """Standard result files of the reference-only run (old-pool ablation), one folder per size:
+    results.csv (one row per instance and method), restart_results.csv, summary.json, run_manifest.json."""
+    out = REPO / "output" / f"{PREFIX}__reference__{size}"
+    out.mkdir(parents=True, exist_ok=True)
+    rows: List[Dict] = []
+    restart_rows: List[Dict] = []
+    for key in sorted(merged):
+        dataset, seed = key.rsplit("__seed", 1)
+        entry = merged[key]
+        budget = float(entry["kisialiou"]["search_cpu_seconds"])
+        for mode in ("kisialiou", "baseline"):
+            e = entry[mode]
+            rr = e["restart_rows"]
+            best = min(rr, key=lambda r: float(r["best_cost"]))
+            before = sum(float(r["search_cpu_seconds"]) for r in rr[:rr.index(best)])
+            rows.append({
+                "dataset": dataset, "size": size, "seed": int(seed), "mode": mode, "action_module": BASELINE_MODULE,
+                "initial_cost": e["initial_cost"], "best_cost": e["best_cost"],
+                "improvement_pct": (e["initial_cost"] - e["best_cost"]) / e["initial_cost"] * 100.0,
+                "search_cpu_seconds": e["search_cpu_seconds"], "solver_runtime_seconds": e["solver_runtime_seconds"],
+                "wall_runtime_seconds": e["wall_runtime_seconds"], "runtime_target_seconds": budget, "restarts": len(rr),
+                "initial_num_vessels_used": best["initial_num_vessels_used"], "best_num_vessels_used": best["best_num_vessels_used"],
+                "best_num_voyages": best["best_num_voyages"],
+                "time_to_best_search_seconds": before + float(best["time_to_best_search_seconds"]),
+            })
+            for r in rr:
+                restart_rows.append({"dataset": dataset, "seed": int(seed), "mode": mode,
+                                     **{k: v for k, v in r.items() if k != "dataset_path"}})
+    for name, data_rows in (("results.csv", rows), ("restart_results.csv", restart_rows)):
+        with (out / name).open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(data_rows[0]))
+            writer.writeheader()
+            writer.writerows(data_rows)
+    (out / "results.json").write_text(json.dumps(rows, indent=2))
+    summary = {}
+    for mode in ("kisialiou", "baseline"):
+        m_rows = [r for r in rows if r["mode"] == mode]
+        summary[mode] = {"instances": len(m_rows),
+                         "mean_improvement_pct": sum(r["improvement_pct"] for r in m_rows) / len(m_rows),
+                         "mean_restarts": sum(r["restarts"] for r in m_rows) / len(m_rows),
+                         "mean_search_cpu_seconds": sum(float(r["search_cpu_seconds"]) for r in m_rows) / len(m_rows),
+                         "mean_best_vessels": sum(float(r["best_num_vessels_used"]) for r in m_rows) / len(m_rows)}
+    (out / "summary.json").write_text(json.dumps(summary, indent=2))
+    manifests = []
+    for c in chunks:
+        try:
+            m = json.loads((c.out_dir / "run_manifest.json").read_text())
+        except (OSError, ValueError):
+            m = {}
+        manifests.append({"run_id": c.run_id, "output_dir": str(c.out_dir), "log_dir": str(REPO / "logs" / c.run_id),
+                          "command": m.get("command"), "created_at": m.get("created_at"),
+                          "finished_at": m.get("finished_at"), "instances": c.meta["instances"]})
+    (out / "run_manifest.json").write_text(json.dumps({
+        "kind": "merged_reference_oldpool_ablation", "size": size, "created_at": datetime.now().isoformat(),
+        "baseline_action_module": BASELINE_MODULE, "rows": len(rows), "instances": len(merged),
+        "merged_cache": chunks[0].meta["merged_cache"], "chunks": manifests, "git": _git()}, indent=2))
+    _event(f"EXPORT {size}: {len(rows)} result rows, {len(restart_rows)} restart rows -> {out}")
 
 
 def _load_experiment_script():
@@ -655,6 +815,20 @@ def _partial_results_rows(tasks: List[Task]) -> List[str]:
     return out
 
 
+def _oldpool_status_lines() -> List[str]:
+    """Ablation table for the status file, computed by the analysis script from the part caches (memoised by mtime)."""
+    try:
+        module = sys.modules.get("analyze_oldpool_ablation")
+        if module is None:
+            spec = importlib.util.spec_from_file_location("analyze_oldpool_ablation", REPO / "scripts" / "analyze_oldpool_ablation.py")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["analyze_oldpool_ablation"] = module
+            spec.loader.exec_module(module)
+        return module.status_lines(CACHE_DIR)
+    except Exception as exc:  # noqa: BLE001 -- the status file must never take the queue down
+        return [f"(results table unavailable: {exc!r})"]
+
+
 def write_status(tasks: List[Task], workers: int) -> None:
     with _lock:
         states = {n: dict(s) for n, s in _state.items()}
@@ -672,7 +846,7 @@ def write_status(tasks: List[Task], workers: int) -> None:
         elif phase not in ("done", "failed"):
             remaining += t.minutes
     eta_h = remaining / max(workers, 1) / 60
-    lines = [f"# Experiment 8 rerun — status ({PREFIX})", "",
+    lines = [f"# Experiment 10 — status ({PREFIX})", "",
              f"Updated {datetime.now():%Y-%m-%d %H:%M:%S} · queue running {(time.time() - _started) / 3600:.1f} h · "
              f"**{counts['done']}/{len(tasks)} tasks done**, {counts['run']} running, "
              f"{len(tasks) - sum(counts.values())} queued, {counts['failed']} failed", "",
@@ -681,11 +855,15 @@ def write_status(tasks: List[Task], workers: int) -> None:
              f"predicted task durations / {workers} workers; refines as tasks finish.", "",
              "## Running", "", "| task | size | state | elapsed | progress |", "|---|---|---|---|---|"]
     lines += rows or ["| — | | | | |"]
-    lines += ["", "## Results so far (finished instances of every evaluation job, updated as instances finish)", "",
-              "Mean ratio to the best of the three methods on each finished instance (1.0000 = best); policy = the job's "
-              "trained model or fixed control. W/T/L = per-instance best-cost wins/ties/losses of the policy.", "",
-              "| job | instances | policy | baseline | Kisialiou | W/T/L vs Kisialiou | W/T/L vs baseline |", "|---|---|---|---|---|---|---|"]
-    lines += _partial_results_rows(tasks)
+    if REFS_ONLY:
+        lines += ["", "## Results so far (old pool = this run; first-fit pool = Experiment 10's references; finished instances only)", ""]
+        lines += _oldpool_status_lines()
+    else:
+        lines += ["", "## Results so far (finished instances of every evaluation job, updated as instances finish)", "",
+                  "Mean ratio to the best of the three methods on each finished instance (1.0000 = best); policy = the job's "
+                  "trained model or fixed control. W/T/L = per-instance best-cost wins/ties/losses of the policy.", "",
+                  "| job | instances | policy | baseline | Kisialiou | W/T/L vs Kisialiou | W/T/L vs baseline |", "|---|---|---|---|---|---|---|"]
+        lines += _partial_results_rows(tasks)
     failed = [t.name for t in tasks if states.get(t.name, {}).get("phase") == "failed"]
     lines += ["", "## Failures", "", ", ".join(failed) if failed else "none", "",
               f"Event log: `{EVENTS_PATH.relative_to(REPO)}` · per-task logs: `{QUEUE_DIR.relative_to(REPO)}/`"]
@@ -733,7 +911,7 @@ def schedule(tasks: List[Task], workers: int) -> None:
                 elif all(p == "done" for p in dep_phases):
                     ready.append(t)
             # required work first, then optional work, each by highest level first
-            ready.sort(key=lambda t: (t.optional, -level[t.name]))
+            ready.sort(key=lambda t: (t.optional, SIZE_RANK[t.size] if REFS_ONLY else 0, -level[t.name]))
             free = workers - len([n for n in running if by_name[n].kind != "merge"])
             disk_ok = free_gb() >= MIN_FREE_GB
             if not disk_ok and not low_disk_reported:
@@ -782,6 +960,23 @@ def write_queue_manifest(tasks: List[Task], args: argparse.Namespace, data: Dict
                    "log_dir": str(REPO / "logs" / t.run_id), "command": " ".join(t.command), "meta": t.meta}
                   for t in tasks],
     }
+    if REFS_ONLY:
+        manifest["kind"] = "experiment_8_rerun_oldpool_ablation_queue"
+        manifest["protocol"] = {
+            "purpose": "isolate what first-fit insertion did to the references: Kisialiou ALNS + adaptive baseline with the "
+                       "ORIGINAL repair pool (no first-fit) on Experiment 10's instances",
+            "baseline_action_module": BASELINE_MODULE,
+            "pool": "3 destroy x 3 repair (deep_greedy_rank_1, k_regret_2, k_regret_3), shared by the adaptive baseline and Kisialiou",
+            "time_budget": "the original reference protocol, unchanged: Kisialiou runs 5 restarts x 300 iterations and its search "
+                           "CPU time is the budget of the plain adaptive ALNS baseline (no improvement operators) on that instance. "
+                           "No reference to the RL runs: the old pool defines its own (shorter or longer) budget",
+            "constant_load": f"{args.workers} busy processes whenever a reference chunk runs",
+            "seed": SEED, "n_test_per_size": N_TEST, "operator_log_restarts": OPERATOR_LOG_RESTARTS,
+            "compare_with": {"first_fit_references": str(RERUN_CACHE_DIR), "rl_models": "output/rerun26__main__delta_cost_v9__<size>__s42",
+                             "analysis": "python scripts/analyze_oldpool_ablation.py"},
+        }
+        manifest["data_verification"] = DATA_CHECK
+        manifest["engine"] = ENGINE_INFO
     QUEUE_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
     QUEUE_MANIFEST.write_text(json.dumps(manifest, indent=2))
 
@@ -831,8 +1026,13 @@ def main() -> None:
     parser.add_argument("--list", action="store_true", help="print the plan and predicted durations, execute nothing")
     parser.add_argument("--status", action="store_true", help="print the status file")
     parser.add_argument("--prepare-data-only", action="store_true")
+    parser.add_argument("--oldpool-ablation", action="store_true",
+                        help="reference chunks only, with the baselines' original repair pool (adaptive_weighted_v1, no first-fit), "
+                             "on Experiment 10's test instances; with --smoke: 2 small instances under its own prefix")
     args = parser.parse_args()
-    if args.smoke:
+    if args.oldpool_ablation:
+        _configure_oldpool(smoke=args.smoke)
+    elif args.smoke:
         _configure_smoke()
         args.alt_sizes = args.alt_sizes or "small"
     if args.status:
@@ -841,7 +1041,11 @@ def main() -> None:
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     data = ensure_data()
-    write_data_manifest(data)
+    if REFS_ONLY:
+        DATA_CHECK.update(verify_data_manifest())
+        ENGINE_INFO.update(engine_fingerprint())
+    else:
+        write_data_manifest(data)
     if args.prepare_data_only:
         print("data ready:", {s: len(d.names) for s, d in data.items()})
         return
