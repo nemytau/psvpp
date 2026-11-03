@@ -985,7 +985,9 @@ T0·e^−7 (≈ 0.1%) and spends its last 15% (iterations 255–300) in the aggr
 **results from before the fix are not comparable with results after it** (Experiments 8–10 stay as
 recorded; a run after the fix needs its own references); policies trained before the fix were
 trained on the old dynamics. `PSVPP_ENGINE_HORIZON=1000` restores the old behaviour
-(the old-pool ablation uses it to stay comparable with Experiment 10); every run manifest records the
+(the old-pool ablation uses it to stay comparable with Experiment 10). The code of Experiments 8–10 is also kept as the frozen branch
+`exp10-legacy-horizon` (git worktree `../psvpp-exp10-legacy`), where the environment passes no horizon and the engine therefore uses 1000 with any
+build of the extension; every run manifest records the
 horizon (`resolved.engine_horizon`). The extension must be rebuilt (`cd rust_alns && maturin develop
 --release`); an older build makes the environment stop with an error that says so. Regression test:
 `tests/test_engine_horizon.py` (5 tests, a few seconds; Rust unit tests for the cooling rate are in `alns/acceptance.rs`).

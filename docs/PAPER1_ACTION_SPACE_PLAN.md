@@ -883,6 +883,14 @@ per dataset with a named denominator, plus the same comparisons at equal compute
 first-fit Kisialiou (ratios 1.0004 and 1.0012) while using 19-35% less CPU; old-pool adaptive ALNS ended 1.2-2.7% above the first-fit
 one while also getting less CPU. Two TW0/DF1 instances only.
 
+**Where to run it**: from the frozen branch `exp10-legacy-horizon` (commit `2b47d56`: the code of Experiment 10 plus a launcher that does not depend on the
+extension build), checked out as the separate worktree `../psvpp-exp10-legacy`; its `data`, `logs`, `output` and `runs` are links to the same SSD folders
+as in this checkout. `scripts/run_oldpool_ablation.sh start` there runs the ablation with the engine horizon of Experiment 10, and the frozen branch cannot
+be run with the fix by accident. It works with either build of the Rust extension (without a horizon argument the engine uses 1000). This line, the main
+one, needs the fixed build and would need `PSVPP_ENGINE_HORIZON=1000` (the launcher sets it) to reproduce Experiment 10. Do not switch the branch of a
+checkout while a run is in progress. If the worktree is ever removed: `git worktree add ../psvpp-exp10-legacy exp10-legacy-horizon`, then
+`for d in data logs output runs; do ln -s "$(readlink $d)" ../psvpp-exp10-legacy/$d; done` from this directory.
+
 **After the engine-horizon fix (2026-11-03)**: the ablation above stays valid because it runs with the old horizon. The fix itself raises a new
 open question that needs its own experiment: how much the corrected schedule (a 300-iteration restart now cools to 0.1% of T0 and spends its last 15%
 in the aggressive phase) changes the numbers of Experiment 10 — references and RL alike. That would be a new experiment (references regenerated, models
