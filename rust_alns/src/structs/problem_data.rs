@@ -11,6 +11,8 @@ pub struct ProblemData {
     pub installations: Vec<Installation>,
     pub base: Base,
     pub distance_manager: DistanceManager,
+    /// Fuel price in NOK per tonne of this problem (default: `constants::FUEL_PRICE_NOK_PER_TONNE`).
+    fuel_price: f64,
 }
 
 impl ProblemData {
@@ -27,7 +29,14 @@ impl ProblemData {
             installations,
             base,
             distance_manager,
+            fuel_price: crate::structs::constants::FUEL_PRICE_NOK_PER_TONNE,
         }
+    }
+
+    /// The same problem with another fuel price (NOK per tonne).
+    pub fn with_fuel_price(mut self, fuel_price: f64) -> Self {
+        self.fuel_price = fuel_price;
+        self
     }
 
     pub fn fcs(&self) -> f64 {
@@ -36,9 +45,9 @@ impl ProblemData {
     pub fn fcw(&self) -> f64 {
         0.26
     }
-    /// Fuel price in NOK per tonne (see `constants::FUEL_PRICE_NOK_PER_TONNE`).
+    /// Fuel price in NOK per tonne (see `constants::FUEL_PRICE_NOK_PER_TONNE` for the default).
     pub fn fuel_price(&self) -> f64 {
-        crate::structs::constants::FUEL_PRICE_NOK_PER_TONNE
+        self.fuel_price
     }
     pub fn generate_visits(&self) -> Vec<Visit> {
         let mut visits = Vec::new();

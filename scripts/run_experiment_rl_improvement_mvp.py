@@ -25,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 from rl.dataset_manager import GeneratedDatasetManager
 from rl.rl_alns_environment import ALNSEnvironment
 from rl.train_alns_rl import train_ppo_agent
+from rl import cost_model
 from rl import episode_runner as _episode_runner
 from rl.episode_runner import (
     EpisodeSummary,
@@ -881,11 +882,14 @@ def _provenance_sections(
             "currency": "NOK",
             "charter_cost_per_vessel_week_in_datasets": sorted(charter),
             "fuel_consumption_t_per_h_sailing_waiting_in_datasets": sorted(consumption),
-            "fuel_price_nok_per_tonne": rust_alns_py.fuel_price_nok_per_tonne(),
-            "sa_initial_temperature": rust_alns_py.default_initial_temperature(),
+            **cost_model.describe(),
+            "PSVPP_FUEL_PRICE": os.environ.get("PSVPP_FUEL_PRICE"),
+            "engine_default_fuel_price_nok_per_tonne": rust_alns_py.fuel_price_nok_per_tonne(),
             "note": (
-                "sa_initial_temperature = 500 * fuel_price / 650: the original cost model (fuel 650/t, "
-                "charter 150,000/week) was calibrated with 500; temperature is in cost units."
+                "sa_initial_temperature = 500 * fuel_price / 650: the original cost model (fuel 650/t, charter 150,000/week) was "
+                "calibrated with 500; temperature is in cost units. The environment hands the fuel price below to the engine "
+                "(rl/cost_model.py). Experiment 10 ran fuel 13,500 (1.78 x the original fuel-to-charter ratio); since 2026-11-03 the main "
+                "line keeps the original ratio (7,583 at a charter of 1,750,000). ratio_relative_to_original_model: 1.0 = original."
             ),
         },
         "data_roots": {

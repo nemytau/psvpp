@@ -113,6 +113,7 @@ SIZE_RANK = {"small": 0, "medium": 1, "large": 2}  # reference-only queue: cheap
 # Engine iteration horizon of Experiment 10 (see rl/rl_alns_environment.py, ENGINE_HORIZON_ENV): it ran 300-iteration restarts
 # against a hard-coded 1000. The old-pool ablation must reproduce that engine to stay comparable with it.
 LEGACY_ENGINE_HORIZON = "1000"
+LEGACY_FUEL_PRICE = "13500"  # NOK/t of Experiment 10; the main line keeps the original fuel-to-charter ratio (rl/cost_model.py)
 RERUN_CACHE_DIR = REPO / "runs" / "baseline_kisialiou_cache" / "rerun26_v1"  # Experiment 10's (first-fit) references
 DATA_CHECK: Dict = {}   # result of verify_data_manifest() (ablation)
 ENGINE_INFO: Dict = {}  # fingerprint of the installed Rust extension (ablation)
@@ -171,7 +172,7 @@ def task_env(run_id: str) -> Dict[str, str]:
         RL_RUN_ID=run_id,
         PSVPP_GENERATED_ROOT=str(GENERATED),
         PSVPP_PROCESSED_ROOT=str(PROCESSED),
-        **({"PSVPP_ENGINE_HORIZON": LEGACY_ENGINE_HORIZON} if REFS_ONLY else {}),
+        **({"PSVPP_ENGINE_HORIZON": LEGACY_ENGINE_HORIZON, "PSVPP_FUEL_PRICE": LEGACY_FUEL_PRICE} if REFS_ONLY else {}),
     )
 
 
@@ -292,9 +293,13 @@ def engine_fingerprint() -> Dict:
 
 
 def _cost_model_constants() -> Dict:
-    out = subprocess.run([PY, "-c", "import rust_alns_py as r; print(r.fuel_price_nok_per_tonne(), r.default_initial_temperature())"],
-                         cwd=REPO, env=task_env("fingerprint"), capture_output=True, text=True).stdout.split()
-    return {"fuel_price_nok_per_tonne": float(out[0]), "sa_initial_temperature": float(out[1])} if len(out) == 2 else {}
+    """Effective cost model of the processes this queue starts (rl/cost_model.py, with the queue's environment)."""
+    out = subprocess.run([PY, "-c", "import json; from rl import cost_model as c; print(json.dumps(c.describe()))"],
+                         cwd=REPO, env=task_env("fingerprint"), capture_output=True, text=True).stdout.strip().splitlines()
+    try:
+        return json.loads(out[-1])
+    except (ValueError, IndexError):
+        return {}
 
 
 def verify_data_manifest() -> Dict:
@@ -981,6 +986,8 @@ def write_queue_manifest(tasks: List[Task], args: argparse.Namespace, data: Dict
             "constant_load": f"{args.workers} busy processes whenever a reference chunk runs",
             "engine_horizon": f"PSVPP_ENGINE_HORIZON={LEGACY_ENGINE_HORIZON}: the horizon Experiment 10 ran with (300-iteration restarts "
                               "against 1000); the engine takes the restart length by default since 2026-11-03",
+            "fuel_price": f"PSVPP_FUEL_PRICE={LEGACY_FUEL_PRICE} NOK/t: the price of Experiment 10; the main line's default is the original "
+                          "fuel-to-charter ratio at the current charter (rl/cost_model.py)",
             "seed": SEED, "n_test_per_size": N_TEST, "operator_log_restarts": OPERATOR_LOG_RESTARTS,
             "compare_with": {"first_fit_references": str(RERUN_CACHE_DIR), "rl_models": "output/rerun26__main__delta_cost_v9__<size>__s42",
                              "analysis": "python scripts/analyze_oldpool_ablation.py"},

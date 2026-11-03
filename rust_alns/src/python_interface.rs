@@ -292,7 +292,8 @@ impl RustALNSInterface {
         aggressive_search_factor=None,
         algorithm_mode=None,
         kisialiou_improvement_sequence=None,
-        max_iterations=None
+        max_iterations=None,
+        fuel_price=None
     ))]
     fn initialize_alns(
         &mut self,
@@ -306,6 +307,7 @@ impl RustALNSInterface {
         algorithm_mode: Option<&str>,
         kisialiou_improvement_sequence: Option<Vec<String>>,
         max_iterations: Option<usize>,
+        fuel_price: Option<f64>,
     ) -> PyResult<PyObject> {
         // Initialize logging for Python interface (only if not already initialized)
         if !PYTHON_LOGGING_INITIALIZED.load(Ordering::Relaxed) {
@@ -321,8 +323,16 @@ impl RustALNSInterface {
             PYTHON_LOGGING_INITIALIZED.store(true, Ordering::Relaxed);
         }
 
-        let temperature =
-            temperature.unwrap_or_else(crate::structs::constants::default_initial_temperature);
+        // Fuel price in NOK per tonne; None = the engine's default (Experiment 10's price). The default start temperature
+        // follows the effective price (500 at 650 NOK/t, proportional to it).
+        if let Some(price) = fuel_price {
+            if !price.is_finite() || price <= 0.0 {
+                return Err(PyValueError::new_err("fuel_price must be a positive number (NOK per tonne)"));
+            }
+        }
+        let effective_fuel_price = fuel_price.unwrap_or(crate::structs::constants::FUEL_PRICE_NOK_PER_TONNE);
+        let temperature = temperature
+            .unwrap_or_else(|| crate::structs::constants::initial_temperature_for(effective_fuel_price));
         let theta = theta.unwrap_or(0.9);
         let weight_update_interval = weight_update_interval.unwrap_or(10);
         let aggressive_search_factor = aggressive_search_factor.unwrap_or(0.85);
@@ -361,6 +371,7 @@ impl RustALNSInterface {
             aggressive_search_factor,
             max_iterations,
             algorithm_mode.unwrap_or(crate::alns::engine::ALNSAlgorithmMode::Baseline),
+            fuel_price,
         )
         .map_err(|e| PyRuntimeError::new_err(e))?;
 
@@ -787,16 +798,19 @@ impl RustALNSInterface {
     }
 }
 
-/// Fuel price in NOK per tonne used by the cost model (single source of truth for Python).
+/// The engine's default fuel price (NOK per tonne), used when `initialize_alns` gets no `fuel_price`.
 #[pyfunction]
 fn fuel_price_nok_per_tonne() -> f64 {
     crate::structs::constants::FUEL_PRICE_NOK_PER_TONNE
 }
 
-/// Default simulated-annealing start temperature (cost units) used when none is passed.
+/// SA start temperature (cost units) for a fuel price; default: the engine's default price.
 #[pyfunction]
-fn default_initial_temperature() -> f64 {
-    crate::structs::constants::default_initial_temperature()
+#[pyo3(signature = (fuel_price=None))]
+fn default_initial_temperature(fuel_price: Option<f64>) -> f64 {
+    crate::structs::constants::initial_temperature_for(
+        fuel_price.unwrap_or(crate::structs::constants::FUEL_PRICE_NOK_PER_TONNE),
+    )
 }
 
 /// Python module definition

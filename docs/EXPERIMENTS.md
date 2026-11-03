@@ -766,7 +766,7 @@ reused (Exp 8 stays locked as it was).
    3 Kisialiou-calibrated destroy × 4 repair (deep greedy rank 1, k-regret 2, k-regret 3,
    `first_fit_insertion_v1`). Passed as `--baseline-action-module`, it restricts the adaptive
    baseline and Kisialiou's ALNS alike. `adaptive_weighted_v1` is untouched.
-3. *Cost model in NOK* — charter 7 × 250,000 = **1,750,000 per vessel and week**
+3. *Cost model in NOK* (fuel price: see the design note "Fuel-to-charter ratio" at the end — the main line has used the original ratio since 2026-11-03) — charter 7 × 250,000 = **1,750,000 per vessel and week**
    (py_alns/resource/generation_config.yaml, all fleet entries; only vessels used are paid);
    fuel price **13,500 NOK per tonne** (rust_alns/src/structs/constants.rs; MGO 1,425 USD/t, Ship & Bunker
    Rotterdam 21 Oct 2026, 2-week range 1,333–1,437, at ≈ 9.5 NOK/USD) instead of 650; consumption
@@ -996,3 +996,29 @@ Experiment 10 bit for bit (temperature 10,311.9 → 1,262.3, best 4,127,926.05);
 runs 10,142.3 → 8.7 and the current solution equals the best one in all 46 iterations 255–300 (old horizon: 0 of 46). Not yet measured: how much the corrected schedule changes the
 numbers (cooler restarts accept fewer worsening moves, so the search is greedier, and the last 15% of
 every restart continues from the restart's best).
+
+### Fuel-to-charter ratio: Experiment 10 priced fuel 1.78 × higher relative to the charter (noted and changed 2026-11-03)
+
+A solution costs (vessels used) × (weekly charter) + (fuel price) × (fuel burnt). Which moves pay off — cutting a vessel or saving sailing — depends
+on the ratio of the two prices, and the rewards are relative to the initial cost, so the ratio characterises a cost model:
+
+| model | charter | fuel | start temperature | fuel / charter |
+|---|---|---|---|---|
+| original (Experiments 0–9) | 150,000 | 650 NOK/t | 500 | 0.00433 |
+| Experiment 10 | 1,750,000 | 13,500 NOK/t | 10,385 | 0.00771 = 1.78 × the original |
+| main line since 2026-11-03 | 1,750,000 | 7,583 NOK/t | 5,833 | 0.00433 = the original |
+
+In Experiment 10 a vessel cut was therefore worth relatively 1.78 × less, compared with saving fuel, than in Experiments 8–9. This may be why the learned
+policy moved from random + first-fit + FCR (which cuts vessels; all 3 medium seeds in Exp 9) to random + first-fit + VNR (which merges voyages and saves
+sailing), and it may have changed other things too; it is a hypothesis, not tested. (Ruled out by the data: seed noise, the engine guard, the CPU-time
+budget, and FCR becoming weaker per step.) The main line now keeps the original ratio: the fuel price is 650 × 1,750,000 / 150,000 = 7,583.33 NOK/t, which makes
+the cost model exactly the original one multiplied by 11.667 (charter, fuel and temperature alike). It is not the market price of fuel (13,500 in
+October 2026); the alternative with the same ratio and the market price is a charter of 3.1 M NOK per week.
+
+Implementation: `initialize_alns(fuel_price=...)` is a per-engine parameter; the environment passes `rl/cost_model.py`'s price (`PSVPP_FUEL_PRICE` overrides it
+for the process) and the matching start temperature, and every run manifest records them (`resolved.cost_model`, with
+`ratio_relative_to_original_model`). The engine's default stays at Experiment 10's 13,500 so that code which passes none — the frozen branch
+`exp10-legacy-horizon`, scripts that call the interface directly — keeps reproducing Experiments 8–10 with any build. On the main line
+`PSVPP_FUEL_PRICE=13500` reproduces Experiment 10's pricing (the old-pool ablation sets it, together with `PSVPP_ENGINE_HORIZON=1000`). The test of the hypothesis
+needs no new code: train the medium model on the main line with and without `PSVPP_FUEL_PRICE=13500` (3 seeds each) and compare the policies. Tests:
+`tests/test_cost_model.py`.

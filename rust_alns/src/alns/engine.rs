@@ -210,6 +210,7 @@ impl ALNSEngine {
         aggressive_search_factor: f64,
         max_iterations: usize,
         algorithm_mode: ALNSAlgorithmMode,
+        fuel_price: Option<f64>,
     ) -> Result<Self, String> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         // The sample directory is in the parent project directory, not in rust_alns
@@ -317,11 +318,14 @@ impl ALNSEngine {
             crate::structs::data_loader::read_data(&installations_path, &vessels_path, &base_path)
                 .map_err(|e| format!("Failed to load data: {}", e))?;
 
-        let problem_data = crate::structs::problem_data::ProblemData::new(
+        let mut problem_data = crate::structs::problem_data::ProblemData::new(
             data.vessels.clone(),
             data.installations.clone(),
             data.base.clone(),
         );
+        if let Some(price) = fuel_price {
+            problem_data = problem_data.with_fuel_price(price);
+        }
         let tsp_solver = crate::utils::tsp_solver::TSPSolver::new_from_problem_data(&problem_data);
         let context = Context {
             problem: problem_data,

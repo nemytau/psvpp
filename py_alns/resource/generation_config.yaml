@@ -1409,8 +1409,9 @@ inst_generation_params:
       deck_service_speed: 10
 
 # Vessel charter cost `cost` is NOK per vessel and week = 7 days x 250,000 NOK/day (set
-# 2026-10-22; it was 150,000 under the original cost model). The fuel price is a global
-# constant of the engine (rust_alns/src/structs/constants.rs, FUEL_PRICE_NOK_PER_TONNE).
+# 2026-10-22; it was 150,000 under the original cost model). The fuel price is a parameter of
+# the engine, handed over by the environment (rl/cost_model.py): since 2026-11-03 7,583 NOK/t, the
+# original fuel-to-charter ratio (650 / 150,000) at this charter; Experiment 10 ran 13,500.
 # Fleet size `num` is an upper bound on the vessels available (only vessels used are paid): large
 # configs have 18 (was 14, 2026-10-22) -- with 14, the constructive heuristic failed up to 63% of
 # its attempts on large test instances with all-tight windows and frequent visits (2026-10 test

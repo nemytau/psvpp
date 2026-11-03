@@ -233,8 +233,8 @@ Initialize ALNS solver with problem instance.
 - `problem_instance`: Instance identifier ("SMALL_1", "SMALL_2", etc.)
 - `seed`: Random seed for reproducibility
 - Optional keyword arguments: `temperature`, `theta`, `weight_update_interval`, `aggressive_search_factor`, `algorithm_mode`,
-  `kisialiou_improvement_sequence` and `max_iterations` (the engine's iteration horizon = restart length, default 1000; it sets the
-  cooling rate and the start of the aggressive phase, see `rust_alns/CONFIGURABLE_PARAMETERS.md`)
+  `kisialiou_improvement_sequence`, `max_iterations` (the engine's iteration horizon = restart length, default 1000; it sets the
+  cooling rate and the start of the aggressive phase) and `fuel_price` (NOK per tonne, default 13,500), see `rust_alns/CONFIGURABLE_PARAMETERS.md`
 
 **Returns:**
 - Dictionary with initial solution metrics

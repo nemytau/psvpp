@@ -500,6 +500,7 @@ fn test_alns_engine_iterations() -> Result<(), Box<dyn std::error::Error>> {
         0.85,  // aggressive_search_factor
         20,    // max_iterations
         crate::alns::engine::ALNSAlgorithmMode::Baseline,
+        None, // default fuel price
     )?;
 
     println!("Initial cost: {:.4}", engine.initial_cost);

@@ -14,8 +14,11 @@ pub const MAX_ATTEMPTS_TO_INIT: u32 = 10; // Maximum number of attempts to initi
 // dataset (`cost` column of vessels.csv, set in py_alns/resource/generation_config.yaml);
 // the fuel price is global and lives here.
 
-/// Fuel price, NOK per tonne (marine gas oil). Basis: MGO 1,425 USD/t (Ship & Bunker,
-/// Rotterdam, 21 Oct 2026; 2-week range 1,333-1,437) at 9.5 NOK/USD, rounded.
+/// Fuel price, NOK per tonne, that the engine uses when the caller gives none: the price of Experiment 10 (marine gas
+/// oil, MGO 1,425 USD/t, Ship & Bunker, Rotterdam, 21 Oct 2026, at 9.5 NOK/USD, rounded). It is a historical default,
+/// kept so that code that passes no fuel price (Experiments 8-10, the frozen branch exp10-legacy-horizon) keeps its
+/// numbers with any build. The environment of the main line passes its own price (rl/cost_model.py: the original
+/// fuel-to-charter ratio at the current charter) to `initialize_alns(fuel_price=...)`.
 pub const FUEL_PRICE_NOK_PER_TONNE: f64 = 13_500.0;
 
 /// The simulated-annealing start temperature is expressed in cost units, so it has to follow the
@@ -25,7 +28,27 @@ pub const FUEL_PRICE_NOK_PER_TONNE: f64 = 13_500.0;
 pub const CALIBRATION_FUEL_PRICE: f64 = 650.0;
 pub const CALIBRATION_INITIAL_TEMPERATURE: f64 = 500.0;
 
-/// Default SA start temperature in cost units (about 0.77 tonnes of fuel).
+/// SA start temperature in cost units for a given fuel price (about 0.77 tonnes of fuel).
+pub fn initial_temperature_for(fuel_price: f64) -> f64 {
+    CALIBRATION_INITIAL_TEMPERATURE * fuel_price / CALIBRATION_FUEL_PRICE
+}
+
+/// Default SA start temperature in cost units, at the default fuel price.
 pub fn default_initial_temperature() -> f64 {
-    CALIBRATION_INITIAL_TEMPERATURE * FUEL_PRICE_NOK_PER_TONNE / CALIBRATION_FUEL_PRICE
+    initial_temperature_for(FUEL_PRICE_NOK_PER_TONNE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_temperature_follows_the_fuel_price() {
+        assert!((initial_temperature_for(CALIBRATION_FUEL_PRICE) - CALIBRATION_INITIAL_TEMPERATURE).abs() < 1e-9);
+        assert!((default_initial_temperature() - 10_384.615384615385).abs() < 1e-6);
+        // the original fuel-to-charter ratio at a charter of 1,750,000 (150,000 originally): 650 * 1.75M / 150k
+        let matched = CALIBRATION_FUEL_PRICE * 1_750_000.0 / 150_000.0;
+        assert!((matched - 7_583.333333333333).abs() < 1e-9);
+        assert!((initial_temperature_for(matched) - 5_833.333333333333).abs() < 1e-9);
+    }
 }

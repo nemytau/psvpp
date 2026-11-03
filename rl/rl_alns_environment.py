@@ -17,6 +17,7 @@ import numpy as np
 import rust_alns_py
 from gymnasium import spaces
 
+from rl import cost_model
 from rl.instance_stats import get_instance_statistics
 from rl.modules.actions import ImprovementChainActionSpace
 from rl.registries import (
@@ -94,6 +95,7 @@ class ALNSEnvironment(gym.Env):
         kisialiou_improvement_sequence: Optional[Sequence[str]] = None,
         chain_max_consecutive_improvements: Optional[int] = 3,
         anti_repeat_penalty: float = 0.0,
+        fuel_price: Optional[float] = None,
     ):
         """
         Initialize the ALNS environment.
@@ -109,8 +111,11 @@ class ALNSEnvironment(gym.Env):
                 match_kisialiou eval restarts), so the same raw iteration count means the same
                 thing to the policy in both contexts.
             temperature: Initial simulated annealing temperature in cost units. Defaults to the
-                engine's cost-model-consistent value (rust_alns_py.default_initial_temperature(),
-                500 at the original fuel price of 650/t, scaled with the fuel price).
+                value consistent with the fuel price (rl.cost_model.initial_temperature: 500 at
+                the original fuel price of 650/t, proportional to the price).
+            fuel_price: Fuel price in NOK per tonne handed to the engine. Defaults to
+                rl.cost_model.fuel_price(): PSVPP_FUEL_PRICE if set, else the original
+                fuel-to-charter ratio at the current charter (7,583 NOK/t).
             theta: Temperature cooling factor
             weight_update_interval: Iterations between operator weight updates
             num_episodes: Number of restarts (each with different seed for diverse initial solutions)
@@ -152,8 +157,9 @@ class ALNSEnvironment(gym.Env):
         # feature value in both contexts -- see docs/PAPER1_ACTION_SPACE_PLAN.md section 10.
         # Defaults to max_iterations for full backward compatibility when not set explicitly.
         self.progress_horizon = progress_horizon if progress_horizon is not None else max_iterations
+        self.fuel_price = float(fuel_price) if fuel_price is not None else cost_model.fuel_price()
         self.temperature = (
-            float(temperature) if temperature is not None else float(rust_alns_py.default_initial_temperature())  # type: ignore
+            float(temperature) if temperature is not None else cost_model.initial_temperature(self.fuel_price)
         )
         self.theta = theta
         # delta (weight-update interval): 50 if rho<500, 100 if rho>=500,
@@ -421,11 +427,12 @@ class ALNSEnvironment(gym.Env):
                 algorithm_mode=self.algorithm_mode,
                 kisialiou_improvement_sequence=self.kisialiou_improvement_sequence,
                 max_iterations=self._engine_horizon(),
+                fuel_price=self.fuel_price,
             )
         except TypeError as exc:
-            if "max_iterations" in str(exc):
+            if "max_iterations" in str(exc) or "fuel_price" in str(exc):
                 raise RuntimeError(
-                    "rust_alns_py was built before the engine-horizon fix and cannot take the restart length; "
+                    "rust_alns_py was built before the engine-horizon / fuel-price parameters and cannot take them; "
                     "rebuild it: cd rust_alns && maturin develop --release"
                 ) from exc
             raise
