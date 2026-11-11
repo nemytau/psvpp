@@ -3,7 +3,7 @@
 
 The cost of a solution is  vessels used x weekly charter (dataset)  +  fuel price x fuel burnt. The fuel price is a parameter of the engine
 (`initialize_alns(fuel_price=...)`, default = Experiment 10's 13,500 NOK/t so that code that passes none keeps its numbers); the environment of the
-main line passes `rl.cost_model.fuel_price()`: 22,500 NOK/t (fuel about a quarter of the cost of the best solutions).
+main line passes `rl.cost_model.fuel_price()`: 13,500 NOK/t (Experiment 10's market price).
 
 Needs the Rust extension built from this commit (`cd rust_alns && maturin develop --release`) and a processed test instance:
 
@@ -50,15 +50,15 @@ class CostModelModuleTest(unittest.TestCase):
             os.environ[cost_model.FUEL_PRICE_ENV] = self._saved
 
     def test_default_price_and_the_original_ratio_price(self):
-        self.assertEqual(cost_model.DEFAULT_FUEL_PRICE, 22500.0)
-        self.assertEqual(cost_model.fuel_price(), 22500.0)
+        self.assertEqual(cost_model.DEFAULT_FUEL_PRICE, 13500.0)
+        self.assertEqual(cost_model.fuel_price(), 13500.0)
         # the price that would keep the original fuel-to-charter ratio: 650 * 1.75M / 150k
         self.assertAlmostEqual(cost_model.ORIGINAL_RATIO_FUEL_PRICE, 7583.333333333333, places=9)
 
     def test_start_temperature_is_500_at_the_original_price_and_proportional(self):
         self.assertEqual(cost_model.initial_temperature(650.0), 500.0)
         self.assertAlmostEqual(cost_model.initial_temperature(13500.0), 10384.615384615385, places=9)
-        self.assertAlmostEqual(cost_model.initial_temperature(cost_model.DEFAULT_FUEL_PRICE), 17307.692307692305, places=9)
+        self.assertAlmostEqual(cost_model.initial_temperature(cost_model.DEFAULT_FUEL_PRICE), 10384.615384615385, places=9)
 
     def test_environment_variable_overrides_and_is_validated(self):
         os.environ[cost_model.FUEL_PRICE_ENV] = "13500"
@@ -101,7 +101,7 @@ class EnvironmentCostModelTest(unittest.TestCase):
         try:
             env = ALNSEnvironment(problem_instance=_instance(), max_iterations=40, seed=42, enable_operator_logging=False)
             self.assertEqual(env.fuel_price, cost_model.DEFAULT_FUEL_PRICE)
-            self.assertAlmostEqual(env.temperature, 17307.692307692305, places=9)
+            self.assertAlmostEqual(env.temperature, 10384.615384615385, places=9)
             env.reset(seed=42)
             self.assertAlmostEqual(env.initial_cost / _init(fuel_price=cost_model.DEFAULT_FUEL_PRICE)["total_cost"], 1.0, places=9)
             env.close()

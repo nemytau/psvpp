@@ -115,7 +115,7 @@ class ALNSEnvironment(gym.Env):
                 the original fuel price of 650/t, proportional to the price).
             fuel_price: Fuel price in NOK per tonne handed to the engine. Defaults to
                 rl.cost_model.fuel_price(): PSVPP_FUEL_PRICE if set, else the original
-                22,500 NOK/t: fuel about a quarter of the cost).
+                13,500 NOK/t).
             theta: Temperature cooling factor
             weight_update_interval: Iterations between operator weight updates
             num_episodes: Number of restarts (each with different seed for diverse initial solutions)

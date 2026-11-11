@@ -889,7 +889,7 @@ def _provenance_sections(
                 "sa_initial_temperature = 500 * fuel_price / 650: the original cost model (fuel 650/t, charter 150,000/week) was "
                 "calibrated with 500; temperature is in cost units. The environment hands the fuel price below to the engine "
                 "(rl/cost_model.py). Experiment 10 ran fuel 13,500 (1.78 x the original fuel-to-charter ratio); since 2026-11-03 the main "
-                "line uses 22,500 (fuel about a quarter of the cost of best solutions; 7,583 would keep the original ratio). ratio_relative_to_original_model: 1.0 = original."
+                "line uses 13,500 again (7,583 would keep the original ratio). ratio_relative_to_original_model: 1.0 = original."
             ),
         },
         "data_roots": {

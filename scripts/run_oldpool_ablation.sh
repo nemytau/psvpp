@@ -7,7 +7,7 @@
 # insertion) on the 150 test instances of the Experiment 10 (data/rerun26: small, medium, large x 50), seed 42, with
 # the same engine, cost model and 4-process load as Experiment 10's references (the engine runs with horizon 1000 via
 # PSVPP_ENGINE_HORIZON, and the fuel price is 13,500 NOK/t via PSVPP_FUEL_PRICE, as in Experiment 10; the main line's defaults since 2026-11-03 are the
-# restart length and 22,500 NOK/t). Nothing else: no training, no RL runs.
+# restart length and 13,500 NOK/t). Nothing else: no training, no RL runs.
 # The Rust extension must be built from the horizon fix (`cd rust_alns && maturin develop --release`); the smoke test checks that
 # it reproduces two Kisialiou results of the pre-fix build exactly.
 #
@@ -89,7 +89,7 @@ check_machine() {
 
 check_engine() {
   # initialize_alns must take the restart length and the fuel price (changes of 2026-11-03); the runs then use PSVPP_ENGINE_HORIZON=1000 and
-  # PSVPP_FUEL_PRICE=13500 like Experiment 10 (the main line's own defaults are the restart length and 22,500 NOK/t).
+  # PSVPP_FUEL_PRICE=13500 like Experiment 10 (the main line's own defaults are the restart length and 13,500 NOK/t).
   # The smoke test verifies that this reproduces the pre-fix build exactly.
   local d
   d=$(ls -d data/rerun26/processed/alns/small/test/*/ | head -1)

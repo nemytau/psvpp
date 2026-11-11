@@ -1408,10 +1408,13 @@ inst_generation_params:
       departure_spread: 1
       deck_service_speed: 10
 
+# Fuel consumption (t/h): fcs sailing 0.575 and fcw waiting/service 0.165 since 2026-11-11 (simple means of the mid-points of a burn-rate table
+# for offshore supply vessels: sailing economy 0.25-0.50 and full speed 0.60-0.95; waiting in port 0.03-0.06, drifting 0.08-0.15, DP 0.20-0.45+); datasets
+# generated before have 0.43 / 0.26 stored in their vessels.csv (Experiments 0-10).
 # Vessel charter cost `cost` is NOK per vessel and week = 7 days x 250,000 NOK/day (set
 # 2026-10-22; it was 150,000 under the original cost model). The fuel price is a parameter of
-# the engine, handed over by the environment (rl/cost_model.py): since 2026-11-11 22,500 NOK/t
-# (fuel about a quarter of the cost of the best solutions; 7,583 from 2026-11-03 to 11-11); Experiment 10 ran 13,500.
+# the engine, handed over by the environment (rl/cost_model.py): 13,500 NOK/t again
+# (Experiment 10's price; 7,583 from 2026-11-03 to 11-11, 22,500 on 2026-11-11 for a day).
 # Fleet size `num` is an upper bound on the vessels available (only vessels used are paid): large
 # configs have 18 (was 14, 2026-10-22) -- with 14, the constructive heuristic failed up to 63% of
 # its attempts on large test instances with all-tight windows and frequent visits (2026-10 test
@@ -1422,8 +1425,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1432,8 +1435,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 10
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1442,8 +1445,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1452,8 +1455,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1462,8 +1465,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1472,8 +1475,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1482,8 +1485,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1492,8 +1495,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1502,8 +1505,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1512,8 +1515,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1522,8 +1525,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1532,8 +1535,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1542,8 +1545,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1552,8 +1555,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1563,8 +1566,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 10
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1573,8 +1576,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1583,8 +1586,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1593,8 +1596,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1603,8 +1606,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1613,8 +1616,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1623,8 +1626,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1633,8 +1636,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1643,8 +1646,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1653,8 +1656,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1663,8 +1666,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1673,8 +1676,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1683,8 +1686,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1693,8 +1696,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1704,8 +1707,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1714,8 +1717,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1724,8 +1727,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1734,8 +1737,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1744,8 +1747,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1754,8 +1757,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1764,8 +1767,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1774,8 +1777,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1784,8 +1787,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1794,8 +1797,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1804,8 +1807,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1814,8 +1817,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1824,8 +1827,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1834,8 +1837,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 18
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1845,8 +1848,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 8
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1855,8 +1858,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 8
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1865,8 +1868,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 8
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1877,8 +1880,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 10
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1887,8 +1890,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1899,8 +1902,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 8
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1909,8 +1912,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 7
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1921,8 +1924,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 6
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1931,8 +1934,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 5
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1943,8 +1946,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 9
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1953,8 +1956,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 7
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
@@ -1963,8 +1966,8 @@ fleet_generation_params:
       name_prefix: 'v'
       num: 8
       speed: 12
-      fcs: 0.43
-      fcw: 0.26
+      fcs: 0.575
+      fcw: 0.165
       deck_capacity: 100
       bulk_capacity: 1000
       cost: 1750000
