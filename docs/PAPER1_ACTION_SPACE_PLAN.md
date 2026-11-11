@@ -813,7 +813,9 @@ retraining — this only needs new datasets + eval runs, not new PPO training.
 **Status**: planned only, not implemented. Target: next week.
 
 
-## 17. TODO — old-pool reference ablation on Experiment 10's instances (prepared 2026-11-03, NOT RUN: waiting for a free PC)
+## 17. DONE (2026-11-11) — old-pool reference ablation on Experiment 10's instances (prepared 2026-11-03, run 2026-11-10/11)
+
+**Result (details in `docs/EXPERIMENTS.md`, "Old-pool ablation", and `docs/EXP10_OLDPOOL_ABLATION.md`)**: without first-fit the references are 6–10% worse (Kisialiou old/ff 1.10 / 1.07 / 1.08 small / medium / large) and RL main is cheaper than old-pool Kisialiou again (0.940 / 0.937 / 0.962). First-fit in the references' pool explains the loss of RL's lead in Experiment 10. The text below is the plan as written before the run.
 
 **Why**: in Experiment 10 (the Experiment 8 rerun; `docs/EXPERIMENTS.md`, "Experiment 10") RL stopped beating the references.
 Per dataset (ratio-to-best; denominator = best of adaptive / Kisialiou / RL main on the dataset, 50 datasets per size,
@@ -896,7 +898,4 @@ open question that needs its own experiment: how much the corrected schedule (a 
 in the aggressive phase) changes the numbers of Experiment 10 — references and RL alike. That would be a new experiment (references regenerated, models
 retrained on the corrected dynamics); not planned in detail yet.
 
-**Status**: prepared, not run. `scripts/run_exp8_rerun.py --oldpool-ablation` (queue mode; reuses Experiment 10's cost-balanced chunks,
-filler load, manifests and status), `scripts/analyze_oldpool_ablation.py`, `scripts/run_oldpool_ablation.sh` are written and
-uncommitted. A 2-instance smoke run of the pipeline passed on 2026-11-03; the scripts were edited afterwards, so `start` repeats the
-smoke test before the long run.
+**Status**: run 2026-11-10 15:00 – 2026-11-11 04:10 from the frozen worktree, 19/19 chunks, no failures; analysis written automatically.

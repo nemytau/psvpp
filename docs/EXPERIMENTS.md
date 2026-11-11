@@ -868,6 +868,34 @@ re-launch are safe; to stop everything: `pkill -f run_exp8_rerun.py; pkill -f ru
 
 ---
 
+### Old-pool ablation: first-fit in the references explains the drop (run 2026-11-10/11, 13.2 h, 19/19 chunks, 0 failures)
+
+Kisialiou (5 restarts) and the plain adaptive ALNS (same CPU time) with the original repair pool (`adaptive_weighted_v1`, no first-fit) on Experiment 10's 150 test
+instances, in Experiment 10's engine and pricing (frozen branch `exp10-legacy-horizon`, horizon 1000, fuel 13,500), 4 workers, own budget per reference. Full report:
+`docs/EXP10_OLDPOOL_ABLATION.md` (per-dataset values: `docs/exp10_oldpool_per_dataset.csv`). Machine speed was stable (fixed probe 4.23–4.35 CPU s from 18:00 to 03:00).
+
+Old pool / first-fit pool, geometric mean of final cost per dataset (above 1 = first-fit helped):
+
+| size | Kisialiou | first-fit cheaper | adaptive | fleet Kisialiou old / ff | CPU old / ff |
+|---|---|---|---|---|---|
+| small | 1.1017 | 39/50 | 1.0978 | 2.70 / 2.40 | 0.92 |
+| medium | 1.0726 | 48/50 | 1.0837 | 4.30 / 3.94 | 0.98 |
+| large | 1.0829 | 50/50 | 1.0647 | 6.90 / 6.30 | 1.04 |
+
+At equal compute the picture is the same. Ratio-to-best with the denominator best of {adaptive, Kisialiou, RL main} on the dataset, RL main as evaluated in Experiment 10:
+
+| size | adaptive (old pool) | Kisialiou (old pool) | RL main | RL main / Kisialiou (old pool) | RL cheaper | fleet RL fewer / more |
+|---|---|---|---|---|---|---|
+| small | 1.0899 | 1.0903 | 1.0162 | 0.9400 | 33/50 | 11 / 1 |
+| medium | 1.1021 | 1.0808 | 1.0089 | 0.9370 | 23/50 | 20 / 1 |
+| large | 1.0929 | 1.0516 | 1.0107 | 0.9624 | 22/50 | 22 / 2 |
+
+Conclusion: without first-fit the references are 6–10% worse and end with 0.3–0.6 more vessels, and RL leads clearly again, as in Experiment 8. With first-fit in the
+references' pool (Experiment 10) the lead is gone. So the drop is explained by first-fit; the new instances, the cost model and the engine guard are not needed for it (they are
+held fixed here). RL's edge in Experiments 8–9 was discovering first-fit offline, not adaptive selection (consistent with the collapsed policies and the fixed-action controls),
+and the plain adaptive ALNS is close to Kisialiou in Experiment 10 because it has first-fit. The fair comparison for the paper is against first-fit references; this ablation is the
+rung that shows why. Not explained by it: the policy change from FCR to VNR (see the design note on the fuel-to-charter ratio).
+
 ## Historical experiments (pre-refactor)
 
 Earlier experiments ran with single non-parameterized operators. Bugs fixed
