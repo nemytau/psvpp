@@ -17,8 +17,8 @@ pub const MAX_ATTEMPTS_TO_INIT: u32 = 10; // Maximum number of attempts to initi
 /// Fuel price, NOK per tonne, that the engine uses when the caller gives none: the price of Experiment 10 (marine gas
 /// oil, MGO 1,425 USD/t, Ship & Bunker, Rotterdam, 21 Oct 2026, at 9.5 NOK/USD, rounded). It is a historical default,
 /// kept so that code that passes no fuel price (Experiments 8-10, the frozen branch exp10-legacy-horizon) keeps its
-/// numbers with any build. The environment of the main line passes its own price (rl/cost_model.py: the original
-/// fuel-to-charter ratio at the current charter) to `initialize_alns(fuel_price=...)`.
+/// numbers with any build. The environment of the main line passes its own price (rl/cost_model.py: 22,500, fuel about
+/// a quarter of the cost) to `initialize_alns(fuel_price=...)`.
 pub const FUEL_PRICE_NOK_PER_TONNE: f64 = 13_500.0;
 
 /// The simulated-annealing start temperature is expressed in cost units, so it has to follow the

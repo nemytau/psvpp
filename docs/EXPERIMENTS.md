@@ -1034,7 +1034,8 @@ on the ratio of the two prices, and the rewards are relative to the initial cost
 |---|---|---|---|---|
 | original (Experiments 0–9) | 150,000 | 650 NOK/t | 500 | 0.00433 |
 | Experiment 10 | 1,750,000 | 13,500 NOK/t | 10,385 | 0.00771 = 1.78 × the original |
-| main line since 2026-11-03 | 1,750,000 | 7,583 NOK/t | 5,833 | 0.00433 = the original |
+| main line 2026-11-03 to 11-11 | 1,750,000 | 7,583 NOK/t | 5,833 | 0.00433 = the original |
+| main line since 2026-11-11 | 1,750,000 | 22,500 NOK/t | 17,308 | 0.01286 = 3.0 × the original, 1.67 × Experiment 10 |
 
 In Experiment 10 a vessel cut was therefore worth relatively 1.78 × less, compared with saving fuel, than in Experiments 8–9. This may be why the learned
 policy moved from random + first-fit + FCR (which cuts vessels; all 3 medium seeds in Exp 9) to random + first-fit + VNR (which merges voyages and saves
@@ -1050,3 +1051,9 @@ for the process) and the matching start temperature, and every run manifest reco
 `PSVPP_FUEL_PRICE=13500` reproduces Experiment 10's pricing (the old-pool ablation sets it, together with `PSVPP_ENGINE_HORIZON=1000`). The test of the hypothesis
 needs no new code: train the medium model on the main line with and without `PSVPP_FUEL_PRICE=13500` (3 seeds each) and compare the policies. Tests:
 `tests/test_cost_model.py`.
+
+**Update 2026-11-11: fuel about a quarter of the cost.** The main line now uses 22,500 NOK/t (`rl/cost_model.py`, `DEFAULT_FUEL_PRICE`; `PSVPP_FUEL_PRICE` still overrides,
+7583.33 restores the original ratio, 13500 Experiment 10's price). Rationale: in Experiment 10's best solutions fuel / charter was 0.18–0.23 at 13,500 NOK/t (fuel 16–18% of the cost);
+a quarter of the cost means fuel / charter = 1/3, i.e. 1.6–1.8 × that price (small 23,900, medium 22,600, large 20,900). Solutions shift somewhat when fuel is dearer, so the realised
+share has to be read from the first manifests/results of the new price (not yet measured). The start temperature follows the price (17,308). The same direction as the 2026-11-03 hypothesis,
+only stronger: a vessel cut is worth relatively less than in Experiments 8–10, so the learned policies may prefer sailing-saving operators even more.

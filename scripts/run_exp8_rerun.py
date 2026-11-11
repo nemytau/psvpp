@@ -113,7 +113,7 @@ SIZE_RANK = {"small": 0, "medium": 1, "large": 2}  # reference-only queue: cheap
 # Engine iteration horizon of Experiment 10 (see rl/rl_alns_environment.py, ENGINE_HORIZON_ENV): it ran 300-iteration restarts
 # against a hard-coded 1000. The old-pool ablation must reproduce that engine to stay comparable with it.
 LEGACY_ENGINE_HORIZON = "1000"
-LEGACY_FUEL_PRICE = "13500"  # NOK/t of Experiment 10; the main line keeps the original fuel-to-charter ratio (rl/cost_model.py)
+LEGACY_FUEL_PRICE = "13500"  # NOK/t of Experiment 10; the main line's default is 22,500 (rl/cost_model.py)
 RERUN_CACHE_DIR = REPO / "runs" / "baseline_kisialiou_cache" / "rerun26_v1"  # Experiment 10's (first-fit) references
 DATA_CHECK: Dict = {}   # result of verify_data_manifest() (ablation)
 ENGINE_INFO: Dict = {}  # fingerprint of the installed Rust extension (ablation)
