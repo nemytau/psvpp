@@ -1055,9 +1055,9 @@ needs no new code: train the medium model on the main line with and without `PSV
 **Update 2026-11-11: back to the market price, new consumption rates.** A burn-rate table for offshore supply vessels (sailing economy 10–12 kn 0.25–0.50 t/h, full speed 14–16 kn
 0.60–0.95; waiting in port 0.03–0.06, drifting offshore 0.08–0.15, on dynamic positioning 0.20–0.45+) shows that the market-based pricing of Experiment 10 is close to reality, so
 the main line uses 13,500 NOK/t again (a one-day detour to 22,500, "fuel a quarter of the cost", was dropped). The consumption rates of newly generated datasets are now the simple means
-of the table's mid-points: **sailing 0.575 t/h** (mean of economy 0.375 and full speed 0.775) and **waiting/service 0.165 t/h** (mean of port 0.045, drifting 0.115 and DP 0.325), instead of
+of the table's mid-points: **sailing 0.575 t/h** (mean of economy 0.375 and full speed 0.775) and **waiting/service 0.22 t/h** (mean of drifting offshore 0.115 and DP 0.325; port idle is left out, vessels at the base are not part of the cost), instead of
 0.43 / 0.26 (`py_alns/resource/generation_config.yaml`; the rates live in each dataset's vessels.csv, so Experiments 0–10 and the frozen branch are untouched). Estimated fuel share of the
 cost of the best solutions: in the initial solutions of Experiment 10's test instances sailing is 62–70% of the fuel burnt at the old rates (hours sailing : waiting + service = 1.30 / 1.08 / 0.93
-for small / medium / large), so the new rates raise the fuel burnt by a factor 1.13 / 1.09 / 1.07, and the fuel share of Kisialiou's best solutions from 15.8 / 16.6 / 17.7% to about
-**17.5 / 17.8 / 18.7%**. Sensitivity: sailing at economy speed with waiting on DP (0.375 / 0.325) gives about 15–16%, full speed with drifting (0.775 / 0.115) about 21%. Fuel is therefore
+for small / medium / large), so the new rates raise the fuel burnt by a factor 1.19 / 1.17 / 1.15, and the fuel share of Kisialiou's best solutions from 15.8 / 16.6 / 17.7% to about
+**18.3 / 18.8 / 19.8%**. Sensitivity: sailing at economy speed with waiting on DP (0.375 / 0.325) gives about 16%, full speed with drifting (0.775 / 0.115) about 21%. Fuel is therefore
 about a fifth of the cost, not a quarter; reaching 25% would need roughly 1.4 × the price. Estimate from initial-solution hours, not measured on best solutions.

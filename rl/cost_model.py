@@ -10,8 +10,8 @@ initial cost, so a cost model is characterised by that ratio. The simulated-anne
 
 The main-line price is Experiment 10's again, 13,500 NOK/t (marine gas oil, MGO 1,425 USD/t at 9.5 NOK/USD, Ship & Bunker, Rotterdam, 21 Oct 2026), which is close to the
 market. For a few days it was changed to 7,583 (the original fuel-to-charter ratio, 2026-11-03) and for a day to 22,500 (fuel a quarter of the cost, 2026-11-11); both were dropped
-because the market price is realistic. What changes for new datasets is the consumption (py_alns/resource/generation_config.yaml): sailing 0.575 and waiting 0.165 t/h instead
-of 0.43 / 0.26, the simple means of a burn-rate table for offshore supply vessels, which lifts the fuel share of Experiment 10's solutions from 16-18% to about 18%
+because the market price is realistic. What changes for new datasets is the consumption (py_alns/resource/generation_config.yaml): sailing 0.575 and waiting 0.22 t/h (mean of drifting and DP, port idle left out) instead
+of 0.43 / 0.26, the simple means of a burn-rate table for offshore supply vessels, which lifts the fuel share of Experiment 10's solutions from 16-18% to about 18-20%
 (sailing is 62-70% of the fuel burnt in the initial solutions; estimate, see docs/EXPERIMENTS.md).
 
 The engine itself still defaults to Experiment 10's price when no fuel price is passed (rust_alns/src/structs/constants.rs), so code that passes none, such as the
